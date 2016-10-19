@@ -21,6 +21,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <sstream>
 
 // ---------------------------------------------------------------------------
 namespace android {
@@ -66,21 +67,17 @@ TextOutput& endl(TextOutput& to);
 TextOutput& indent(TextOutput& to);
 TextOutput& dedent(TextOutput& to);
 
-TextOutput& operator<<(TextOutput& to, const char* str);
-TextOutput& operator<<(TextOutput& to, char);     // writes raw character
-TextOutput& operator<<(TextOutput& to, bool);
-TextOutput& operator<<(TextOutput& to, int);
-TextOutput& operator<<(TextOutput& to, long);
-TextOutput& operator<<(TextOutput& to, unsigned int);
-TextOutput& operator<<(TextOutput& to, unsigned long);
-TextOutput& operator<<(TextOutput& to, long long);
-TextOutput& operator<<(TextOutput& to, unsigned long long);
-TextOutput& operator<<(TextOutput& to, float);
-TextOutput& operator<<(TextOutput& to, double);
+template<typename T>
+TextOutput& operator<<(TextOutput& to, const T& val)
+{
+    std::stringstream strbuf;
+    strbuf << val;
+    std::string str = strbuf.str();
+    to.print(str.c_str(), str.size());
+    return to;
+}
+
 TextOutput& operator<<(TextOutput& to, TextOutputManipFunc func);
-TextOutput& operator<<(TextOutput& to, const void*);
-TextOutput& operator<<(TextOutput& to, const String8& val);
-TextOutput& operator<<(TextOutput& to, const String16& val);
 
 class TypeCode
 {
@@ -143,18 +140,6 @@ inline TextOutput& indent(TextOutput& to)
 inline TextOutput& dedent(TextOutput& to)
 {
     to.moveIndent(-1);
-    return to;
-}
-
-inline TextOutput& operator<<(TextOutput& to, const char* str)
-{
-    to.print(str, strlen(str));
-    return to;
-}
-
-inline TextOutput& operator<<(TextOutput& to, char c)
-{
-    to.print(&c, 1);
     return to;
 }
 
