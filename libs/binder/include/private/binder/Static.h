@@ -36,6 +36,9 @@ extern sp<ProcessState> gProcess;
 // For IServiceManager.cpp
 extern Mutex gDefaultServiceManagerLock;
 extern sp<IServiceManager> gDefaultServiceManager;
+#ifndef __ANDROID_VNDK__
 extern sp<IPermissionController> gPermissionController;
+#endif
+extern bool gSystemBootCompleted;
 
 }   // namespace android
