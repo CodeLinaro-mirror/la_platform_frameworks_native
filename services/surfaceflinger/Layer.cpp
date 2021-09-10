@@ -134,7 +134,7 @@ Layer::Layer(const LayerCreationArgs& args)
     mDrawingState.frameTimelineInfo = {};
     mDrawingState.postTime = -1;
     mDrawingState.destinationFrame.makeInvalid();
-    mDrawingState.dropInputMode = gui::DropInputMode::NONE;
+    mDrawingState.isTrustedOverlay = false;
 
     if (args.flags & ISurfaceComposerClient::eNoColorFill) {
         // Set an invalid color so there is no color fill.
