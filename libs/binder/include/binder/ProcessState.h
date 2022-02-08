@@ -35,12 +35,6 @@ class ProcessState : public virtual RefBase
 {
 public:
     static  sp<ProcessState>    self();
-    static  sp<ProcessState>    selfOrNull();
-    /* initWithDriver() can be used to configure libbinder to use
-     * a different binder driver dev node. It must be called *before*
-     * any call to ProcessState::self(). /dev/binder remains the default.
-     */
-    static  sp<ProcessState>    initWithDriver(const char *driver);
 
             void                setContextObject(const sp<IBinder>& object);
             sp<IBinder>         getContextObject(const sp<IBinder>& caller);
@@ -70,14 +64,10 @@ public:
             status_t            setThreadPoolMaxThreadCount(size_t maxThreads);
             void                giveThreadPoolName();
 
-            String8             getDriverName();
-
-            ssize_t             getKernelReferences(size_t count, uintptr_t* buf);
-
 private:
     friend class IPCThreadState;
     
-                                ProcessState(const char* driver);
+                                ProcessState();
                                 ~ProcessState();
 
                                 ProcessState(const ProcessState& o);
@@ -91,7 +81,6 @@ private:
 
             handle_entry*       lookupHandleLocked(int32_t handle);
 
-            String8             mDriverName;
             int                 mDriverFD;
             void*               mVMStart;
 
@@ -102,8 +91,6 @@ private:
             size_t              mExecutingThreadsCount;
             // Maximum number for binder threads allowed for this process.
             size_t              mMaxThreads;
-            // Time when thread pool was emptied
-            int64_t             mStarvationStartTimeMs;
 
     mutable Mutex               mLock;  // protects everything below.
 

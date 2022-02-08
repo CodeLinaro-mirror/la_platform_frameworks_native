@@ -1,0 +1,10 @@
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@
+
+Name: libbinderstreaming
+Description: libbinderstreaming library
+Version: @VERSION@
+Libs: -L${libdir} -lbinderstreaming
+Cflags: -I${includedir}

@@ -17,10 +17,16 @@
 #ifndef ANDROID_PARCEL_H
 #define ANDROID_PARCEL_H
 
+/* Create a file descriptor with FD_CLOEXEC set. */
+#define F_LINUX_SPECIFIC_BASE 1024
+#define F_DUPFD_CLOEXEC	(F_LINUX_SPECIFIC_BASE + 6)
+
+#include <memory>
+#include <limits>
 #include <string>
 #include <vector>
-
-#include <android-base/unique_fd.h>
+//#include <android-base/unique_fd.h>
+#include "unique_fd.h"
 #include <cutils/native_handle.h>
 #include <utils/Errors.h>
 #include <utils/RefBase.h>
@@ -32,6 +38,18 @@
 #include <binder/IInterface.h>
 #include <binder/Parcelable.h>
 #include <binder/Map.h>
+#ifdef __LP64__
+# define ULONG_MAX    0xffffffffffffffffUL
+#else
+# define ULONG_MAX    0xffffffffUL
+#endif
+
+#define SIZE_T_MAX ULONG_MAX
+
+enum {
+    UNKNOWN_ERROR       = (-2147483647-1),
+    UNEXPECTED_NULL     = (UNKNOWN_ERROR + 8),
+};
 
 // ---------------------------------------------------------------------------
 namespace android {
@@ -209,14 +227,14 @@ public:
     // semantics of the smart file descriptor. A new descriptor will be
     // created, and will be closed when the parcel is destroyed.
     status_t            writeUniqueFileDescriptor(
-                            const base::unique_fd& fd);
+                            const binderbase::unique_fd& fd);
 
     // Place a vector of file desciptors into the parcel. Each descriptor is
     // dup'd as in writeDupFileDescriptor
     status_t            writeUniqueFileDescriptorVector(
-                            const std::unique_ptr<std::vector<base::unique_fd>>& val);
+                            const std::unique_ptr<std::vector<binderbase::unique_fd>>& val);
     status_t            writeUniqueFileDescriptorVector(
-                            const std::vector<base::unique_fd>& val);
+                            const std::vector<binderbase::unique_fd>& val);
 
     // Writes a blob to the parcel.
     // If the blob is small, then it is stored in-place, otherwise it is
@@ -362,14 +380,14 @@ public:
 
     // Retrieve a smart file descriptor from the parcel.
     status_t            readUniqueFileDescriptor(
-                            base::unique_fd* val) const;
+                            binderbase::unique_fd* val) const;
 
 
     // Retrieve a vector of smart file descriptors from the parcel.
     status_t            readUniqueFileDescriptorVector(
-                            std::unique_ptr<std::vector<base::unique_fd>>* val) const;
+                            std::unique_ptr<std::vector<binderbase::unique_fd>>* val) const;
     status_t            readUniqueFileDescriptorVector(
-                            std::vector<base::unique_fd>* val) const;
+                            std::vector<binderbase::unique_fd>* val) const;
 
     // Reads a blob from the parcel.
     // The caller should call release() on the blob after reading its contents.

@@ -17,6 +17,7 @@
 #ifndef ANDROID_VALUE_H
 #define ANDROID_VALUE_H
 
+#define CONFIG_PERISTABLE_BUNDLE 0
 #include <stdint.h>
 #include <map>
 #include <set>
@@ -24,7 +25,9 @@
 #include <string>
 
 #include <binder/Parcelable.h>
+#if CONFIG_PERISTABLE_BUNDLE
 #include <binder/PersistableBundle.h>
+#endif
 #include <binder/Map.h>
 #include <utils/String8.h>
 #include <utils/String16.h>
@@ -86,7 +89,9 @@ public:
     Value(const std::vector<int64_t>& value);
     Value(const std::vector<double>& value);
     Value(const std::vector<String16>& value);
+#if CONFIG_PERISTABLE_BUNDLE
     Value(const os::PersistableBundle& value);
+#endif
     Value(const binder::Map& value);
 
     Value& operator=(const Value& rhs);
@@ -102,7 +107,9 @@ public:
     Value& operator=(const std::vector<int64_t>& rhs);
     Value& operator=(const std::vector<double>& rhs);
     Value& operator=(const std::vector<String16>& rhs);
+#if CONFIG_PERISTABLE_BUNDLE
     Value& operator=(const os::PersistableBundle& rhs);
+#endif
     Value& operator=(const binder::Map& rhs);
 
     void putBoolean(const bool& value);
@@ -117,7 +124,9 @@ public:
     void putLongVector(const std::vector<int64_t>& value);
     void putDoubleVector(const std::vector<double>& value);
     void putStringVector(const std::vector<String16>& value);
+#if CONFIG_PERISTABLE_BUNDLE
     void putPersistableBundle(const os::PersistableBundle& value);
+#endif
     void putMap(const binder::Map& value);
 
     bool getBoolean(bool* out) const;
@@ -132,7 +141,9 @@ public:
     bool getLongVector(std::vector<int64_t>* out) const;
     bool getDoubleVector(std::vector<double>* out) const;
     bool getStringVector(std::vector<String16>* out) const;
+#if CONFIG_PERISTABLE_BUNDLE
     bool getPersistableBundle(os::PersistableBundle* out) const;
+#endif
     bool getMap(binder::Map* out) const;
 
     bool isBoolean() const;
@@ -147,7 +158,9 @@ public:
     bool isLongVector() const;
     bool isDoubleVector() const;
     bool isStringVector() const;
+#if CONFIG_PERISTABLE_BUNDLE
     bool isPersistableBundle() const;
+#endif
     bool isMap() const;
 
     // String Convenience Adapters

@@ -15,7 +15,7 @@
  */
 
 #define LOG_TAG "Value"
-
+#define CONFIG_PERSISTABLE_BUNDLE 0
 #include <binder/Value.h>
 
 #include <limits>
@@ -30,7 +30,7 @@
 using android::BAD_TYPE;
 using android::BAD_VALUE;
 using android::NO_ERROR;
-using android::UNEXPECTED_NULL;
+//using android::UNEXPECTED_NULL;
 using android::Parcel;
 using android::sp;
 using android::status_t;
@@ -39,7 +39,9 @@ using std::set;
 using std::vector;
 using android::binder::Value;
 using android::IBinder;
+#if CONFIG_PERSISTABLE_BUNDLE
 using android::os::PersistableBundle;
+#endif
 using namespace android::binder;
 
 // ====================================================================
@@ -219,7 +221,9 @@ int32_t Value::parcelType() const
     if (t_info == internal_type_ptr<vector<String16>>()) return VAL_STRINGARRAY;
 
     if (t_info == internal_type_ptr<Map>()) return VAL_MAP;
+#if CONFIG_PERSISTABLE_BUNDLE
     if (t_info == internal_type_ptr<PersistableBundle>()) return VAL_PERSISTABLEBUNDLE;
+#endif
 
     return VAL_NULL;
 }
@@ -275,7 +279,9 @@ DEF_TYPE_ACCESSORS(std::vector<double>, DoubleVector)
 DEF_TYPE_ACCESSORS(std::vector<String16>, StringVector)
 
 DEF_TYPE_ACCESSORS(::android::binder::Map, Map)
+#if CONFIG_PERSISTABLE_BUNDLE
 DEF_TYPE_ACCESSORS(PersistableBundle, PersistableBundle)
+#endif
 
 bool Value::getString(String8* out) const
 {
@@ -341,7 +347,9 @@ status_t Value::writeToParcel(Parcel* parcel) const
     HANDLE_WRITE_TYPE(vector<double>,   VAL_DOUBLEARRAY,  writeDoubleVector)
     HANDLE_WRITE_TYPE(vector<String16>, VAL_STRINGARRAY,  writeString16Vector)
 
+#if CONFIG_PERSISTABLE_BUNDLE
     HANDLE_WRITE_PARCELABLE(PersistableBundle, VAL_PERSISTABLEBUNDLE)
+#endif
 
     END_HANDLE_WRITE()
 
@@ -399,7 +407,9 @@ status_t Value::readFromParcel(const Parcel* parcel)
     HANDLE_READ_TYPE(vector<double>,   VAL_DOUBLEARRAY,  readDoubleVector)
     HANDLE_READ_TYPE(vector<String16>, VAL_STRINGARRAY,  readString16Vector)
 
+#if CONFIG_PERSISTABLE_BUNDLE
     HANDLE_READ_PARCELABLE(PersistableBundle, VAL_PERSISTABLEBUNDLE)
+#endif
 
     END_HANDLE_READ()
 

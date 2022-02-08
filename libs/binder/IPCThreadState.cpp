@@ -15,7 +15,7 @@
  */
 
 #define LOG_TAG "IPCThreadState"
-
+#define LOG_NDEBUG 1
 #include <binder/IPCThreadState.h>
 
 #include <binder/Binder.h>
@@ -24,20 +24,20 @@
 
 #include <cutils/sched_policy.h>
 #include <utils/Log.h>
-#include <utils/SystemClock.h>
 #include <utils/threads.h>
 
 #include <private/binder/binder_module.h>
 #include <private/binder/Static.h>
 
 #include <errno.h>
-#include <inttypes.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdio.h>
 #include <sys/ioctl.h>
 #include <sys/resource.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #if LOG_NDEBUG
@@ -46,7 +46,6 @@
 #define IF_LOG_COMMANDS() if (false)
 #define LOG_REMOTEREFS(...) 
 #define IF_LOG_REMOTEREFS() if (false)
-
 #define LOG_THREADPOOL(...) 
 #define LOG_ONEWAY(...) 
 
@@ -61,9 +60,21 @@
 
 #endif
 
+#ifndef __ANDROID__
+pid_t gettid() {
+#if defined(__linux__)
+  return syscall(__NR_gettid);
+#endif
+}
+#endif  // __ANDROID__
+
 // ---------------------------------------------------------------------------
 
 namespace android {
+
+static const char* getReturnString(size_t idx);
+static const void* printReturnCommand(TextOutput& out, const void* _cmd);
+static const void* printCommand(TextOutput& out, const void* _cmd);
 
 // Static const and functions will be optimized out if not used,
 // when LOG_NDEBUG and references in IF_LOG_COMMANDS() are optimized out.
@@ -108,9 +119,8 @@ static const char *kCommandStrings[] = {
     "BC_DEAD_BINDER_DONE"
 };
 
-static const char* getReturnString(uint32_t cmd)
+static const char* getReturnString(size_t idx)
 {
-    size_t idx = cmd & 0xff;
     if (idx < sizeof(kReturnStrings) / sizeof(kReturnStrings[0]))
         return kReturnStrings[idx];
     else
@@ -287,18 +297,12 @@ restart:
         return new IPCThreadState;
     }
 
-    if (gShutdown) {
-        ALOGW("Calling IPCThreadState::self() during shutdown is dangerous, expect a crash.\n");
-        return NULL;
-    }
+    if (gShutdown) return NULL;
 
     pthread_mutex_lock(&gTLSMutex);
     if (!gHaveTLS) {
-        int key_create_value = pthread_key_create(&gTLS, threadDestructor);
-        if (key_create_value != 0) {
+        if (pthread_key_create(&gTLS, threadDestructor) != 0) {
             pthread_mutex_unlock(&gTLSMutex);
-            ALOGW("IPCThreadState::self() unable to create TLS key, expect a crash: %s\n",
-                    strerror(key_create_value));
             return NULL;
         }
         gHaveTLS = true;
@@ -328,7 +332,6 @@ void IPCThreadState::shutdown()
             delete st;
             pthread_setspecific(gTLS, NULL);
         }
-        pthread_key_delete(gTLS);
         gHaveTLS = false;
     }
 }
@@ -336,11 +339,6 @@ void IPCThreadState::shutdown()
 void IPCThreadState::disableBackgroundScheduling(bool disable)
 {
     gDisableBackgroundScheduling = disable;
-}
-
-bool IPCThreadState::backgroundSchedulingDisabled()
-{
-    return gDisableBackgroundScheduling;
 }
 
 sp<ProcessState> IPCThreadState::process()
@@ -440,27 +438,23 @@ status_t IPCThreadState::getAndExecuteCommand()
 
         pthread_mutex_lock(&mProcess->mThreadCountLock);
         mProcess->mExecutingThreadsCount++;
-        if (mProcess->mExecutingThreadsCount >= mProcess->mMaxThreads &&
-                mProcess->mStarvationStartTimeMs == 0) {
-            mProcess->mStarvationStartTimeMs = uptimeMillis();
-        }
         pthread_mutex_unlock(&mProcess->mThreadCountLock);
 
         result = executeCommand(cmd);
 
         pthread_mutex_lock(&mProcess->mThreadCountLock);
         mProcess->mExecutingThreadsCount--;
-        if (mProcess->mExecutingThreadsCount < mProcess->mMaxThreads &&
-                mProcess->mStarvationStartTimeMs != 0) {
-            int64_t starvationTimeMs = uptimeMillis() - mProcess->mStarvationStartTimeMs;
-            if (starvationTimeMs > 100) {
-                ALOGE("binder thread pool (%zu threads) starved for %" PRId64 " ms",
-                      mProcess->mMaxThreads, starvationTimeMs);
-            }
-            mProcess->mStarvationStartTimeMs = 0;
-        }
         pthread_cond_broadcast(&mProcess->mThreadCountDecrement);
         pthread_mutex_unlock(&mProcess->mThreadCountLock);
+
+        // After executing the command, ensure that the thread is returned to the
+        // foreground cgroup before rejoining the pool.  The driver takes care of
+        // restoring the priority, but doesn't do anything with cgroups so we
+        // need to take care of that here in userspace.  Note that we do make
+        // sure to go in the foreground after executing a transaction, but
+        // there are other callbacks into user code that could have changed
+        // our group so we want to make absolutely sure it is put back.
+        set_sched_policy(mMyThreadId, SP_FOREGROUND);
     }
 
     return result;
@@ -496,6 +490,11 @@ void IPCThreadState::joinThreadPool(bool isMain)
 
     mOut.writeInt32(isMain ? BC_ENTER_LOOPER : BC_REGISTER_LOOPER);
 
+    // This thread may have been spawned by a thread that was in the background
+    // scheduling group, so first we will make sure it is in the foreground
+    // one to avoid performing an initial transaction in the background.
+    set_sched_policy(mMyThreadId, SP_FOREGROUND);
+
     status_t result;
     do {
         processPendingDerefs();
@@ -515,8 +514,8 @@ void IPCThreadState::joinThreadPool(bool isMain)
         }
     } while (result != -ECONNREFUSED && result != -EBADF);
 
-    LOG_THREADPOOL("**** THREAD %p (PID %d) IS LEAVING THE THREAD POOL err=%d\n",
-        (void*)pthread_self(), getpid(), result);
+    LOG_THREADPOOL("**** THREAD %p (PID %d) IS LEAVING THE THREAD POOL err=%p\n",
+        (void*)pthread_self(), getpid(), (void*)result);
 
     mOut.writeInt32(BC_EXIT_LOOPER);
     talkWithDriver(false);
@@ -658,7 +657,7 @@ status_t IPCThreadState::attemptIncStrongHandle(int32_t handle)
     waitForResponse(NULL, &result);
 
 #if LOG_REFCOUNTS
-    ALOGV("IPCThreadState::attemptIncStrongHandle(%ld) = %s\n",
+    printf("IPCThreadState::attemptIncStrongHandle(%ld) = %s\n",
         handle, result == NO_ERROR ? "SUCCESS" : "FAILURE");
 #endif
 
@@ -673,7 +672,7 @@ status_t IPCThreadState::attemptIncStrongHandle(int32_t handle)
 void IPCThreadState::expungeHandle(int32_t handle, IBinder* binder)
 {
 #if LOG_REFCOUNTS
-    ALOGV("IPCThreadState::expungeHandle(%ld)\n", handle);
+    printf("IPCThreadState::expungeHandle(%ld)\n", handle);
 #endif
     self()->mProcess->expungeHandle(handle, binder);
 }
@@ -696,6 +695,7 @@ status_t IPCThreadState::clearDeathNotification(int32_t handle, BpBinder* proxy)
 
 IPCThreadState::IPCThreadState()
     : mProcess(ProcessState::self()),
+      mMyThreadId(gettid()),
       mStrictModePolicy(0),
       mLastTransactionBinderFlags(0)
 {
@@ -862,7 +862,7 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
         IF_LOG_COMMANDS() {
             alog << "About to read/write, write size = " << mOut.dataSize() << endl;
         }
-#if defined(__ANDROID__)
+#if defined(HAVE_ANDROID_OS)
         if (ioctl(mProcess->mDriverFD, BINDER_WRITE_READ, &bwr) >= 0)
             err = NO_ERROR;
         else
@@ -1057,6 +1057,26 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
             mCallingUid = tr.sender_euid;
             mLastTransactionBinderFlags = tr.flags;
 
+            int curPrio = getpriority(PRIO_PROCESS, mMyThreadId);
+            if (gDisableBackgroundScheduling) {
+                if (curPrio > ANDROID_PRIORITY_NORMAL) {
+                    // We have inherited a reduced priority from the caller, but do not
+                    // want to run in that state in this process.  The driver set our
+                    // priority already (though not our scheduling class), so bounce
+                    // it back to the default before invoking the transaction.
+                    setpriority(PRIO_PROCESS, mMyThreadId, ANDROID_PRIORITY_NORMAL);
+                }
+            } else {
+                if (curPrio >= ANDROID_PRIORITY_BACKGROUND) {
+                    // We want to use the inherited priority from the caller.
+                    // Ensure this thread is in the background scheduling class,
+                    // since the driver won't modify scheduling classes for us.
+                    // The scheduling group is reset to default by the caller
+                    // once this method returns after the transaction is complete.
+                    set_sched_policy(mMyThreadId, SP_BACKGROUND);
+                }
+            }
+
             //ALOGI(">>>> TRANSACT from pid %d uid %d\n", mCallingPid, mCallingUid);
 
             Parcel reply;
@@ -1139,7 +1159,6 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
         break;
 
     default:
-        ALOGE("*** BAD COMMAND %d received from Binder driver\n", cmd);
         result = UNKNOWN_ERROR;
         break;
     }
@@ -1156,7 +1175,7 @@ void IPCThreadState::threadDestructor(void *st)
         IPCThreadState* const self = static_cast<IPCThreadState*>(st);
         if (self) {
                 self->flushCommands();
-#if defined(__ANDROID__)
+#if defined(HAVE_ANDROID_OS)
         if (self->mProcess->mDriverFD > 0) {
             ioctl(self->mProcess->mDriverFD, BINDER_THREAD_EXIT, 0);
         }

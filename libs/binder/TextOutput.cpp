@@ -25,6 +25,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef USE_GLIB
+#include <glib.h>
+#define strlcpy g_strlcpy
+#define strlcat g_strlcat
+#endif
+
 namespace android {
 
 // ---------------------------------------------------------------------------
@@ -36,6 +42,103 @@ TextOutput::~TextOutput() {
 }
 
 // ---------------------------------------------------------------------------
+
+TextOutput& operator<<(TextOutput& to, bool val)
+{
+    if (val) to.print("true", 4);
+    else to.print("false", 5);
+    return to;
+}
+
+TextOutput& operator<<(TextOutput& to, int val)
+{
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d", val);
+    to.print(buf, strlen(buf));
+    return to;
+}
+
+TextOutput& operator<<(TextOutput& to, long val)
+{
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%ld", val);
+    to.print(buf, strlen(buf));
+    return to;
+}
+
+TextOutput& operator<<(TextOutput& to, unsigned int val)
+{
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%u", val);
+    to.print(buf, strlen(buf));
+    return to;
+}
+
+TextOutput& operator<<(TextOutput& to, unsigned long val)
+{
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%lu", val);
+    to.print(buf, strlen(buf));
+    return to;
+}
+
+TextOutput& operator<<(TextOutput& to, long long val)
+{
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%Ld", val);
+    to.print(buf, strlen(buf));
+    return to;
+}
+
+TextOutput& operator<<(TextOutput& to, unsigned long long val)
+{
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%Lu", val);
+    to.print(buf, strlen(buf));
+    return to;
+}
+
+static TextOutput& print_float(TextOutput& to, double value)
+{
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%g", value);
+    if( !strchr(buf, '.') && !strchr(buf, 'e') &&
+        !strchr(buf, 'E') ) {
+        strlcat(buf, ".0", sizeof(buf)-1);
+    }
+    to.print(buf, strlen(buf));
+    return to;
+}
+
+TextOutput& operator<<(TextOutput& to, float val)
+{
+    return print_float(to,val);
+}
+
+TextOutput& operator<<(TextOutput& to, double val)
+{
+    return print_float(to,val);
+}
+
+TextOutput& operator<<(TextOutput& to, const void* val)
+{
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%p", val);
+    to.print(buf, strlen(buf));
+    return to;
+}
+
+TextOutput& operator<<(TextOutput& to, const String8& val)
+{
+    to << val.string();
+    return to;
+}
+
+TextOutput& operator<<(TextOutput& to, const String16& val)
+{
+    to << String8(val).string();
+    return to;
+}
 
 static void textOutputPrinter(void* cookie, const char* txt)
 {
