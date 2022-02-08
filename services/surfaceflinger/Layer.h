@@ -1075,6 +1075,9 @@ private:
     void updateTreeHasFrameRateVote();
     bool isTrustedOverlay() const;
 
+    gui::DropInputMode getDropInputMode() const;
+    void handleDropInputMode(InputWindowInfo& info) const;
+
     // Cached properties computed from drawing state
     // Effective transform taking into account parent transforms and any parent scaling.
     ui::Transform mEffectiveTransform;
