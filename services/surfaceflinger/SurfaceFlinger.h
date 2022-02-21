@@ -209,31 +209,6 @@ private:
     void *mDolphinHandle = nullptr;
 };
 
-class SmomoWrapper {
-public:
-    SmomoWrapper() {}
-    ~SmomoWrapper();
-
-    bool init();
-
-    SmomoIntf* operator->() const { return mInst; }
-    operator bool() const { return mInst != nullptr; }
-
-    SmomoWrapper(const SmomoWrapper&) = delete;
-    SmomoWrapper& operator=(const SmomoWrapper&) = delete;
-
-    void setRefreshRates(std::unique_ptr<scheduler::RefreshRateConfigs> &refreshRateConfigs);
-
-private:
-    SmomoIntf *mInst = nullptr;
-    void *mSmoMoLibHandle = nullptr;
-
-    using CreateSmoMoFuncPtr = std::add_pointer<bool(uint16_t, SmomoIntf**)>::type;
-    using DestroySmoMoFuncPtr = std::add_pointer<void(SmomoIntf*)>::type;
-    CreateSmoMoFuncPtr mSmoMoCreateFunc;
-    DestroySmoMoFuncPtr mSmoMoDestroyFunc;
-};
-
 class LayerExtWrapper {
 public:
     LayerExtWrapper() {}
@@ -922,6 +897,8 @@ private:
     // Check if unified draw supported
     void startUnifiedDraw();
     void InitComposerExtn();
+    void createSmomoInstance(const DisplayDeviceState& state);
+    void destroySmomoInstance(const sp<DisplayDevice>& display);
 
     // Returns whether a new buffer has been latched (see handlePageFlip())
     bool handleMessageInvalidate();
@@ -1375,7 +1352,7 @@ private:
                                                std::chrono::nanoseconds presentLatency);
     int getMaxAcquiredBufferCountForRefreshRate(Fps refreshRate) const;
     void setDesiredModeByThermalLevel(float newFpsRequest);
-    bool isFpsDeferNeeded(const ActiveModeInfo& info);
+    bool isFpsDeferNeeded(const ActiveModeInfo& info) REQUIRES(mStateLock);
     virtual void getModeFromFps(float fps,DisplayModePtr& outMode);
     void handleNewLevelFps(float currFps, float newLevelFps, float* fpsToSet);
 
@@ -1688,12 +1665,20 @@ private:
 
     void scheduleRegionSamplingThread();
     void notifyRegionSamplingThread();
+    void setRefreshRates(std::unique_ptr<scheduler::RefreshRateConfigs> &refreshRateConfigs);
+    void UpdateSmomoState();
 
 public:
     nsecs_t mVsyncPeriod = -1;
     DolphinWrapper mDolphinWrapper;
-    SmomoWrapper mSmoMo;
     LayerExtWrapper mLayerExt;
+    struct SmomoInfo {
+      uint32_t displayId;
+      uint32_t layerStackId;
+      bool active = false;
+      SmomoIntf *smoMo = nullptr;
+    };
+    std::vector<SmomoInfo> mSmomoInstances;
 
 private:
     bool mEarlyWakeUpEnabled = false;
