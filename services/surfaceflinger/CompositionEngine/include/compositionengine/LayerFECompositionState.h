@@ -164,6 +164,7 @@ struct LayerFECompositionState {
     int bufferSlot{BufferQueue::INVALID_BUFFER_SLOT};
     sp<Fence> acquireFence;
     Region surfaceDamage;
+    uint64_t frameNumber = 0;
 
     // The handle to use for a sideband stream for this layer
     sp<NativeHandle> sidebandStream;
