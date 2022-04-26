@@ -15,5 +15,5 @@
 -->
 
 <permissions>
-    <feature name="android.software.print" />
+    <!-- feature name="android.software.print" / -->
 </permissions>
