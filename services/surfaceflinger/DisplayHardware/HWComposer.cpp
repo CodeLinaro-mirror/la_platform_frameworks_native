@@ -245,8 +245,7 @@ size_t HWComposer::getMaxVirtualDisplayDimension() const {
 }
 
 bool HWComposer::allocateVirtualDisplay(HalVirtualDisplayId displayId, ui::Size resolution,
-                                        ui::PixelFormat* format,
-                                        std::optional<PhysicalDisplayId> mirror) {
+                                        ui::PixelFormat* format) {
     if (!resolution.isValid()) {
         ALOGE("%s: Invalid resolution %dx%d", __func__, resolution.width, resolution.height);
         return false;
@@ -262,14 +261,9 @@ bool HWComposer::allocateVirtualDisplay(HalVirtualDisplayId displayId, ui::Size 
         return false;
     }
 
-    std::optional<hal::HWDisplayId> hwcMirrorId;
-    if (mirror) {
-        hwcMirrorId = fromPhysicalDisplayId(*mirror);
-    }
-
     hal::HWDisplayId hwcDisplayId;
     const auto error = static_cast<hal::Error>(
-            mComposer->createVirtualDisplay(width, height, format, hwcMirrorId, &hwcDisplayId));
+            mComposer->createVirtualDisplay(width, height, format, &hwcDisplayId));
     RETURN_IF_HWC_ERROR_FOR("createVirtualDisplay", error, displayId, false);
 
     auto display = std::make_unique<HWC2::impl::Display>(*mComposer.get(), mCapabilities,
@@ -565,6 +559,13 @@ status_t HWComposer::getDeviceCompositionChanges(
 
 sp<Fence> HWComposer::getPresentFence(HalDisplayId displayId) const {
     RETURN_IF_INVALID_DISPLAY(displayId, Fence::NO_FENCE);
+
+    auto& hwcDisplay = mDisplayData.at(displayId).hwcDisplay;
+
+    if (!hwcDisplay->isConnected()) {
+        return Fence::NO_FENCE;
+    }
+
     return mDisplayData.at(displayId).lastPresentFence;
 }
 
@@ -588,6 +589,10 @@ status_t HWComposer::presentAndGetReleaseFences(
 
     auto& displayData = mDisplayData[displayId];
     auto& hwcDisplay = displayData.hwcDisplay;
+
+    if (!hwcDisplay->isConnected()) {
+        return NO_ERROR;
+    }
 
     if (displayData.validateWasSkipped) {
         displayData.validateWasSkipped = false;
