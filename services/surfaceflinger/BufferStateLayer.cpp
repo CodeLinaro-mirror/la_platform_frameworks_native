@@ -387,6 +387,15 @@ bool BufferStateLayer::setBuffer(std::shared_ptr<renderengine::ExternalTexture>&
     const uint64_t frameNumber =
             frameNumberChanged ? bufferData.frameNumber : mDrawingState.frameNumber + 1;
 
+    if (bufferData.invalid) {
+        callReleaseBufferCallback(bufferData.releaseBufferListener,
+                                  buffer->getBuffer(), bufferData.frameNumber,
+                                  bufferData.acquireFence,
+                                  mFlinger->getMaxAcquiredBufferCountForCurrentRefreshRate(
+                                          mOwnerUid));
+        return false;
+    }
+
     if (mDrawingState.buffer) {
         mReleasePreviousBuffer = true;
         if (!mBufferInfo.mBuffer ||
@@ -1114,6 +1123,13 @@ bool BufferStateLayer::simpleBufferUpdate(const layer_state_t& s) const {
     if (s.what & layer_state_t::eDestinationFrameChanged) {
         if (mDrawingState.destinationFrame != s.destinationFrame) {
             ALOGV("%s: false [eDestinationFrameChanged changed]", __func__);
+            return false;
+        }
+    }
+
+    if (s.what & layer_state_t::eDimmingEnabledChanged) {
+        if (mDrawingState.dimmingEnabled != s.dimmingEnabled) {
+            ALOGV("%s: false [eDimmingEnabledChanged changed]", __func__);
             return false;
         }
     }
