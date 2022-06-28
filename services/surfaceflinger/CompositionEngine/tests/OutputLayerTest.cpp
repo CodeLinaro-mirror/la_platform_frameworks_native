@@ -169,7 +169,7 @@ struct OutputLayerSourceCropTest : public OutputLayerTest {
     FloatRect calculateOutputSourceCrop() {
         mLayerFEState.geomInverseLayerTransform = mLayerFEState.geomLayerTransform.inverse();
 
-        return mOutputLayer.calculateOutputSourceCrop();
+        return mOutputLayer.calculateOutputSourceCrop(ui::Transform::RotationFlags::ROT_0);
     }
 };
 
@@ -533,7 +533,7 @@ struct OutputLayerPartialMockForUpdateCompositionState : public impl::OutputLaye
                                                     sp<compositionengine::LayerFE> layerFE)
           : mOutput(output), mLayerFE(layerFE) {}
     // Mock everything called by updateCompositionState to simplify testing it.
-    MOCK_CONST_METHOD0(calculateOutputSourceCrop, FloatRect());
+    MOCK_CONST_METHOD1(calculateOutputSourceCrop, FloatRect(uint32_t));
     MOCK_CONST_METHOD0(calculateOutputDisplayFrame, Rect());
     MOCK_CONST_METHOD1(calculateOutputRelativeBufferTransform, uint32_t(uint32_t));
 
@@ -563,7 +563,8 @@ public:
     ~OutputLayerUpdateCompositionStateTest() = default;
 
     void setupGeometryChildCallValues(ui::Transform::RotationFlags internalDisplayRotationFlags) {
-        EXPECT_CALL(mOutputLayer, calculateOutputSourceCrop()).WillOnce(Return(kSourceCrop));
+        EXPECT_CALL(mOutputLayer, calculateOutputSourceCrop(internalDisplayRotationFlags))
+                .WillOnce(Return(kSourceCrop));
         EXPECT_CALL(mOutputLayer, calculateOutputDisplayFrame()).WillOnce(Return(kDisplayFrame));
         EXPECT_CALL(mOutputLayer,
                     calculateOutputRelativeBufferTransform(internalDisplayRotationFlags))
@@ -655,6 +656,23 @@ TEST_F(OutputLayerUpdateCompositionStateTest, setsOutputLayerColorspaceCorrectly
     mOutputLayer.updateCompositionState(false, false, ui::Transform::RotationFlags::ROT_0);
 
     EXPECT_EQ(ui::Dataspace::V0_SCRGB, mOutputLayer.getState().dataspace);
+}
+
+TEST_F(OutputLayerUpdateCompositionStateTest, setsOutputLayerColorspaceWith170mReplacement) {
+    mLayerFEState.dataspace = ui::Dataspace::TRANSFER_SMPTE_170M;
+    mOutputState.targetDataspace = ui::Dataspace::V0_SCRGB;
+    mOutputState.treat170mAsSrgb = false;
+    mLayerFEState.isColorspaceAgnostic = false;
+
+    mOutputLayer.updateCompositionState(false, false, ui::Transform::RotationFlags::ROT_0);
+
+    EXPECT_EQ(ui::Dataspace::TRANSFER_SMPTE_170M, mOutputLayer.getState().dataspace);
+
+    // Rewrite SMPTE 170M as sRGB
+    mOutputState.treat170mAsSrgb = true;
+    mOutputLayer.updateCompositionState(false, false, ui::Transform::RotationFlags::ROT_0);
+
+    EXPECT_EQ(ui::Dataspace::TRANSFER_SRGB, mOutputLayer.getState().dataspace);
 }
 
 TEST_F(OutputLayerUpdateCompositionStateTest, setsWhitePointNitsAndDimmingRatioCorrectly) {
@@ -922,7 +940,7 @@ const half4 OutputLayerWriteStateToHWCTest::kColor{81.f / 255.f, 82.f / 255.f, 8
                                                    84.f / 255.f};
 const Rect OutputLayerWriteStateToHWCTest::kDisplayFrame{1001, 1002, 1003, 10044};
 const Rect OutputLayerWriteStateToHWCTest::kOverrideDisplayFrame{1002, 1003, 1004, 20044};
-const FloatRect OutputLayerWriteStateToHWCTest::kOverrideSourceCrop{1002, 1003, 1004, 20044};
+const FloatRect OutputLayerWriteStateToHWCTest::kOverrideSourceCrop{0.f, 0.f, 4.f, 5.f};
 const Region OutputLayerWriteStateToHWCTest::kOutputSpaceVisibleRegion{
         Rect{1005, 1006, 1007, 1008}};
 const Region OutputLayerWriteStateToHWCTest::kOverrideVisibleRegion{Rect{1006, 1007, 1008, 1009}};

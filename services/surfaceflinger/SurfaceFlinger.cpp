@@ -632,6 +632,8 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     property_get("debug.sf.predict_hwc_composition_strategy", value, "1");
     mPredictCompositionStrategy = atoi(value);
 
+    property_get("debug.sf.treat_170m_as_sRGB", value, "0");
+    mTreat170mAsSrgb = atoi(value);
     char property[PROPERTY_VALUE_MAX] = {0};
     if((property_get("vendor.display.vsync_reliable_on_doze", property, "0") > 0) &&
         (!strncmp(property, "1", PROPERTY_VALUE_MAX ) ||
@@ -1097,13 +1099,12 @@ void SurfaceFlinger::init() {
 
     enableLatchUnsignaledConfig = getLatchUnsignaledConfig();
 
-    if (base::GetBoolProperty("vendor.display.disable_latch_media_content"s, false)) {
-        mLatchMediaContent = false;
+    if (base::GetBoolProperty("vendor.display.enable_latch_media_content"s, false)) {
+        mLatchMediaContent = true;
     }
 
-    if (base::GetBoolProperty("debug.sf.enable_hwc_vds"s, false)) {
-        enableHalVirtualDisplays(true);
-    }
+    mAllowHwcForWFD = base::GetBoolProperty("vendor.display.vds_allow_hwc"s, false);
+    mAllowHwcForVDS = mAllowHwcForWFD && base::GetBoolProperty("debug.sf.enable_hwc_vds"s, false);
 
     // Process any initial hotplug and resulting display changes.
     processDisplayHotplugEventsLocked();
@@ -1281,8 +1282,6 @@ void SurfaceFlinger::startUnifiedDraw() {
 #ifdef QTI_UNIFIED_DRAW
     if (mDisplayExtnIntf) {
         // Displays hotplugged at this point.
-        // TODO(b/230790745): Re-enable this function
-        /*
         for (const auto& display : mDisplaysList) {
             const auto id = HalDisplayId::tryCast(display->getId());
             if (id) {
@@ -1298,7 +1297,6 @@ void SurfaceFlinger::startUnifiedDraw() {
                 }
             }
         }
-        */
     }
 #endif
     createPhaseOffsetExtn();
@@ -2265,7 +2263,7 @@ status_t SurfaceFlinger::setDisplayBrightness(const sp<IBinder>& displayToken,
     }
 
     const char* const whence = __func__;
-    return ftl::chain(mScheduler->schedule([=]() FTL_FAKE_GUARD(mStateLock) {
+    return ftl::Future(mScheduler->schedule([=]() FTL_FAKE_GUARD(mStateLock) {
                if (const auto display = getDisplayDeviceLocked(displayToken)) {
                    const bool supportsDisplayBrightnessCommand =
                            getHwComposer().getComposer()->isSupported(
@@ -2303,7 +2301,7 @@ status_t SurfaceFlinger::setDisplayBrightness(const sp<IBinder>& displayToken,
                    return ftl::yield<status_t>(NAME_NOT_FOUND);
                }
            }))
-            .then([](std::future<status_t> task) { return task; })
+            .then([](ftl::Future<status_t> task) { return task; })
             .get();
 }
 
@@ -2487,11 +2485,15 @@ void SurfaceFlinger::setRefreshRateTo(int32_t refreshRate) {
     auto currentRefreshRate = display->refreshRateConfigs().getActiveMode();
 
     auto policy = display->refreshRateConfigs().getCurrentPolicy();
+    auto setRefreshRate = Fps::fromValue(refreshRate);
+    if(!policy.primaryRange.includes(setRefreshRate)) {
+        return;
+    }
+
     const auto& allRates = display->refreshRateConfigs().getAllRefreshRates();
     auto iter = allRates.cbegin();
     while (iter != allRates.cend()) {
-        const auto& refreshRate = *iter->second;
-        if(policy.primaryRange.includes(refreshRate.getFps())) {
+        if(isApproxEqual(iter->second->getFps(), setRefreshRate)) {
             break;
         }
         ++iter;
@@ -2674,9 +2676,12 @@ bool SurfaceFlinger::commit(nsecs_t frameTime, int64_t vsyncId, nsecs_t expected
         mDolphinWrapper.dolphinTrackVsyncSignal(frameTime, vsyncId, expectedVsyncTime);
     }
 
-    const uint32_t layerStackId = getDefaultDisplayDeviceLocked()->getLayerStack().id;
-    if (SmomoIntf *smoMo = getSmomoInstance(layerStackId)) {
-        smoMo->OnVsync(expectedVsyncTime);
+    SmomoIntf *smoMo = nullptr;
+    for (auto &instance: mSmomoInstances) {
+        smoMo = instance.smoMo;
+        if (smoMo) {
+            smoMo->OnVsync(expectedVsyncTime);
+        }
     }
 
     // we set this once at the beginning of commit to ensure consistency throughout the whole frame
@@ -3193,19 +3198,16 @@ void SurfaceFlinger::postComposition() {
 
     const auto* display = FTL_FAKE_GUARD(mStateLock, getDefaultDisplayDeviceLocked()).get();
 
-    getBE().mGlCompositionDoneTimeline.updateSignalTimes();
     std::shared_ptr<FenceTime> glCompositionDoneFenceTime;
     if (display && display->getCompositionDisplay()->getState().usesClientComposition) {
         glCompositionDoneFenceTime =
                 std::make_shared<FenceTime>(display->getCompositionDisplay()
                                                     ->getRenderSurface()
                                                     ->getClientTargetAcquireFence());
-        getBE().mGlCompositionDoneTimeline.push(glCompositionDoneFenceTime);
     } else {
         glCompositionDoneFenceTime = FenceTime::NO_FENCE;
     }
 
-    getBE().mDisplayTimeline.updateSignalTimes();
     mPreviousPresentFences[1] = mPreviousPresentFences[0];
 
     sp<DisplayDevice> vSyncSource = mNextVsyncSource;
@@ -3216,8 +3218,6 @@ void SurfaceFlinger::postComposition() {
         getHwComposer().getPresentFence(vSyncSource->getPhysicalId()) : Fence::NO_FENCE;
     mPreviousPresentFences[0].fenceTime =
             std::make_shared<FenceTime>(mPreviousPresentFences[0].fence);
-
-    getBE().mDisplayTimeline.push(mPreviousPresentFences[0].fenceTime);
 
     nsecs_t now = systemTime();
 
@@ -3510,14 +3510,10 @@ SmomoIntf* SurfaceFlinger::getSmomoInstance(const uint32_t layerStackId) const {
 void SurfaceFlinger::updateSmomoLayerInfo(TransactionState &ts,
         int64_t desiredPresentTime, bool isAutoTimestamp) {
     ts.traverseStatesWithBuffers([&](const layer_state_t& state) {
-        sp<Layer> layer = nullptr;
+        sp<Layer> layer = fromHandle(state.surface).promote();
         SmomoIntf *smoMo = nullptr;
-        {
-            Mutex::Autolock _l(mStateLock);
-            layer = fromHandle(state.surface).promote();
-            if (layer != nullptr) {
-                smoMo = getSmomoInstance(layer->getSmomoLayerStackId());
-            }
+        if (layer != nullptr) {
+            smoMo = getSmomoInstance(layer->getSmomoLayerStackId());
         }
 
         if (smoMo) {
@@ -3576,9 +3572,6 @@ void SurfaceFlinger::computeLayerBounds() {
 }
 
 sp<DisplayDevice> SurfaceFlinger::getVsyncSource() {
-    // TODO(b/230790745): Re-enable this function
-    if (/* DISABLES CODE */ (true)) return NULL;
-
     // Return the vsync source from the active displays based on the order in which they are
     // connected.
     // Normally the order of priority is Primary (Built-in/Pluggable) followed by Secondary
@@ -3946,21 +3939,18 @@ void SurfaceFlinger::processDisplayAdded(const wp<IBinder>& displayToken,
         status = state.surface->query(NATIVE_WINDOW_FORMAT, &format);
         ALOGE_IF(status != NO_ERROR, "Unable to query format (%d)", status);
         pixelFormat = static_cast<ui::PixelFormat>(format);
-        if (mVirtualDisplayIdGenerators.hal) {
-            size_t maxVirtualDisplaySize = getHwComposer().getMaxVirtualDisplayDimension();
-            if (maxVirtualDisplaySize == 0 ||
-                ((uint64_t)resolution.width <= maxVirtualDisplaySize &&
-                (uint64_t)resolution.height <= maxVirtualDisplaySize)) {
-                uint64_t usage = 0;
-                // Replace with native_window_get_consumer_usage ?
-                status = state .surface->getConsumerUsage(&usage);
-                ALOGW_IF(status != NO_ERROR, "Unable to query usage (%d)", status);
-                if ((status == NO_ERROR) && canAllocateHwcDisplayIdForVDS(usage)) {
-                   canAllocateHwcForVDS = true;
-               }
+        // Check if VDS is allowed to use HWC
+        size_t maxVirtualDisplaySize = getHwComposer().getMaxVirtualDisplayDimension();
+        if (maxVirtualDisplaySize == 0 || ((uint64_t)resolution.width <= maxVirtualDisplaySize &&
+            (uint64_t)resolution.height <= maxVirtualDisplaySize)) {
+            uint64_t usage = 0;
+            // Replace with native_window_get_consumer_usage ?
+            status = state .surface->getConsumerUsage(&usage);
+            ALOGW_IF(status != NO_ERROR, "Unable to query usage (%d)", status);
+            if ((status == NO_ERROR) && canAllocateHwcDisplayIdForVDS(usage)) {
+                canAllocateHwcForVDS = true;
             }
         }
-
     } else {
         // Virtual displays without a surface are dormant:
         // they have external state (layer stack, projection,
@@ -4028,13 +4018,11 @@ void SurfaceFlinger::processDisplayAdded(const wp<IBinder>& displayToken,
         }
     }
     if (supported) {
-      sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
       display->setPowerModeOverrideConfig(true);
     }
 #endif
     if (!state.isVirtual()) {
-        sp<DisplayDevice> displayNew = getDisplayDeviceLocked(displayToken);
-        if (mPluggableVsyncPrioritized && !isInternalDisplay(displayNew)) {
+        if (mPluggableVsyncPrioritized && !isInternalDisplay(display)) {
             // Insert the pluggable display just before the first built-in display
             // so that the earlier pluggable display remains the V-sync source.
             auto it = mDisplaysList.begin();
@@ -4043,9 +4031,9 @@ void SurfaceFlinger::processDisplayAdded(const wp<IBinder>& displayToken,
                     break;
                 }
             }
-            mDisplaysList.insert(it, displayNew);
+            mDisplaysList.insert(it, display);
         } else {
-            mDisplaysList.push_back(displayNew);
+            mDisplaysList.push_back(display);
         }
         dispatchDisplayHotplugEvent(display->getPhysicalId(), true);
 
@@ -4069,8 +4057,7 @@ void SurfaceFlinger::processDisplayAdded(const wp<IBinder>& displayToken,
         }
     }
 #endif
-    // TODO(b/230790745): add back std::move
-    mDisplays.try_emplace(displayToken, display);
+    mDisplays.try_emplace(displayToken, std::move(display));
     createSmomoInstance(state);
 }
 
@@ -4198,8 +4185,18 @@ void SurfaceFlinger::updateInternalDisplayVsyncLocked(const sp<DisplayDevice>& a
             mVsyncConfiguration->getConfigsForRefreshRate(mode->getFps());
         }
 
-        // Update the Advanced SF Offsets/Durations
-        mVsyncConfiguration->UpdateSfOffsets(&mAdvancedSfOffsets);
+        if (mUseWorkDurations) {
+#ifdef DYNAMIC_APP_DURATIONS
+            // Update the Work Durations for the given refresh rates
+            mVsyncConfiguration->UpdateWorkDurations(&mWorkDurationConfigsMap);
+#else
+            // TODO: Remove this once phase offset extension change is available
+            mVsyncConfiguration->UpdateSfOffsets(&mAdvancedSfOffsets);
+#endif
+        } else {
+            // Update the Advanced SF Offsets/Durations
+            mVsyncConfiguration->UpdateSfOffsets(&mAdvancedSfOffsets);
+        }
     }
 }
 
@@ -4400,12 +4397,12 @@ void SurfaceFlinger::updateInputFlinger() {
     if (!updateWindowInfo && mInputWindowCommands.empty()) {
         return;
     }
-    BackgroundExecutor::getInstance().execute([updateWindowInfo,
-                                               windowInfos = std::move(windowInfos),
-                                               displayInfos = std::move(displayInfos),
-                                               inputWindowCommands =
-                                                       std::move(mInputWindowCommands),
-                                               inputFlinger = mInputFlinger, this]() {
+    BackgroundExecutor::getInstance().sendCallbacks({[updateWindowInfo,
+                                                      windowInfos = std::move(windowInfos),
+                                                      displayInfos = std::move(displayInfos),
+                                                      inputWindowCommands =
+                                                              std::move(mInputWindowCommands),
+                                                      inputFlinger = mInputFlinger, this]() {
         ATRACE_NAME("BackgroundExecutor::updateInputFlinger");
         if (updateWindowInfo) {
             mWindowInfosListenerInvoker->windowInfosChanged(windowInfos, displayInfos,
@@ -4418,7 +4415,7 @@ void SurfaceFlinger::updateInputFlinger() {
         for (const auto& focusRequest : inputWindowCommands.focusRequests) {
             inputFlinger->setFocusedWindow(focusRequest);
         }
-    });
+    }});
 
     mInputWindowCommands.clear();
 }
@@ -4647,6 +4644,15 @@ void SurfaceFlinger::doCommitTransactions() {
             // Ensure any buffers set to display on any children are released.
             if (l->isRemovedFromCurrentState()) {
                 l->latchAndReleaseBuffer();
+            }
+
+            // If a layer has a parent, we allow it to out-live it's handle
+            // with the idea that the parent holds a reference and will eventually
+            // be cleaned up. However no one cleans up the top-level so we do so
+            // here.
+            if (l->isAtRoot()) {
+                l->setIsAtRoot(false);
+                mCurrentState.layersSortedByZ.remove(l);
             }
 
             // If the layer has been removed and has no parent, then it will not be reachable
@@ -4902,12 +4908,13 @@ int SurfaceFlinger::flushPendingTransactionQueues(
 
             auto& transaction = transactionQueue.front();
             const auto ready =
-                    transactionIsReadyToBeApplied(transaction.frameTimelineInfo,
-                                                  transaction.isAutoTimestamp,
-                                                  transaction.desiredPresentTime,
-                                                  transaction.originUid, transaction.states,
-                                                  bufferLayersReadyToPresent, transactions.size(),
-                                                  tryApplyUnsignaled);
+                transactionIsReadyToBeApplied(transaction,
+                                              transaction.frameTimelineInfo,
+                                              transaction.isAutoTimestamp,
+                                              transaction.desiredPresentTime,
+                                              transaction.originUid, transaction.states,
+                                              bufferLayersReadyToPresent, transactions.size(),
+                                              tryApplyUnsignaled);
             ATRACE_INT("TransactionReadiness", static_cast<int>(ready));
             if (ready == TransactionReadiness::NotReady) {
                 setTransactionFlags(eTransactionFlushNeeded);
@@ -4984,7 +4991,7 @@ bool SurfaceFlinger::flushTransactionQueues(int64_t vsyncId) {
                         return TransactionReadiness::NotReady;
                     }
 
-                    return transactionIsReadyToBeApplied(transaction.frameTimelineInfo,
+                    return transactionIsReadyToBeApplied(transaction, transaction.frameTimelineInfo,
                                                          transaction.isAutoTimestamp,
                                                          transaction.desiredPresentTime,
                                                          transaction.originUid, transaction.states,
@@ -5146,7 +5153,7 @@ bool SurfaceFlinger::shouldLatchUnsignaled(const sp<Layer>& layer, const layer_s
     return true;
 }
 
-auto SurfaceFlinger::transactionIsReadyToBeApplied(
+auto SurfaceFlinger::transactionIsReadyToBeApplied(TransactionState& transaction,
         const FrameTimelineInfo& info, bool isAutoTimestamp, int64_t desiredPresentTime,
         uid_t originUid, Vector<ComposerState>& states,
         const std::unordered_map<
@@ -5175,8 +5182,10 @@ auto SurfaceFlinger::transactionIsReadyToBeApplied(
     }
 
     bool fenceUnsignaled = false;
+    auto queueProcessTime = systemTime();
     for (ComposerState& state : states) {
         layer_state_t& s = state.state;
+
         sp<Layer> layer = nullptr;
         if (s.surface) {
             layer = fromHandle(s.surface).promote();
@@ -5216,13 +5225,22 @@ auto SurfaceFlinger::transactionIsReadyToBeApplied(
           ((usage & GRALLOC_USAGE_HW_VIDEO_ENCODER) != 0);
 
         if (fenceUnsignaled && (!allowLatchUnsignaled || (mLatchMediaContent && cameraOrVideo))) {
+            if (!transaction.sentFenceTimeoutWarning &&
+                queueProcessTime - transaction.queueTime > std::chrono::nanoseconds(4s).count()) {
+                transaction.sentFenceTimeoutWarning = true;
+                auto listener = s.bufferData->releaseBufferListener;
+                if (listener) {
+                    listener->onTransactionQueueStalled();
+                }
+            }
+
             ATRACE_NAME("fence unsignaled");
             return TransactionReadiness::NotReady;
         }
 
         if (mLatchMediaContent && cameraOrVideo &&
-            s.bufferData && s.bufferData->acquireFence &&
-            (s.bufferData->acquireFence->getStatus() == Fence::Status::Signaled) &&
+            s.bufferData && s.bufferData->acquireFence && s.bufferData->acquireFence->get() != -1
+            && (s.bufferData->acquireFence->getStatus() == Fence::Status::Signaled) &&
             (s.bufferData->acquireFence->getSignalTime() == Fence::SIGNAL_TIME_INVALID)) {
             ATRACE_NAME("fence signaled with error. drop");
             s.bufferData->invalid=true;
@@ -5249,6 +5267,8 @@ auto SurfaceFlinger::transactionIsReadyToBeApplied(
 }
 
 void SurfaceFlinger::queueTransaction(TransactionState& state) {
+    state.queueTime = systemTime();
+
     Mutex::Autolock lock(mQueueLock);
 
     // Generate a CountDownLatch pending state if this is a synchronous transaction.
@@ -5458,8 +5478,7 @@ void SurfaceFlinger::checkVirtualDisplayHint(const Vector<DisplayState>& display
         const uint32_t what = s.what;
         if (what & DisplayState::eSurfaceChanged) {
             if (IInterface::asBinder(state.surface) != IInterface::asBinder(s.surface)) {
-                if (state.isVirtual() && s.surface != nullptr &&
-                    mVirtualDisplayIdGenerators.hal) {
+                if (state.isVirtual() && s.surface != nullptr) {
                     int width = 0;
                     int status = s.surface->query(NATIVE_WINDOW_WIDTH, &width);
                     ALOGE_IF(status != NO_ERROR, "Unable to query width (%d)", status);
@@ -6026,19 +6045,11 @@ void SurfaceFlinger::markLayerPendingRemovalLocked(const sp<Layer>& layer) {
 
 void SurfaceFlinger::onHandleDestroyed(BBinder* handle, sp<Layer>& layer) {
     Mutex::Autolock lock(mStateLock);
-    // If a layer has a parent, we allow it to out-live it's handle
-    // with the idea that the parent holds a reference and will eventually
-    // be cleaned up. However no one cleans up the top-level so we do so
-    // here.
     if (!layer) {
       ALOGW("Attempted to destroy an invalid layer");
       return;
     }
 
-    if (layer->isAtRoot()) {
-        layer->setIsAtRoot(false);
-        mCurrentState.layersSortedByZ.remove(layer);
-    }
     markLayerPendingRemovalLocked(layer);
     mBufferCountTracker.remove(handle);
     layer.clear();
@@ -6334,7 +6345,6 @@ status_t SurfaceFlinger::doDump(int fd, const DumpArgs& args, bool asProto) {
                 {"--displays"s, dumper(&SurfaceFlinger::dumpDisplays)},
                 {"--dispsync"s, dumper([this](std::string& s) { mScheduler->dumpVsync(s); })},
                 {"--edid"s, argsDumper(&SurfaceFlinger::dumpRawDisplayIdentificationData)},
-                {"--frame-events"s, dumper(&SurfaceFlinger::dumpFrameEventsLocked)},
                 {"--latency"s, argsDumper(&SurfaceFlinger::dumpStatsLocked)},
                 {"--latency-clear"s, argsDumper(&SurfaceFlinger::clearStatsLocked)},
                 {"--list"s, dumper(&SurfaceFlinger::listLayersLocked)},
@@ -6631,13 +6641,6 @@ void SurfaceFlinger::dumpStaticScreenStats(std::string& result) const {
             static_cast<float>(getBE().mFrameBuckets[SurfaceFlingerBE::NUM_BUCKETS - 1]) / getBE().mTotalTime;
     StringAppendF(&result, "  %zd+ frames: %.3f s (%.1f%%)\n", SurfaceFlingerBE::NUM_BUCKETS - 1,
                   bucketTimeSec, percent);
-}
-
-void SurfaceFlinger::dumpFrameEventsLocked(std::string& result) {
-    result.append("Layer frame timestamps:\n");
-    // Traverse all layers to dump frame-events for each layer
-    mCurrentState.traverseInZOrder(
-        [&] (Layer* layer) { layer->dumpFrameEvents(result); });
 }
 
 void SurfaceFlinger::dumpCompositionDisplays(std::string& result) const {
@@ -7529,28 +7532,9 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
             }
             case 1035: {
                 const int modeId = data.readInt32();
-
-                const auto display = getDefaultDisplayDevice();
-                const auto numConfigs = display->refreshRateConfigs().getAllRefreshRates().size();
-                if ((modeId >= 0) && (modeId < numConfigs)) {
-                    const auto displayId = getInternalDisplayId();
-                    if (!displayId) {
-                        ALOGE("No internal display found.");
-                        return NO_ERROR;
-                    }
-                    if(isSupportedConfigSwitch(getPhysicalDisplayToken(*displayId),
-                    modeId) != NO_ERROR) {
-                       return BAD_VALUE;
-                    }
-                    status_t result = setActiveModeFromBackdoor(getPhysicalDisplayToken(*displayId), modeId);
-                    if (result != NO_ERROR) {
-                        return result;
-                    }
-                    mDebugDisplayModeSetByBackdoor = true;
-                }
-
                 const auto displayToken = [&]() -> sp<IBinder> {
                     uint64_t value;
+                    //if no value is specified use the default display
                     if (data.readUint64(&value) != NO_ERROR) {
                         return getDefaultDisplayDevice()->getDisplayToken().promote();
                     }
@@ -7560,10 +7544,16 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                     ALOGE("Invalid physical display ID");
                     return nullptr;
                 }();
-
+                //check if a valid mode was selected
+                if(isSupportedConfigSwitch(displayToken, modeId) != NO_ERROR) {
+                    return BAD_VALUE;
+                }
                 mDebugDisplayModeSetByBackdoor = false;
                 const status_t result = setActiveModeFromBackdoor(displayToken, modeId);
-                mDebugDisplayModeSetByBackdoor = result == NO_ERROR;
+                if (result == NO_ERROR) {
+                    mDebugDisplayModeSetByBackdoor = true;
+                    ATRACE_NAME(std::string("ModeSwitch " + std::to_string(modeId)).c_str());
+                }
                 return result;
             }
             // Turn on/off frame rate flexibility mode. When turned on it overrides the display
@@ -8139,10 +8129,10 @@ status_t SurfaceFlinger::captureDisplay(const DisplayCaptureArgs& args,
         traverseLayersInLayerStack(layerStack, args.uid, visitor);
     };
 
-    auto captureResultFuture = captureScreenCommon(std::move(renderAreaFuture), traverseLayers,
-                                                   reqSize, args.pixelFormat, args.allowProtected,
-                                                   args.grayscale, captureListener);
-    return captureResultFuture.get().status;
+    auto future = captureScreenCommon(std::move(renderAreaFuture), traverseLayers, reqSize,
+                                      args.pixelFormat, args.allowProtected, args.grayscale,
+                                      captureListener);
+    return fenceStatus(future.get());
 }
 
 status_t SurfaceFlinger::captureDisplay(DisplayId displayId,
@@ -8181,11 +8171,14 @@ status_t SurfaceFlinger::captureDisplay(DisplayId displayId,
         ALOGE("capture screen must provide a capture listener callback");
         return BAD_VALUE;
     }
-    auto captureResultFuture =
-            captureScreenCommon(std::move(renderAreaFuture), traverseLayers, size,
-                                ui::PixelFormat::RGBA_8888, false /* allowProtected */,
-                                false /* grayscale */, captureListener);
-    return captureResultFuture.get().status;
+
+    constexpr bool kAllowProtected = false;
+    constexpr bool kGrayscale = false;
+
+    auto future = captureScreenCommon(std::move(renderAreaFuture), traverseLayers, size,
+                                      ui::PixelFormat::RGBA_8888, kAllowProtected, kGrayscale,
+                                      captureListener);
+    return fenceStatus(future.get());
 }
 
 status_t SurfaceFlinger::captureLayers(const LayerCaptureArgs& args,
@@ -8297,13 +8290,13 @@ status_t SurfaceFlinger::captureLayers(const LayerCaptureArgs& args,
         return BAD_VALUE;
     }
 
-    auto captureResultFuture = captureScreenCommon(std::move(renderAreaFuture), traverseLayers,
-                                                   reqSize, args.pixelFormat, args.allowProtected,
-                                                   args.grayscale, captureListener);
-    return captureResultFuture.get().status;
+    auto future = captureScreenCommon(std::move(renderAreaFuture), traverseLayers, reqSize,
+                                      args.pixelFormat, args.allowProtected, args.grayscale,
+                                      captureListener);
+    return fenceStatus(future.get());
 }
 
-std::shared_future<renderengine::RenderEngineResult> SurfaceFlinger::captureScreenCommon(
+ftl::SharedFuture<FenceResult> SurfaceFlinger::captureScreenCommon(
         RenderAreaFuture renderAreaFuture, TraverseLayersFunction traverseLayers,
         ui::Size bufferSize, ui::PixelFormat reqPixelFormat, bool allowProtected, bool grayscale,
         const sp<IScreenCaptureListener>& captureListener) {
@@ -8313,7 +8306,7 @@ std::shared_future<renderengine::RenderEngineResult> SurfaceFlinger::captureScre
         ALOGE("Attempted to capture screen with size (%" PRId32 ", %" PRId32
               ") that exceeds render target size limit.",
               bufferSize.getWidth(), bufferSize.getHeight());
-        return ftl::yield<renderengine::RenderEngineResult>({BAD_VALUE, base::unique_fd()}).share();
+        return ftl::yield<FenceResult>(base::unexpected(BAD_VALUE)).share();
     }
 
     // Loop over all visible layers to see whether there's any protected layer. A protected layer is
@@ -8366,7 +8359,7 @@ std::shared_future<renderengine::RenderEngineResult> SurfaceFlinger::captureScre
                                false /* regionSampling */, grayscale, captureListener);
 }
 
-std::shared_future<renderengine::RenderEngineResult> SurfaceFlinger::captureScreenCommon(
+ftl::SharedFuture<FenceResult> SurfaceFlinger::captureScreenCommon(
         RenderAreaFuture renderAreaFuture, TraverseLayersFunction traverseLayers,
         const std::shared_ptr<renderengine::ExternalTexture>& buffer, bool regionSampling,
         bool grayscale, const sp<IScreenCaptureListener>& captureListener) {
@@ -8374,59 +8367,52 @@ std::shared_future<renderengine::RenderEngineResult> SurfaceFlinger::captureScre
 
     bool canCaptureBlackoutContent = hasCaptureBlackoutContentPermission();
 
-    auto scheduleResultFuture = mScheduler->schedule([=,
-                                                      renderAreaFuture =
-                                                              std::move(renderAreaFuture)]() mutable
-                                                     -> std::shared_future<
-                                                             renderengine::RenderEngineResult> {
+    auto future = mScheduler->schedule([=, renderAreaFuture = std::move(renderAreaFuture)]() mutable
+                                       -> ftl::SharedFuture<FenceResult> {
         ScreenCaptureResults captureResults;
         std::unique_ptr<RenderArea> renderArea = renderAreaFuture.get();
         if (!renderArea) {
             ALOGW("Skipping screen capture because of invalid render area.");
             captureResults.result = NO_MEMORY;
             captureListener->onScreenCaptureCompleted(captureResults);
-            return ftl::yield<renderengine::RenderEngineResult>({NO_ERROR, base::unique_fd()})
-                    .share();
+            return ftl::yield<FenceResult>(base::unexpected(NO_ERROR)).share();
         }
 
-        std::shared_future<renderengine::RenderEngineResult> renderEngineResultFuture;
-
+        ftl::SharedFuture<FenceResult> renderFuture;
         renderArea->render([&] {
-            renderEngineResultFuture =
-                    renderScreenImpl(*renderArea, traverseLayers, buffer,
-                                           canCaptureBlackoutContent, regionSampling, grayscale,
-                                           captureResults);
+            renderFuture =
+                    renderScreenImpl(*renderArea, traverseLayers, buffer, canCaptureBlackoutContent,
+                                     regionSampling, grayscale, captureResults);
         });
-        // spring up a thread to unblock SF main thread and wait for
-        // RenderEngineResult to be available
-        if (captureListener != nullptr) {
+
+        if (captureListener) {
+            // TODO: The future returned by std::async blocks the main thread. Return a chain of
+            // futures to the Binder thread instead.
             std::async([=]() mutable {
                 ATRACE_NAME("captureListener is nonnull!");
-                auto& [status, drawFence] = renderEngineResultFuture.get();
-                captureResults.result = status;
-                captureResults.fence = new Fence(dup(drawFence));
+                auto fenceResult = renderFuture.get();
+                // TODO(b/232535621): Change ScreenCaptureResults to store a FenceResult.
+                captureResults.result = fenceStatus(fenceResult);
+                captureResults.fence = std::move(fenceResult).value_or(Fence::NO_FENCE);
                 captureListener->onScreenCaptureCompleted(captureResults);
             });
         }
-        return renderEngineResultFuture;
+        return renderFuture;
     });
 
-    // flatten scheduleResultFuture object to single shared_future object
-    if (captureListener == nullptr) {
-        std::future<renderengine::RenderEngineResult> captureScreenResultFuture =
-                ftl::chain(std::move(scheduleResultFuture))
-                        .then([=](std::shared_future<renderengine::RenderEngineResult> futureObject)
-                                      -> renderengine::RenderEngineResult {
-                            auto& [status, drawFence] = futureObject.get();
-                            return {status, base::unique_fd(dup(drawFence))};
-                        });
-        return captureScreenResultFuture.share();
-    } else {
-        return ftl::yield<renderengine::RenderEngineResult>({NO_ERROR, base::unique_fd()}).share();
+    if (captureListener) {
+        return ftl::yield<FenceResult>(base::unexpected(NO_ERROR)).share();
     }
+
+    // Flatten nested futures.
+    auto chain = ftl::Future(std::move(future)).then([](ftl::SharedFuture<FenceResult> future) {
+        return future;
+    });
+
+    return chain.share();
 }
 
-std::shared_future<renderengine::RenderEngineResult> SurfaceFlinger::renderScreenImpl(
+ftl::SharedFuture<FenceResult> SurfaceFlinger::renderScreenImpl(
         const RenderArea& renderArea, TraverseLayersFunction traverseLayers,
         const std::shared_ptr<renderengine::ExternalTexture>& buffer,
         bool canCaptureBlackoutContent, bool regionSampling, bool grayscale,
@@ -8445,14 +8431,16 @@ std::shared_future<renderengine::RenderEngineResult> SurfaceFlinger::renderScree
     // the impetus on WindowManager to not persist them.
     if (captureResults.capturedSecureLayers && !canCaptureBlackoutContent) {
         ALOGW("FB is protected: PERMISSION_DENIED");
-        return ftl::yield<renderengine::RenderEngineResult>({PERMISSION_DENIED, base::unique_fd()})
-                .share();
+        return ftl::yield<FenceResult>(base::unexpected(PERMISSION_DENIED)).share();
     }
 
     captureResults.buffer = buffer->getBuffer();
     auto dataspace = renderArea.getReqDataSpace();
     auto parent = renderArea.getParentLayer();
     auto renderIntent = RenderIntent::TONE_MAP_COLORIMETRIC;
+    auto sdrWhitePointNits = DisplayDevice::sDefaultMaxLumiance;
+    auto displayBrightnessNits = DisplayDevice::sDefaultMaxLumiance;
+
     if ((dataspace == ui::Dataspace::UNKNOWN) && (parent != nullptr)) {
         Mutex::Autolock lock(mStateLock);
         auto display = findDisplay([layerStack = parent->getLayerStack()](const auto& display) {
@@ -8466,6 +8454,8 @@ std::shared_future<renderengine::RenderEngineResult> SurfaceFlinger::renderScree
         const ui::ColorMode colorMode = display->getCompositionDisplay()->getState().colorMode;
         dataspace = pickDataspaceFromColorMode(colorMode);
         renderIntent = display->getCompositionDisplay()->getState().renderIntent;
+        sdrWhitePointNits = display->getCompositionDisplay()->getState().sdrWhitePointNits;
+        displayBrightnessNits = display->getCompositionDisplay()->getState().displayBrightnessNits;
     }
     captureResults.capturedDataspace = dataspace;
 
@@ -8486,6 +8476,7 @@ std::shared_future<renderengine::RenderEngineResult> SurfaceFlinger::renderScree
     clientCompositionDisplay.orientation = rotation;
 
     clientCompositionDisplay.outputDataspace = dataspace;
+    clientCompositionDisplay.currentLuminanceNits = displayBrightnessNits;
     clientCompositionDisplay.maxLuminance = DisplayDevice::sDefaultMaxLumiance;
     clientCompositionDisplay.renderIntent =
             static_cast<aidl::android::hardware::graphics::composer3::RenderIntent>(renderIntent);
@@ -8527,7 +8518,7 @@ std::shared_future<renderengine::RenderEngineResult> SurfaceFlinger::renderScree
                                        BlurSetting::Disabled
                              : compositionengine::LayerFE::ClientCompositionTargetSettings::
                                        BlurSetting::Enabled,
-                DisplayDevice::sDefaultMaxLumiance,
+                isHdrLayer(layer) ? displayBrightnessNits : sdrWhitePointNits,
 
         };
         std::vector<compositionengine::LayerFE::LayerSettings> results =
@@ -8542,6 +8533,7 @@ std::shared_future<renderengine::RenderEngineResult> SurfaceFlinger::renderScree
                 if (regionSampling) {
                     settings.backgroundBlurRadius = 0;
                 }
+                captureResults.capturedHdrLayers |= isHdrLayer(layer);
             }
 
             clientCompositionLayers.insert(clientCompositionLayers.end(),
@@ -8564,23 +8556,22 @@ std::shared_future<renderengine::RenderEngineResult> SurfaceFlinger::renderScree
     base::unique_fd bufferFence;
     getRenderEngine().useProtectedContext(useProtected);
 
-    const constexpr bool kUseFramebufferCache = false;
-    std::future<renderengine::RenderEngineResult> drawLayersResult =
-            getRenderEngine().drawLayers(clientCompositionDisplay, clientRenderEngineLayers, buffer,
-                                         kUseFramebufferCache, std::move(bufferFence));
+    constexpr bool kUseFramebufferCache = false;
+    auto chain =
+            ftl::Future(getRenderEngine().drawLayers(clientCompositionDisplay,
+                                                     clientRenderEngineLayers, buffer,
+                                                     kUseFramebufferCache, std::move(bufferFence)))
+                    .then(&toFenceResult);
 
-    std::shared_future<renderengine::RenderEngineResult> drawLayersResultFuture =
-            drawLayersResult.share(); // drawLayersResult will be moved to shared one
-
+    const auto future = chain.share();
     for (auto* layer : renderedLayers) {
-        // make a copy of shared_future object for each layer
-        layer->onLayerDisplayed(drawLayersResultFuture);
+        layer->onLayerDisplayed(future);
     }
 
     // Always switch back to unprotected context.
     getRenderEngine().useProtectedContext(false);
 
-    return drawLayersResultFuture;
+    return future;
 }
 
 void SurfaceFlinger::windowInfosReported() {
@@ -8696,9 +8687,6 @@ status_t SurfaceFlinger::setDesiredDisplayModeSpecsInternal(
 bool SurfaceFlinger::canAllocateHwcDisplayIdForVDS(uint64_t usage) {
     uint64_t flag_mask_pvt_wfd = ~0;
     uint64_t flag_mask_hw_video = ~0;
-    char value[PROPERTY_VALUE_MAX] = {};
-    property_get("vendor.display.vds_allow_hwc", value, "0");
-    int allowHwcForVDS = atoi(value);
     // Reserve hardware acceleration for WFD use-case
     // GRALLOC_USAGE_PRIVATE_WFD + GRALLOC_USAGE_HW_VIDEO_ENCODER = WFD using HW composer.
     flag_mask_pvt_wfd = GRALLOC_USAGE_PRIVATE_WFD;
@@ -8707,8 +8695,18 @@ bool SurfaceFlinger::canAllocateHwcDisplayIdForVDS(uint64_t usage) {
     // WFD using GLES (directstreaming).
     sDirectStreaming = ((usage & GRALLOC_USAGE_PRIVATE_WFD) &&
                         (usage & GRALLOC_USAGE_SW_READ_OFTEN));
-    return (allowHwcForVDS || ((usage & flag_mask_pvt_wfd) &&
-            (usage & flag_mask_hw_video)));
+
+    // Enabling only the vendor property would allow WFD to use HWC
+    // Enabling both the aosp and vendor properties would allow all other VDS to use HWC
+    // Disabling both would set all virtual displays to fall back to GPU
+    bool canAllocate = mAllowHwcForVDS || (mAllowHwcForWFD && (usage & flag_mask_pvt_wfd) &&
+                       (usage & flag_mask_hw_video));
+
+    if (canAllocate) {
+        enableHalVirtualDisplays(true);
+    }
+
+    return canAllocate;
 }
 
 bool SurfaceFlinger::skipColorLayer(const char* layerType) {
@@ -9195,8 +9193,6 @@ void SurfaceFlinger::updateInternalDisplaysPresentationMode() {
 
     bool compareStack = false;
     ui::LayerStack previousStackId;
-    // TODO(b/230790745): Re-enable this function
-    /*
     for (const auto& display : mDisplaysList) {
         if (isInternalDisplay(display)) {
             auto currentStackId = display->getLayerStack();
@@ -9209,7 +9205,6 @@ void SurfaceFlinger::updateInternalDisplaysPresentationMode() {
             compareStack = true;
         }
     }
-    */
 }
 
 void SurfaceFlinger::createPhaseOffsetExtn() {
@@ -9223,16 +9218,34 @@ void SurfaceFlinger::createPhaseOffsetExtn() {
             ALOGI("Created PhaseOffset extension");
         }
 
-        g_comp_ext_intf_.phaseOffsetExtnIntf->GetAdvancedSfOffsets(&mAdvancedSfOffsets);
-
         // Populate the fps supported on device in mOffsetCache
         const auto& supportedModes = getDefaultDisplayDeviceLocked()->getSupportedModes();
         for (const auto& [id, mode] : supportedModes) {
             mVsyncConfiguration->getConfigsForRefreshRate(mode->getFps());
         }
 
-        // Update the Advanced SF Offsets/Durations
-        mVsyncConfiguration->UpdateSfOffsets(&mAdvancedSfOffsets);
+        if (property_get_bool("debug.sf.use_phase_offsets_as_durations", false)) {
+            mUseWorkDurations = true;
+        }
+
+        if (mUseWorkDurations) {
+            ALOGI("Use work durations");
+#ifdef DYNAMIC_APP_DURATIONS
+            // Update the Work Durations for the given refresh rates in mOffsets map
+            g_comp_ext_intf_.phaseOffsetExtnIntf->GetWorkDurationConfigs(&mWorkDurationConfigsMap);
+            mVsyncConfiguration->UpdateWorkDurations(&mWorkDurationConfigsMap);
+#else 
+            // TODO: Remove this once phase extension change is available
+            g_comp_ext_intf_.phaseOffsetExtnIntf->GetAdvancedSfOffsets(&mAdvancedSfOffsets);
+            mVsyncConfiguration->UpdateSfOffsets(&mAdvancedSfOffsets);
+#endif
+        } else {
+            ALOGI("Use phase offsets");
+            // Update the Advanced SF Offsets for the given refresh rates in mOffsets map
+            g_comp_ext_intf_.phaseOffsetExtnIntf->GetAdvancedSfOffsets(&mAdvancedSfOffsets);
+            mVsyncConfiguration->UpdateSfOffsets(&mAdvancedSfOffsets);
+        }
+
         const auto vsyncConfig =
             mVsyncModulator->setVsyncConfigSet(mVsyncConfiguration->getCurrentConfigs());
         ALOGI("VsyncConfig sfOffset %" PRId64 "\n", vsyncConfig.sfOffset);
@@ -9307,8 +9320,6 @@ void SurfaceFlinger::setupDisplayExtnFeatures() {
     bool enableDynamicSfIdle = (atoi(propValue) == 0);
 
     if (enableEarlyWakeUp || enableDynamicSfIdle) {
-        // TODO(b/230790745): Re-enable this function
-        /*
         for (const auto& display : mDisplaysList) {
             // Register Internal Physical Displays
             if (isInternalDisplay(display)) {
@@ -9326,7 +9337,6 @@ void SurfaceFlinger::setupDisplayExtnFeatures() {
                 }
             }
         }
-        */
         mEarlyWakeUpEnabled = enableEarlyWakeUp;
         mDynamicSfIdleEnabled = enableDynamicSfIdle;
     }

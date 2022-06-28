@@ -27,6 +27,7 @@
 #include <android/gui/DisplayState.h>
 #include <cutils/atomic.h>
 #include <cutils/compiler.h>
+#include <ftl/future.h>
 #include <ftl/small_map.h>
 #include <gui/BufferQueue.h>
 #include <gui/FrameTimestamps.h>
@@ -49,6 +50,7 @@
 #include <utils/Trace.h>
 #include <utils/threads.h>
 
+#include <compositionengine/FenceResult.h>
 #include <compositionengine/OutputColorSetting.h>
 #include <scheduler/Fps.h>
 
@@ -76,7 +78,6 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
-#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -186,9 +187,6 @@ enum class LatchUnsignaledConfig {
 using DisplayColorSetting = compositionengine::OutputColorSetting;
 
 struct SurfaceFlingerBE {
-    FenceTimeline mGlCompositionDoneTimeline;
-    FenceTimeline mDisplayTimeline;
-
     // protected by mCompositorTimingLock;
     mutable std::mutex mCompositorTimingLock;
     CompositorTiming mCompositorTiming;
@@ -416,6 +414,12 @@ public:
     // run parallel to the hwc validateDisplay call and re-run if the predition is incorrect.
     bool mPredictCompositionStrategy = false;
 
+    // If true, then any layer with a SMPTE 170M transfer function is decoded using the sRGB
+    // transfer instead. This is mainly to preserve legacy behavior, where implementations treated
+    // SMPTE 170M as sRGB prior to color management being implemented, and now implementations rely
+    // on this behavior to increase contrast for some media sources.
+    bool mTreat170mAsSrgb = false;
+
     nsecs_t mVsyncTimeStamp = -1;
     void NotifyIdleStatus();
     void NotifyResolutionSwitch(int displayId, int32_t width, int32_t height, int32_t vsyncPeriod);
@@ -462,7 +466,7 @@ private:
     using VsyncModulator = scheduler::VsyncModulator;
     using TransactionSchedule = scheduler::TransactionSchedule;
     using TraverseLayersFunction = std::function<void(const LayerVector::Visitor&)>;
-    using RenderAreaFuture = std::future<std::unique_ptr<RenderArea>>;
+    using RenderAreaFuture = ftl::Future<std::unique_ptr<RenderArea>>;
     using DumpArgs = Vector<String16>;
     using Dumper = std::function<void(const DumpArgs&, bool asProto, std::string&)>;
 
@@ -908,7 +912,7 @@ private:
         Ready,
         ReadyUnsignaled,
     };
-    TransactionReadiness transactionIsReadyToBeApplied(
+    TransactionReadiness transactionIsReadyToBeApplied(TransactionState& state,
             const FrameTimelineInfo& info, bool isAutoTimestamp, int64_t desiredPresentTime,
             uid_t originUid, Vector<ComposerState>& states,
             const std::unordered_map<
@@ -967,14 +971,15 @@ private:
     // Boot animation, on/off animations and screen capture
     void startBootAnim();
 
-    std::shared_future<renderengine::RenderEngineResult> captureScreenCommon(
-            RenderAreaFuture, TraverseLayersFunction, ui::Size bufferSize, ui::PixelFormat,
-            bool allowProtected, bool grayscale, const sp<IScreenCaptureListener>&);
-    std::shared_future<renderengine::RenderEngineResult> captureScreenCommon(
+    ftl::SharedFuture<FenceResult> captureScreenCommon(RenderAreaFuture, TraverseLayersFunction,
+                                                       ui::Size bufferSize, ui::PixelFormat,
+                                                       bool allowProtected, bool grayscale,
+                                                       const sp<IScreenCaptureListener>&);
+    ftl::SharedFuture<FenceResult> captureScreenCommon(
             RenderAreaFuture, TraverseLayersFunction,
             const std::shared_ptr<renderengine::ExternalTexture>&, bool regionSampling,
             bool grayscale, const sp<IScreenCaptureListener>&);
-    std::shared_future<renderengine::RenderEngineResult> renderScreenImpl(
+    ftl::SharedFuture<FenceResult> renderScreenImpl(
             const RenderArea&, TraverseLayersFunction,
             const std::shared_ptr<renderengine::ExternalTexture>&, bool canCaptureBlackoutContent,
             bool regionSampling, bool grayscale, ScreenCaptureResults&) EXCLUDES(mStateLock);
@@ -1036,10 +1041,7 @@ private:
         }
         // The active display is outdated, so fall back to the primary display.
         mActiveDisplayToken.clear();
-        if (const auto token = getPrimaryDisplayTokenLocked()) {
-            return getDisplayDeviceLocked(token);
-        }
-        return nullptr;
+        return getDisplayDeviceLocked(getPrimaryDisplayTokenLocked());
     }
 
     sp<const DisplayDevice> getDefaultDisplayDevice() const EXCLUDES(mStateLock) {
@@ -1213,8 +1215,6 @@ private:
 
     void dumpVSync(std::string& result) const REQUIRES(mStateLock);
     void dumpStaticScreenStats(std::string& result) const;
-    // Not const because each Layer needs to query Fences and cache timestamps.
-    void dumpFrameEventsLocked(std::string& result);
 
     void dumpCompositionDisplays(std::string& result) const REQUIRES(mStateLock);
     void dumpDisplays(std::string& result) const REQUIRES(mStateLock);
@@ -1631,6 +1631,7 @@ private:
     bool mDynamicSfIdleEnabled = false;
     bool wakeUpPresentationDisplays = false;
     bool mInternalPresentationDisplays = false;
+    bool mUseWorkDurations = false;
 
     composer::ComposerExtnIntf *mComposerExtnIntf = nullptr;
     composer::FrameSchedulerIntf *mFrameSchedulerExtnIntf = nullptr;
@@ -1641,8 +1642,9 @@ private:
     float mThermalLevelFps = 0;
     float mLastCachedFps = 0;
     bool mAllowThermalFpsChange = false;
+    std::unordered_map<float, std::pair<int64_t, int64_t>> mWorkDurationConfigsMap;
     std::unordered_map<float, int64_t> mAdvancedSfOffsets;
-    bool mLatchMediaContent = true;
+    bool mLatchMediaContent = false;
 
     FlagManager mFlagManager;
     int mRETid = 0;
@@ -1652,6 +1654,8 @@ private:
     bool mSentInitialFps = false;
     std::mutex mEarlyWakeUpMutex;
     int mUiLayerFrameCount = 0;
+    bool mAllowHwcForVDS = false;
+    bool mAllowHwcForWFD = false;
 
     // returns the framerate of the layer with the given sequence ID
     float getLayerFramerate(nsecs_t now, int32_t id) const {

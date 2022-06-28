@@ -168,6 +168,17 @@ BLASTBufferQueue::BLASTBufferQueue(const std::string& name, bool updateDestinati
 
     mNumAcquired = 0;
     mNumFrameAvailable = 0;
+
+    TransactionCompletedListener::getInstance()->addQueueStallListener(
+        [&]() {
+            std::function<void(bool)> callbackCopy;
+            {
+                std::unique_lock _lock{mMutex};
+                callbackCopy = mTransactionHangCallback;
+            }
+            if (callbackCopy) callbackCopy(true);
+        }, this);
+
     BQA_LOGV("BLASTBufferQueue created");
 }
 
@@ -178,6 +189,7 @@ BLASTBufferQueue::BLASTBufferQueue(const std::string& name, const sp<SurfaceCont
 }
 
 BLASTBufferQueue::~BLASTBufferQueue() {
+    TransactionCompletedListener::getInstance()->removeQueueStallListener(this);
     if (mPendingTransactions.empty()) {
         return;
     }
@@ -447,6 +459,7 @@ void BLASTBufferQueue::releaseBuffer(const ReleaseCallbackId& callbackId,
         return;
     }
     mNumAcquired--;
+    mNumUndequeued++;
     BBQ_TRACE("frame=%" PRIu64, callbackId.framenumber);
     BQA_LOGV("released %s", callbackId.to_string().c_str());
     mBufferItemConsumer->releaseBuffer(it->second, releaseFence);
@@ -1133,6 +1146,11 @@ void BLASTBufferQueue::abandon() {
 bool BLASTBufferQueue::isSameSurfaceControl(const sp<SurfaceControl>& surfaceControl) const {
     std::unique_lock _lock{mMutex};
     return SurfaceControl::isSameSurface(mSurfaceControl, surfaceControl);
+}
+
+void BLASTBufferQueue::setTransactionHangCallback(std::function<void(bool)> callback) {
+    std::unique_lock _lock{mMutex};
+    mTransactionHangCallback = callback;
 }
 
 } // namespace android
