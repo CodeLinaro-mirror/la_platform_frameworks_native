@@ -1121,6 +1121,8 @@ private:
      * VSYNC
      */
     nsecs_t getVsyncPeriodFromHWC() const REQUIRES(mStateLock);
+    nsecs_t getVsyncPeriodFromHWCcb();
+    sp<DisplayDevice> getCurrentVsyncSource();
 
     void setHWCVsyncEnabled(PhysicalDisplayId id, hal::Vsync enabled) {
         mLastHWCVsyncState = enabled;
@@ -1625,6 +1627,12 @@ public:
       SmomoIntf *smoMo = nullptr;
     };
     std::vector<SmomoInfo> mSmomoInstances;
+
+    struct VisibleLayerInfo {
+      std::vector<std::string> layerName;
+      std::vector<int32_t> layerSequence;
+    };
+    VisibleLayerInfo mVisibleLayerInfo;
 
 private:
     bool mEarlyWakeUpEnabled = false;
