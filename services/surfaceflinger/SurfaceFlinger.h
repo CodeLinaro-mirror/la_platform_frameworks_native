@@ -1713,6 +1713,7 @@ private:
     bool mDynamicSfIdleEnabled = false;
     bool wakeUpPresentationDisplays = false;
     bool mInternalPresentationDisplays = false;
+    bool mDisplaySizeChanged = false;
 
     composer::ComposerExtnIntf *mComposerExtnIntf = nullptr;
     composer::FrameSchedulerIntf *mFrameSchedulerExtnIntf = nullptr;
