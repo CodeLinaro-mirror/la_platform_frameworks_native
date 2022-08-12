@@ -6940,7 +6940,6 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
         // captureLayers and captureDisplay will handle the permission check in the function
         case CAPTURE_LAYERS:
         case CAPTURE_DISPLAY:
-        case SET_DISPLAY_BRIGHTNESS:
         case SET_FRAME_TIMELINE_INFO:
         case GET_GPU_CONTEXT_PRIORITY:
         case GET_MAX_ACQUIRED_BUFFER_COUNT: {
@@ -6948,6 +6947,7 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
             return OK;
         }
         case ADD_HDR_LAYER_INFO_LISTENER:
+        case SET_DISPLAY_BRIGHTNESS:
         case REMOVE_HDR_LAYER_INFO_LISTENER: {
             // TODO (b/183985553): Should getting & setting brightness be part of this...?
             // codes that require permission check
