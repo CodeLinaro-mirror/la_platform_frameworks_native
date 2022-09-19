@@ -3968,7 +3968,7 @@ void SurfaceFlinger::processDisplayChanged(const wp<IBinder>& displayToken,
         if ((currentState.orientation != drawingState.orientation) ||
             (currentState.layerStackSpaceRect != drawingState.layerStackSpaceRect) ||
             (currentState.orientedDisplaySpaceRect != drawingState.orientedDisplaySpaceRect)) {
-            if (mUseFbScaling && display->isPrimary() && display->isPoweredOn()) {
+            if (mUseFbScaling && display->isPrimary()) {
                 const ssize_t index = mCurrentState.displays.indexOfKey(displayToken);
                 DisplayDeviceState& curState = mCurrentState.displays.editValueAt(index);
                 setFrameBufferSizeForScaling(display, curState, drawingState);
@@ -4037,12 +4037,16 @@ void SurfaceFlinger::setFrameBufferSizeForScaling(sp<DisplayDevice> displayDevic
         displayDevice->setProjection(currentState.orientation, currentState.layerStackSpaceRect,
                                      currentState.orientedDisplaySpaceRect);
         display->getRenderSurface()->setViewportAndProjection();
-        display->getRenderSurface()->flipClientTarget(true);
-        // queue a scratch buffer to flip Client Target with updated size
-        display->getRenderSurface()->queueBuffer(std::move(fd));
-        display->getRenderSurface()->flipClientTarget(false);
-        // releases the FrameBuffer that was acquired as part of queueBuffer()
-        display->getRenderSurface()->onPresentDisplayCompleted();
+        if (displayDevice->isPoweredOn()) {
+            display->getRenderSurface()->flipClientTarget(true);
+            // queue a scratch buffer to flip Client Target with updated size
+            display->getRenderSurface()->queueBuffer(std::move(fd));
+            display->getRenderSurface()->flipClientTarget(false);
+            // releases the FrameBuffer that was acquired as part of queueBuffer()
+            display->getRenderSurface()->onPresentDisplayCompleted();
+        } else {
+            mDisplaySizeChanged = true;
+        }
     }
 }
 void SurfaceFlinger::processDisplayChangesLocked() {
@@ -5963,6 +5967,18 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal:
         getHwComposer().setPowerMode(displayId, mode);
     }
 
+    if (mDisplaySizeChanged && display->isPrimary()) {
+        base::unique_fd fd;
+        auto compositionDisplay = display->getCompositionDisplay();
+        compositionDisplay->getRenderSurface()->flipClientTarget(true);
+        // queue a scratch buffer to flip Client Target with updated size
+        compositionDisplay->getRenderSurface()->queueBuffer(std::move(fd));
+        compositionDisplay->getRenderSurface()->flipClientTarget(false);
+        // releases the FrameBuffer that was acquired as part of queueBuffer()
+        compositionDisplay->getRenderSurface()->onPresentDisplayCompleted();
+        mDisplaySizeChanged = false;
+    }
+
     const sp<DisplayDevice> vsyncSource = getVsyncSource();
     struct sched_param param = {0};
     if (vsyncSource != NULL) {
@@ -6924,7 +6940,6 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
         // captureLayers and captureDisplay will handle the permission check in the function
         case CAPTURE_LAYERS:
         case CAPTURE_DISPLAY:
-        case SET_DISPLAY_BRIGHTNESS:
         case SET_FRAME_TIMELINE_INFO:
         case GET_GPU_CONTEXT_PRIORITY:
         case GET_MAX_ACQUIRED_BUFFER_COUNT: {
@@ -6932,6 +6947,7 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
             return OK;
         }
         case ADD_HDR_LAYER_INFO_LISTENER:
+        case SET_DISPLAY_BRIGHTNESS:
         case REMOVE_HDR_LAYER_INFO_LISTENER: {
             // TODO (b/183985553): Should getting & setting brightness be part of this...?
             // codes that require permission check
