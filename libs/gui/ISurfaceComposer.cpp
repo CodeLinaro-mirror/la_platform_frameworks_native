@@ -321,9 +321,21 @@ public:
 
     status_t getDisplayState(const sp<IBinder>& display, ui::DisplayState* state) override {
         Parcel data, reply;
-        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
-        data.writeStrongBinder(display);
-        remote()->transact(BnSurfaceComposer::GET_DISPLAY_STATE, data, &reply);
+        status_t error = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (error != NO_ERROR) {
+            ALOGE("getDisplayState failed to write interface token: %d", error);
+            return error;
+        }
+        error = data.writeStrongBinder(display);
+        if (error != NO_ERROR) {
+            ALOGE("getDisplayState failed to display binder token: %d", error);
+            return error;
+        }
+        error = remote()->transact(BnSurfaceComposer::GET_DISPLAY_STATE, data, &reply);
+        if (error != NO_ERROR) {
+            ALOGE("getDisplayState failed to transact: %d", error);
+            return error;
+        }
         const status_t result = reply.readInt32();
         if (result == NO_ERROR) {
             memcpy(state, reply.readInplace(sizeof(ui::DisplayState)), sizeof(ui::DisplayState));
