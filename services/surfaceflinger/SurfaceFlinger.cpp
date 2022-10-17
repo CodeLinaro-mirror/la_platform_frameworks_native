@@ -763,7 +763,8 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
         if (displayConfigIntf == nullptr) {
             ALOGE("Failed to retrieve DisplayConfig AIDL binder");
         } else {
-            mAidlCallbackHandler = std::make_shared<DisplayConfigAidlCallbackHandler>(*this);
+            mAidlCallbackHandler =
+                                ndk::SharedRefBase::make<DisplayConfigAidlCallbackHandler>(*this);
             displayConfigIntf->registerCallback(mAidlCallbackHandler, &callbackClientId);
             if (callbackClientId >= 0) {
                ALOGI("Registered to displayconfig aidl service and enabled callback");
