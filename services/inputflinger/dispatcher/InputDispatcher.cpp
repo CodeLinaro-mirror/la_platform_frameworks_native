@@ -60,6 +60,7 @@ using android::os::BlockUntrustedTouchesMode;
 using android::os::IInputConstants;
 using android::os::InputEventInjectionResult;
 using android::os::InputEventInjectionSync;
+using android::base::GetBoolProperty;
 
 namespace android::inputdispatcher {
 
@@ -559,8 +560,9 @@ InputDispatcher::InputDispatcher(const sp<InputDispatcherPolicyInterface>& polic
     mReporter = createInputReporter();
 
     mWindowInfoListener = new DispatcherWindowListener(*this);
+    if (GetBoolProperty("ro.config.headless", 0) != 1) {
     SurfaceComposerClient::getDefault()->addWindowInfosListener(mWindowInfoListener);
-
+    }
     mKeyRepeatState.lastKeyEntry = nullptr;
 
     policy->getDispatcherConfiguration(&mConfig);
