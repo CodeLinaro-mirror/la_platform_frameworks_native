@@ -2603,13 +2603,13 @@ protected:
 };
 
 TEST_F(SwitchInputMapperTest, GetSources) {
-    SwitchInputMapper& mapper = addMapperAndConfigure<SwitchInputMapper>();
+    SwitchInputMapper& mapper = constructAndAddMapper<SwitchInputMapper>();
 
     ASSERT_EQ(uint32_t(AINPUT_SOURCE_SWITCH), mapper.getSources());
 }
 
 TEST_F(SwitchInputMapperTest, GetSwitchState) {
-    SwitchInputMapper& mapper = addMapperAndConfigure<SwitchInputMapper>();
+    SwitchInputMapper& mapper = constructAndAddMapper<SwitchInputMapper>();
 
     mFakeEventHub->setSwitchState(EVENTHUB_ID, SW_LID, 1);
     ASSERT_EQ(1, mapper.getSwitchState(AINPUT_SOURCE_ANY, SW_LID));
@@ -2619,7 +2619,7 @@ TEST_F(SwitchInputMapperTest, GetSwitchState) {
 }
 
 TEST_F(SwitchInputMapperTest, Process) {
-    SwitchInputMapper& mapper = addMapperAndConfigure<SwitchInputMapper>();
+    SwitchInputMapper& mapper = constructAndAddMapper<SwitchInputMapper>();
     std::list<NotifyArgs> out;
     out = process(mapper, ARBITRARY_TIME, READ_TIME, EV_SW, SW_LID, 1);
     ASSERT_TRUE(out.empty());
@@ -2645,13 +2645,13 @@ protected:
 };
 
 TEST_F(VibratorInputMapperTest, GetSources) {
-    VibratorInputMapper& mapper = addMapperAndConfigure<VibratorInputMapper>();
+    VibratorInputMapper& mapper = constructAndAddMapper<VibratorInputMapper>();
 
     ASSERT_EQ(AINPUT_SOURCE_UNKNOWN, mapper.getSources());
 }
 
 TEST_F(VibratorInputMapperTest, GetVibratorIds) {
-    VibratorInputMapper& mapper = addMapperAndConfigure<VibratorInputMapper>();
+    VibratorInputMapper& mapper = constructAndAddMapper<VibratorInputMapper>();
 
     ASSERT_EQ(mapper.getVibratorIds().size(), 2U);
 }
@@ -2659,7 +2659,7 @@ TEST_F(VibratorInputMapperTest, GetVibratorIds) {
 TEST_F(VibratorInputMapperTest, Vibrate) {
     constexpr uint8_t DEFAULT_AMPLITUDE = 192;
     constexpr int32_t VIBRATION_TOKEN = 100;
-    VibratorInputMapper& mapper = addMapperAndConfigure<VibratorInputMapper>();
+    VibratorInputMapper& mapper = constructAndAddMapper<VibratorInputMapper>();
 
     VibrationElement pattern(2);
     VibrationSequence sequence(2);
@@ -2784,7 +2784,7 @@ void SensorInputMapperTest::setGyroProperties() {
 }
 
 TEST_F(SensorInputMapperTest, GetSources) {
-    SensorInputMapper& mapper = addMapperAndConfigure<SensorInputMapper>();
+    SensorInputMapper& mapper = constructAndAddMapper<SensorInputMapper>();
 
     ASSERT_EQ(static_cast<uint32_t>(AINPUT_SOURCE_SENSOR), mapper.getSources());
 }
@@ -2792,7 +2792,7 @@ TEST_F(SensorInputMapperTest, GetSources) {
 TEST_F(SensorInputMapperTest, ProcessAccelerometerSensor) {
     setAccelProperties();
     prepareAccelAxes();
-    SensorInputMapper& mapper = addMapperAndConfigure<SensorInputMapper>();
+    SensorInputMapper& mapper = constructAndAddMapper<SensorInputMapper>();
 
     ASSERT_TRUE(mapper.enableSensor(InputDeviceSensorType::ACCELEROMETER,
                                     std::chrono::microseconds(10000),
@@ -2822,7 +2822,7 @@ TEST_F(SensorInputMapperTest, ProcessAccelerometerSensor) {
 TEST_F(SensorInputMapperTest, ProcessGyroscopeSensor) {
     setGyroProperties();
     prepareGyroAxes();
-    SensorInputMapper& mapper = addMapperAndConfigure<SensorInputMapper>();
+    SensorInputMapper& mapper = constructAndAddMapper<SensorInputMapper>();
 
     ASSERT_TRUE(mapper.enableSensor(InputDeviceSensorType::GYROSCOPE,
                                     std::chrono::microseconds(10000),
@@ -2892,7 +2892,7 @@ void KeyboardInputMapperTest::testDPadKeyRotation(KeyboardInputMapper& mapper,
 
 TEST_F(KeyboardInputMapperTest, GetSources) {
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
 
     ASSERT_EQ(AINPUT_SOURCE_KEYBOARD, mapper.getSources());
@@ -2908,7 +2908,7 @@ TEST_F(KeyboardInputMapperTest, Process_SimpleKeyPress) {
     mFakeEventHub->addKey(EVENTHUB_ID, 0, KEY_SCROLLLOCK, AKEYCODE_SCROLL_LOCK, POLICY_FLAG_WAKE);
 
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     // Initial metastate is AMETA_NONE.
     ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
@@ -3009,7 +3009,7 @@ TEST_F(KeyboardInputMapperTest, Process_KeyRemapping) {
     mFakeEventHub->addKeyRemapping(EVENTHUB_ID, AKEYCODE_A, AKEYCODE_B);
 
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
 
     // Key down by scan code.
@@ -3031,7 +3031,7 @@ TEST_F(KeyboardInputMapperTest, Process_SendsReadTime) {
     mFakeEventHub->addKey(EVENTHUB_ID, KEY_HOME, 0, AKEYCODE_HOME, POLICY_FLAG_WAKE);
 
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     NotifyKeyArgs args;
 
@@ -3054,7 +3054,7 @@ TEST_F(KeyboardInputMapperTest, Process_ShouldUpdateMetaState) {
     mFakeEventHub->addKey(EVENTHUB_ID, 0, KEY_SCROLLLOCK, AKEYCODE_SCROLL_LOCK, 0);
 
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
 
     // Initial metastate is AMETA_NONE.
@@ -3095,7 +3095,7 @@ TEST_F(KeyboardInputMapperTest, Process_WhenNotOrientationAware_ShouldNotRotateD
     mFakeEventHub->addKey(EVENTHUB_ID, KEY_LEFT, 0, AKEYCODE_DPAD_LEFT, 0);
 
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
 
     prepareDisplay(ui::ROTATION_90);
@@ -3117,7 +3117,7 @@ TEST_F(KeyboardInputMapperTest, Process_WhenOrientationAware_ShouldRotateDPad) {
 
     addConfigurationProperty("keyboard.orientationAware", "1");
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
 
     prepareDisplay(ui::ROTATION_0);
@@ -3189,7 +3189,7 @@ TEST_F(KeyboardInputMapperTest, DisplayIdConfigurationChange_NotOrientationAware
     mFakeEventHub->addKey(EVENTHUB_ID, KEY_UP, 0, AKEYCODE_DPAD_UP, 0);
 
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     NotifyKeyArgs args;
 
@@ -3215,7 +3215,7 @@ TEST_F(KeyboardInputMapperTest, DisplayIdConfigurationChange_OrientationAware) {
 
     addConfigurationProperty("keyboard.orientationAware", "1");
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     NotifyKeyArgs args;
 
@@ -3243,7 +3243,7 @@ TEST_F(KeyboardInputMapperTest, DisplayIdConfigurationChange_OrientationAware) {
 
 TEST_F(KeyboardInputMapperTest, GetKeyCodeState) {
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
 
     mFakeEventHub->setKeyCodeState(EVENTHUB_ID, AKEYCODE_A, 1);
@@ -3255,7 +3255,7 @@ TEST_F(KeyboardInputMapperTest, GetKeyCodeState) {
 
 TEST_F(KeyboardInputMapperTest, GetKeyCodeForKeyLocation) {
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
 
     mFakeEventHub->addKeyCodeMapping(EVENTHUB_ID, AKEYCODE_Y, AKEYCODE_Z);
@@ -3268,7 +3268,7 @@ TEST_F(KeyboardInputMapperTest, GetKeyCodeForKeyLocation) {
 
 TEST_F(KeyboardInputMapperTest, GetScanCodeState) {
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
 
     mFakeEventHub->setScanCodeState(EVENTHUB_ID, KEY_A, 1);
@@ -3280,7 +3280,7 @@ TEST_F(KeyboardInputMapperTest, GetScanCodeState) {
 
 TEST_F(KeyboardInputMapperTest, MarkSupportedKeyCodes) {
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
 
     mFakeEventHub->addKey(EVENTHUB_ID, KEY_A, 0, AKEYCODE_A, 0);
@@ -3300,7 +3300,7 @@ TEST_F(KeyboardInputMapperTest, Process_LockedKeysShouldToggleMetaStateAndLeds) 
     mFakeEventHub->addKey(EVENTHUB_ID, KEY_SCROLLLOCK, 0, AKEYCODE_SCROLL_LOCK, 0);
 
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     // Initial metastate is AMETA_NONE.
     ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
@@ -3366,7 +3366,7 @@ TEST_F(KeyboardInputMapperTest, NoMetaStateWhenMetaKeysNotPresent) {
     mFakeEventHub->addKey(EVENTHUB_ID, BTN_Y, 0, AKEYCODE_BUTTON_Y, 0);
 
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_NON_ALPHABETIC);
 
     // Meta state should be AMETA_NONE after reset
@@ -3416,14 +3416,16 @@ TEST_F(KeyboardInputMapperTest, Configure_AssignsDisplayPort) {
     mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_LEFT, 0, AKEYCODE_DPAD_LEFT, 0);
 
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
 
+    device2->addEmptyEventHubDevice(SECOND_EVENTHUB_ID);
     KeyboardInputMapper& mapper2 =
-            device2->addMapper<KeyboardInputMapper>(SECOND_EVENTHUB_ID,
-                                                    mFakePolicy->getReaderConfiguration(),
-                                                    AINPUT_SOURCE_KEYBOARD,
-                                                    AINPUT_KEYBOARD_TYPE_ALPHABETIC);
+            device2->constructAndAddMapper<KeyboardInputMapper>(SECOND_EVENTHUB_ID,
+                                                                mFakePolicy
+                                                                        ->getReaderConfiguration(),
+                                                                AINPUT_SOURCE_KEYBOARD,
+                                                                AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     std::list<NotifyArgs> unused =
             device2->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
                                /*changes=*/{});
@@ -3485,7 +3487,7 @@ TEST_F(KeyboardInputMapperTest, Process_LockedKeysShouldToggleAfterReattach) {
     mFakeEventHub->addKey(EVENTHUB_ID, KEY_SCROLLLOCK, 0, AKEYCODE_SCROLL_LOCK, 0);
 
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     // Initial metastate is AMETA_NONE.
     ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
@@ -3531,11 +3533,13 @@ TEST_F(KeyboardInputMapperTest, Process_LockedKeysShouldToggleAfterReattach) {
     mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_NUMLOCK, 0, AKEYCODE_NUM_LOCK, 0);
     mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_SCROLLLOCK, 0, AKEYCODE_SCROLL_LOCK, 0);
 
+    device2->addEmptyEventHubDevice(SECOND_EVENTHUB_ID);
     KeyboardInputMapper& mapper2 =
-            device2->addMapper<KeyboardInputMapper>(SECOND_EVENTHUB_ID,
-                                                    mFakePolicy->getReaderConfiguration(),
-                                                    AINPUT_SOURCE_KEYBOARD,
-                                                    AINPUT_KEYBOARD_TYPE_ALPHABETIC);
+            device2->constructAndAddMapper<KeyboardInputMapper>(SECOND_EVENTHUB_ID,
+                                                                mFakePolicy
+                                                                        ->getReaderConfiguration(),
+                                                                AINPUT_SOURCE_KEYBOARD,
+                                                                AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     std::list<NotifyArgs> unused =
             device2->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
                                /*changes=*/{});
@@ -3554,10 +3558,10 @@ TEST_F(KeyboardInputMapperTest, Process_toggleCapsLockState) {
     mFakeEventHub->addKey(EVENTHUB_ID, KEY_SCROLLLOCK, 0, AKEYCODE_SCROLL_LOCK, 0);
 
     // Suppose we have two mappers. (DPAD + KEYBOARD)
-    addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_DPAD,
+    constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_DPAD,
                                                AINPUT_KEYBOARD_TYPE_NON_ALPHABETIC);
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     // Initial metastate is AMETA_NONE.
     ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
@@ -3576,7 +3580,7 @@ TEST_F(KeyboardInputMapperTest, Process_LockedKeysShouldToggleInMultiDevices) {
     mFakeEventHub->addKey(EVENTHUB_ID, KEY_SCROLLLOCK, 0, AKEYCODE_SCROLL_LOCK, 0);
 
     KeyboardInputMapper& mapper1 =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
 
     // keyboard 2.
@@ -3594,11 +3598,13 @@ TEST_F(KeyboardInputMapperTest, Process_LockedKeysShouldToggleInMultiDevices) {
     mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_NUMLOCK, 0, AKEYCODE_NUM_LOCK, 0);
     mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_SCROLLLOCK, 0, AKEYCODE_SCROLL_LOCK, 0);
 
+    device2->addEmptyEventHubDevice(SECOND_EVENTHUB_ID);
     KeyboardInputMapper& mapper2 =
-            device2->addMapper<KeyboardInputMapper>(SECOND_EVENTHUB_ID,
-                                                    mFakePolicy->getReaderConfiguration(),
-                                                    AINPUT_SOURCE_KEYBOARD,
-                                                    AINPUT_KEYBOARD_TYPE_ALPHABETIC);
+            device2->constructAndAddMapper<KeyboardInputMapper>(SECOND_EVENTHUB_ID,
+                                                                mFakePolicy
+                                                                        ->getReaderConfiguration(),
+                                                                AINPUT_SOURCE_KEYBOARD,
+                                                                AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     std::list<NotifyArgs> unused =
             device2->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
                                /*changes=*/{});
@@ -3654,7 +3660,7 @@ TEST_F(KeyboardInputMapperTest, Process_DisabledDevice) {
     mFakeEventHub->addKey(EVENTHUB_ID, 0, USAGE_A, AKEYCODE_A, POLICY_FLAG_WAKE);
 
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     // Key down by scan code.
     process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_HOME, 1);
@@ -3680,9 +3686,8 @@ TEST_F(KeyboardInputMapperTest, Process_DisabledDevice) {
 }
 
 TEST_F(KeyboardInputMapperTest, Configure_AssignKeyboardLayoutInfo) {
-    mDevice->addMapper<KeyboardInputMapper>(EVENTHUB_ID, mFakePolicy->getReaderConfiguration(),
-                                            AINPUT_SOURCE_KEYBOARD,
-                                            AINPUT_KEYBOARD_TYPE_ALPHABETIC);
+    constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+                                               AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     std::list<NotifyArgs> unused =
             mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
                                /*changes=*/{});
@@ -3713,7 +3718,7 @@ TEST_F(KeyboardInputMapperTest, LayoutInfoCorrectlyMapped) {
                                     RawLayoutInfo{.languageTag = "en", .layoutType = "extended"});
 
     // Configuration
-    addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+    constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     InputReaderConfiguration config;
     std::list<NotifyArgs> unused = mDevice->configure(ARBITRARY_TIME, config, /*changes=*/{});
@@ -3739,7 +3744,7 @@ TEST_F(KeyboardInputMapperTest_ExternalDevice, WakeBehavior) {
                           POLICY_FLAG_WAKE);
 
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
 
     process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_HOME, 1);
@@ -3777,7 +3782,7 @@ TEST_F(KeyboardInputMapperTest_ExternalDevice, DoNotWakeByDefaultBehavior) {
 
     addConfigurationProperty("keyboard.doNotWakeByDefault", "1");
     KeyboardInputMapper& mapper =
-            addMapperAndConfigure<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
+            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
                                                        AINPUT_KEYBOARD_TYPE_ALPHABETIC);
 
     process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_HOME, 1);
@@ -3862,21 +3867,21 @@ void CursorInputMapperTest::testMotionRotation(CursorInputMapper& mapper, int32_
 
 TEST_F(CursorInputMapperTest, WhenModeIsPointer_GetSources_ReturnsMouse) {
     addConfigurationProperty("cursor.mode", "pointer");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     ASSERT_EQ(AINPUT_SOURCE_MOUSE, mapper.getSources());
 }
 
 TEST_F(CursorInputMapperTest, WhenModeIsNavigation_GetSources_ReturnsTrackball) {
     addConfigurationProperty("cursor.mode", "navigation");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     ASSERT_EQ(AINPUT_SOURCE_TRACKBALL, mapper.getSources());
 }
 
 TEST_F(CursorInputMapperTest, WhenModeIsPointer_PopulateDeviceInfo_ReturnsRangeFromPointerController) {
     addConfigurationProperty("cursor.mode", "pointer");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     InputDeviceInfo info;
     mapper.populateDeviceInfo(info);
@@ -3906,7 +3911,7 @@ TEST_F(CursorInputMapperTest, WhenModeIsPointer_PopulateDeviceInfo_ReturnsRangeF
 
 TEST_F(CursorInputMapperTest, WhenModeIsNavigation_PopulateDeviceInfo_ReturnsScaledRange) {
     addConfigurationProperty("cursor.mode", "navigation");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     InputDeviceInfo info;
     mapper.populateDeviceInfo(info);
@@ -3924,7 +3929,7 @@ TEST_F(CursorInputMapperTest, WhenModeIsNavigation_PopulateDeviceInfo_ReturnsSca
 
 TEST_F(CursorInputMapperTest, Process_ShouldSetAllFieldsAndIncludeGlobalMetaState) {
     addConfigurationProperty("cursor.mode", "navigation");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     mReader->getContext()->setGlobalMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON);
 
@@ -4012,7 +4017,7 @@ TEST_F(CursorInputMapperTest, Process_ShouldSetAllFieldsAndIncludeGlobalMetaStat
 
 TEST_F(CursorInputMapperTest, Process_ShouldHandleIndependentXYUpdates) {
     addConfigurationProperty("cursor.mode", "navigation");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     NotifyMotionArgs args;
 
@@ -4036,7 +4041,7 @@ TEST_F(CursorInputMapperTest, Process_ShouldHandleIndependentXYUpdates) {
 
 TEST_F(CursorInputMapperTest, Process_ShouldHandleIndependentButtonUpdates) {
     addConfigurationProperty("cursor.mode", "navigation");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     NotifyMotionArgs args;
 
@@ -4065,7 +4070,7 @@ TEST_F(CursorInputMapperTest, Process_ShouldHandleIndependentButtonUpdates) {
 
 TEST_F(CursorInputMapperTest, Process_ShouldHandleCombinedXYAndButtonUpdates) {
     addConfigurationProperty("cursor.mode", "navigation");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     NotifyMotionArgs args;
 
@@ -4114,7 +4119,7 @@ TEST_F(CursorInputMapperTest, Process_WhenOrientationAware_ShouldNotRotateMotion
     // InputReader works in the un-rotated coordinate space, so orientation-aware devices do not
     // need to be rotated.
     addConfigurationProperty("cursor.orientationAware", "1");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     prepareDisplay(ui::ROTATION_90);
     ASSERT_NO_FATAL_FAILURE(testMotionRotation(mapper,  0,  1,  0,  1));
@@ -4132,7 +4137,7 @@ TEST_F(CursorInputMapperTest, Process_WhenNotOrientationAware_ShouldRotateMotion
     addConfigurationProperty("cursor.mode", "navigation");
     // Since InputReader works in the un-rotated coordinate space, only devices that are not
     // orientation-aware are affected by display rotation.
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     clearViewports();
     prepareDisplay(ui::ROTATION_0);
@@ -4181,7 +4186,7 @@ TEST_F(CursorInputMapperTest, Process_WhenNotOrientationAware_ShouldRotateMotion
 
 TEST_F(CursorInputMapperTest, Process_ShouldHandleAllButtons) {
     addConfigurationProperty("cursor.mode", "pointer");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     mFakePointerController->setBounds(0, 0, 800 - 1, 480 - 1);
     mFakePointerController->setPosition(100, 200);
@@ -4435,7 +4440,7 @@ TEST_F(CursorInputMapperTest, Process_ShouldHandleAllButtons) {
 
 TEST_F(CursorInputMapperTest, Process_WhenModeIsPointer_ShouldMoveThePointerAround) {
     addConfigurationProperty("cursor.mode", "pointer");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     mFakePointerController->setBounds(0, 0, 800 - 1, 480 - 1);
     mFakePointerController->setPosition(100, 200);
@@ -4456,7 +4461,7 @@ TEST_F(CursorInputMapperTest, Process_WhenModeIsPointer_ShouldMoveThePointerArou
 TEST_F(CursorInputMapperTest, Process_PointerCapture) {
     addConfigurationProperty("cursor.mode", "pointer");
     mFakePolicy->setPointerCapture(true);
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     NotifyDeviceResetArgs resetArgs;
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
@@ -4548,7 +4553,7 @@ TEST_F(CursorInputMapperTest, PointerCaptureDisablesVelocityProcessing) {
     const VelocityControlParameters testParams(/*scale=*/5.f, /*low threshold=*/0.f,
                                                /*high threshold=*/100.f, /*acceleration=*/10.f);
     mFakePolicy->setVelocityControlParams(testParams);
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     NotifyDeviceResetArgs resetArgs;
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
@@ -4589,7 +4594,7 @@ TEST_F(CursorInputMapperTest, PointerCaptureDisablesVelocityProcessing) {
 
 TEST_F(CursorInputMapperTest, PointerCaptureDisablesOrientationChanges) {
     addConfigurationProperty("cursor.mode", "pointer");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     NotifyDeviceResetArgs resetArgs;
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
@@ -4630,7 +4635,7 @@ TEST_F(CursorInputMapperTest, PointerCaptureDisablesOrientationChanges) {
 }
 
 TEST_F(CursorInputMapperTest, ConfigureDisplayId_NoAssociatedViewport) {
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     // Set up the default display.
     prepareDisplay(ui::ROTATION_90);
@@ -4656,7 +4661,7 @@ TEST_F(CursorInputMapperTest, ConfigureDisplayId_NoAssociatedViewport) {
 }
 
 TEST_F(CursorInputMapperTest, ConfigureDisplayId_WithAssociatedViewport) {
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     // Set up the default display.
     prepareDisplay(ui::ROTATION_90);
@@ -4682,7 +4687,7 @@ TEST_F(CursorInputMapperTest, ConfigureDisplayId_WithAssociatedViewport) {
 }
 
 TEST_F(CursorInputMapperTest, ConfigureDisplayId_IgnoresEventsForMismatchedPointerDisplay) {
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     // Set up the default display as the display on which the pointer should be shown.
     prepareDisplay(ui::ROTATION_90);
@@ -4715,7 +4720,7 @@ protected:
 
 TEST_F(BluetoothCursorInputMapperTest, TimestampSmoothening) {
     addConfigurationProperty("cursor.mode", "pointer");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     nsecs_t kernelEventTime = ARBITRARY_TIME;
     nsecs_t expectedEventTime = ARBITRARY_TIME;
@@ -4742,7 +4747,7 @@ TEST_F(BluetoothCursorInputMapperTest, TimestampSmoothening) {
 
 TEST_F(BluetoothCursorInputMapperTest, TimestampSmootheningIsCapped) {
     addConfigurationProperty("cursor.mode", "pointer");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     nsecs_t expectedEventTime = ARBITRARY_TIME;
     process(mapper, ARBITRARY_TIME, READ_TIME, EV_REL, REL_X, 1);
@@ -4779,7 +4784,7 @@ TEST_F(BluetoothCursorInputMapperTest, TimestampSmootheningIsCapped) {
 
 TEST_F(BluetoothCursorInputMapperTest, TimestampSmootheningNotUsed) {
     addConfigurationProperty("cursor.mode", "pointer");
-    CursorInputMapper& mapper = addMapperAndConfigure<CursorInputMapper>();
+    CursorInputMapper& mapper = constructAndAddMapper<CursorInputMapper>();
 
     nsecs_t kernelEventTime = ARBITRARY_TIME;
     nsecs_t expectedEventTime = ARBITRARY_TIME;
@@ -5069,7 +5074,7 @@ void SingleTouchInputMapperTest::processSync(SingleTouchInputMapper& mapper) {
 TEST_F(SingleTouchInputMapperTest, GetSources_WhenDeviceTypeIsNotSpecifiedAndNotACursor_ReturnsPointer) {
     prepareButtons();
     prepareAxes(POSITION);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     ASSERT_EQ(AINPUT_SOURCE_MOUSE, mapper.getSources());
 }
@@ -5078,7 +5083,7 @@ TEST_F(SingleTouchInputMapperTest, GetSources_WhenDeviceTypeIsTouchScreen_Return
     prepareButtons();
     prepareAxes(POSITION);
     addConfigurationProperty("touch.deviceType", "touchScreen");
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     ASSERT_EQ(AINPUT_SOURCE_TOUCHSCREEN, mapper.getSources());
 }
@@ -5089,7 +5094,7 @@ TEST_F(SingleTouchInputMapperTest, GetKeyCodeState) {
     prepareButtons();
     prepareAxes(POSITION);
     prepareVirtualKeys();
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     // Unknown key.
     ASSERT_EQ(AKEY_STATE_UNKNOWN, mapper.getKeyCodeState(AINPUT_SOURCE_ANY, AKEYCODE_A));
@@ -5117,7 +5122,7 @@ TEST_F(SingleTouchInputMapperTest, GetScanCodeState) {
     prepareButtons();
     prepareAxes(POSITION);
     prepareVirtualKeys();
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     // Unknown key.
     ASSERT_EQ(AKEY_STATE_UNKNOWN, mapper.getScanCodeState(AINPUT_SOURCE_ANY, KEY_A));
@@ -5145,7 +5150,7 @@ TEST_F(SingleTouchInputMapperTest, MarkSupportedKeyCodes) {
     prepareButtons();
     prepareAxes(POSITION);
     prepareVirtualKeys();
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     uint8_t flags[2] = { 0, 0 };
     ASSERT_TRUE(
@@ -5160,7 +5165,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenVirtualKeyIsPressedAndReleasedNor
     prepareButtons();
     prepareAxes(POSITION);
     prepareVirtualKeys();
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     mReader->getContext()->setGlobalMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON);
 
@@ -5210,7 +5215,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenVirtualKeyIsPressedAndMovedOutOfB
     prepareButtons();
     prepareAxes(POSITION);
     prepareVirtualKeys();
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     mReader->getContext()->setGlobalMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON);
 
@@ -5331,7 +5336,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenTouchStartsOutsideDisplayAndMoves
     prepareButtons();
     prepareAxes(POSITION);
     prepareVirtualKeys();
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     mReader->getContext()->setGlobalMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON);
 
@@ -5406,7 +5411,7 @@ TEST_F(SingleTouchInputMapperTest, Process_NormalSingleTouchGesture_VirtualDispl
     prepareButtons();
     prepareAxes(POSITION);
     prepareVirtualKeys();
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     mReader->getContext()->setGlobalMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON);
 
@@ -5502,7 +5507,7 @@ TEST_F(SingleTouchInputMapperTest, Process_NormalSingleTouchGesture) {
     prepareButtons();
     prepareAxes(POSITION);
     prepareVirtualKeys();
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     mReader->getContext()->setGlobalMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON);
 
@@ -5592,7 +5597,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenOrientationAware_DoesNotRotateMot
     prepareAxes(POSITION);
     // InputReader works in the un-rotated coordinate space, so orientation-aware devices do not
     // need to be rotated. Touchscreens are orientation-aware by default.
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     NotifyMotionArgs args;
 
@@ -5617,7 +5622,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenNotOrientationAware_RotatesMotion
     // Since InputReader works in the un-rotated coordinate space, only devices that are not
     // orientation-aware are affected by display rotation.
     addConfigurationProperty("touch.orientationAware", "0");
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     NotifyMotionArgs args;
 
@@ -5686,7 +5691,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenOrientation0_RotatesMotions) {
     addConfigurationProperty("touch.orientation", "ORIENTATION_0");
     clearViewports();
     prepareDisplay(ui::ROTATION_0);
-    auto& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    auto& mapper = constructAndAddMapper<SingleTouchInputMapper>();
     NotifyMotionArgs args;
 
     // Orientation 0.
@@ -5710,7 +5715,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenOrientation90_RotatesMotions) {
     addConfigurationProperty("touch.orientation", "ORIENTATION_90");
     clearViewports();
     prepareDisplay(ui::ROTATION_0);
-    auto& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    auto& mapper = constructAndAddMapper<SingleTouchInputMapper>();
     NotifyMotionArgs args;
 
     // Orientation 90.
@@ -5734,7 +5739,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenOrientation180_RotatesMotions) {
     addConfigurationProperty("touch.orientation", "ORIENTATION_180");
     clearViewports();
     prepareDisplay(ui::ROTATION_0);
-    auto& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    auto& mapper = constructAndAddMapper<SingleTouchInputMapper>();
     NotifyMotionArgs args;
 
     // Orientation 180.
@@ -5758,7 +5763,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenOrientation270_RotatesMotions) {
     addConfigurationProperty("touch.orientation", "ORIENTATION_270");
     clearViewports();
     prepareDisplay(ui::ROTATION_0);
-    auto& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    auto& mapper = constructAndAddMapper<SingleTouchInputMapper>();
     NotifyMotionArgs args;
 
     // Orientation 270.
@@ -5782,7 +5787,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenOrientationSpecified_RotatesMotio
     // orientation-aware are affected by display rotation.
     addConfigurationProperty("touch.orientationAware", "0");
     addConfigurationProperty("touch.orientation", "ORIENTATION_90");
-    auto& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    auto& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     NotifyMotionArgs args;
 
@@ -5849,7 +5854,7 @@ TEST_F(SingleTouchInputMapperTest, Process_IgnoresTouchesOutsidePhysicalFrame) {
     prepareAxes(POSITION);
     addConfigurationProperty("touch.orientationAware", "1");
     prepareDisplay(ui::ROTATION_0);
-    auto& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    auto& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     // Set a physical frame in the display viewport.
     auto viewport = mFakePolicy->getDisplayViewportByType(ViewportType::INTERNAL);
@@ -5903,7 +5908,7 @@ TEST_F(SingleTouchInputMapperTest, Process_AllAxes_DefaultCalibration) {
     prepareDisplay(ui::ROTATION_0);
     prepareButtons();
     prepareAxes(POSITION | PRESSURE | TOOL | DISTANCE | TILT);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     // These calculations are based on the input device calibration documentation.
     int32_t rawX = 100;
@@ -5948,7 +5953,7 @@ TEST_F(SingleTouchInputMapperTest, Process_XYAxes_AffineCalibration) {
     prepareLocationCalibration();
     prepareButtons();
     prepareAxes(POSITION);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     int32_t rawX = 100;
     int32_t rawY = 200;
@@ -5970,7 +5975,7 @@ TEST_F(SingleTouchInputMapperTest, Process_ShouldHandleAllButtons) {
     prepareDisplay(ui::ROTATION_0);
     prepareButtons();
     prepareAxes(POSITION);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
     NotifyKeyArgs keyArgs;
@@ -6213,7 +6218,7 @@ TEST_F(SingleTouchInputMapperTest, Process_ShouldHandleAllToolTypes) {
     prepareDisplay(ui::ROTATION_0);
     prepareButtons();
     prepareAxes(POSITION);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -6349,7 +6354,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenBtnTouchPresent_HoversIfItsValueI
     prepareButtons();
     prepareAxes(POSITION);
     mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOOL_FINGER, 0, AKEYCODE_UNKNOWN, 0);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -6420,7 +6425,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenAbsPressureIsPresent_HoversIfItsV
     prepareDisplay(ui::ROTATION_0);
     prepareButtons();
     prepareAxes(POSITION | PRESSURE);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -6491,7 +6496,7 @@ TEST_F(SingleTouchInputMapperTest, Reset_CancelsOngoingGesture) {
     prepareDisplay(ui::ROTATION_0);
     prepareButtons();
     prepareAxes(POSITION | PRESSURE);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     // Touch down.
     processDown(mapper, 100, 200);
@@ -6513,7 +6518,7 @@ TEST_F(SingleTouchInputMapperTest, Reset_RecreatesTouchState) {
     prepareDisplay(ui::ROTATION_0);
     prepareButtons();
     prepareAxes(POSITION | PRESSURE);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     // Set the initial state for the touch pointer.
     mFakeEventHub->setAbsoluteAxisValue(EVENTHUB_ID, ABS_X, 100);
@@ -6541,7 +6546,7 @@ TEST_F(SingleTouchInputMapperTest,
     prepareDisplay(ui::ROTATION_0);
     prepareButtons();
     prepareAxes(POSITION);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
     NotifyMotionArgs motionArgs;
 
     // Down.
@@ -6569,7 +6574,7 @@ TEST_F(SingleTouchInputMapperTest,
     prepareDisplay(ui::ROTATION_0);
     prepareButtons();
     prepareAxes(POSITION);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
     NotifyMotionArgs motionArgs;
 
@@ -6629,7 +6634,7 @@ TEST_F(SingleTouchInputMapperTest, ButtonIsReleasedOnTouchUp) {
     prepareDisplay(ui::ROTATION_0);
     prepareButtons();
     prepareAxes(POSITION);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
 
     // Press a stylus button.
@@ -6670,7 +6675,7 @@ TEST_F(SingleTouchInputMapperTest, StylusButtonMotionEventsDisabled) {
 
     mFakePolicy->setStylusButtonMotionEventsEnabled(false);
 
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
 
     // Press a stylus button.
@@ -6707,7 +6712,7 @@ TEST_F(SingleTouchInputMapperTest, WhenDeviceTypeIsSetToTouchNavigation_setsCorr
     prepareDisplay(ui::ROTATION_0);
     prepareButtons();
     prepareAxes(POSITION);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
 
     ASSERT_EQ(AINPUT_SOURCE_TOUCH_NAVIGATION, mapper.getSources());
@@ -6723,7 +6728,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenConfigEnabled_ShouldShowDirectSty
     mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOOL_PEN, 0, AKEYCODE_UNKNOWN, 0);
     mFakePolicy->setPointerController(fakePointerController);
     mFakePolicy->setStylusPointerIconEnabled(true);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     processKey(mapper, BTN_TOOL_PEN, 1);
     processMove(mapper, 100, 200);
@@ -6747,7 +6752,7 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenConfigDisabled_ShouldNotShowDirec
     mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOOL_PEN, 0, AKEYCODE_UNKNOWN, 0);
     mFakePolicy->setPointerController(fakePointerController);
     mFakePolicy->setStylusPointerIconEnabled(false);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     processKey(mapper, BTN_TOOL_PEN, 1);
     processMove(mapper, 100, 200);
@@ -6765,7 +6770,7 @@ TEST_F(SingleTouchInputMapperTest, WhenDeviceTypeIsChangedToTouchNavigation_upda
     prepareDisplay(ui::ROTATION_0);
     prepareButtons();
     prepareAxes(POSITION);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     // Ensure that the device is created as a touchscreen, not touch navigation.
     ASSERT_EQ(AINPUT_SOURCE_TOUCHSCREEN, mapper.getSources());
@@ -6799,7 +6804,7 @@ TEST_F(SingleTouchInputMapperTest, HoverEventsOutsidePhysicalFrameAreIgnored) {
     mFakePolicy->updateViewport(*viewport);
     configureDevice(InputReaderConfiguration::Change::DISPLAY_INFO);
 
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     // Hovering inside the physical frame produces events.
     processKey(mapper, BTN_TOOL_PEN, 1);
@@ -6905,7 +6910,7 @@ TEST_F(TouchDisplayProjectionTest, IgnoresTouchesOutsidePhysicalDisplay) {
 
     prepareButtons();
     prepareAxes(POSITION);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -6940,7 +6945,7 @@ TEST_F(TouchDisplayProjectionTest, EmitsTouchDownAfterEnteringPhysicalDisplay) {
 
     prepareButtons();
     prepareAxes(POSITION);
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -7069,7 +7074,7 @@ TEST_P(TouchscreenPrecisionTestsFixture, OrientationPrecision) {
     addConfigurationProperty("touch.orientation", ftl::enum_string(touchscreenOrientation).c_str());
     prepareDisplay(ui::ROTATION_0);
 
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     // If the touchscreen is installed in a rotated orientation relative to the display (i.e. in
     // orientations of either 90 or 270) this means the display's natural resolution will be
@@ -7121,7 +7126,7 @@ TEST_P(TouchscreenPrecisionTestsFixture, RotationPrecisionWhenOrientationAware) 
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(displayRotation);
 
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     const auto& expectedPoints = kMappedCorners.at(displayRotation);
 
@@ -7159,7 +7164,7 @@ TEST_P(TouchscreenPrecisionTestsFixture, RotationPrecisionOrientationAwareInOri2
     addConfigurationProperty("touch.deviceType", "touchScreen");
     addConfigurationProperty("touch.orientation", "ORIENTATION_270");
 
-    SingleTouchInputMapper& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
     // Ori 270, so width and height swapped
     const Rect physicalFrame{0, 0, DISPLAY_HEIGHT, DISPLAY_WIDTH};
@@ -7195,7 +7200,7 @@ TEST_P(TouchscreenPrecisionTestsFixture, MotionRangesAreOrientedInRotatedDisplay
     prepareDisplay(displayRotation);
 
     __attribute__((unused)) SingleTouchInputMapper& mapper =
-            addMapperAndConfigure<SingleTouchInputMapper>();
+            constructAndAddMapper<SingleTouchInputMapper>();
 
     const InputDeviceInfo deviceInfo = mDevice->getDeviceInfo();
     // MotionRanges use display pixels as their units
@@ -7240,7 +7245,7 @@ public:
         prepareDisplay(ui::ROTATION_0);
         prepareButtons();
         prepareAxes(POSITION);
-        auto& mapper = addMapperAndConfigure<SingleTouchInputMapper>();
+        auto& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
         mStylusState.when = ARBITRARY_TIME;
         mStylusState.pressure = 0.f;
@@ -7729,7 +7734,7 @@ TEST_F(MultiTouchInputMapperTest, Process_NormalMultiTouchGesture_WithoutTrackin
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION);
     prepareVirtualKeys();
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     mReader->getContext()->setGlobalMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON);
 
@@ -8013,7 +8018,7 @@ TEST_F(MultiTouchInputMapperTest, AxisResolution_IsPopulated) {
     mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_MT_WIDTH_MINOR, RAW_TOOL_MIN, RAW_TOOL_MAX,
                                    /*flat*/ 0, /*flat*/ 0, /*resolution*/ 15);
 
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     // X and Y axes
     assertAxisResolution(mapper, AMOTION_EVENT_AXIS_X, 10 / X_PRECISION);
@@ -8037,7 +8042,7 @@ TEST_F(MultiTouchInputMapperTest, TouchMajorAndMinorAxes_DoNotAppearIfNotSupport
 
     // We do not add ABS_MT_TOUCH_MAJOR / MINOR or ABS_MT_WIDTH_MAJOR / MINOR axes
 
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     // Touch major and minor
     assertAxisNotPresent(mapper, AMOTION_EVENT_AXIS_TOUCH_MAJOR);
@@ -8052,7 +8057,7 @@ TEST_F(MultiTouchInputMapperTest, Process_NormalMultiTouchGesture_WithTrackingId
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID);
     prepareVirtualKeys();
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     mReader->getContext()->setGlobalMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON);
 
@@ -8223,7 +8228,7 @@ TEST_F(MultiTouchInputMapperTest, Process_NormalMultiTouchGesture_WithSlots) {
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT);
     prepareVirtualKeys();
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     mReader->getContext()->setGlobalMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON);
 
@@ -8388,7 +8393,7 @@ TEST_F(MultiTouchInputMapperTest, Process_AllAxes_WithDefaultCalibration) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | TOUCH | TOOL | PRESSURE | ORIENTATION | ID | MINOR | DISTANCE);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     // These calculations are based on the input device calibration documentation.
     int32_t rawX = 100;
@@ -8438,7 +8443,7 @@ TEST_F(MultiTouchInputMapperTest, Process_TouchAndToolAxes_GeometricCalibration)
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | TOUCH | TOOL | MINOR);
     addConfigurationProperty("touch.size.calibration", "geometric");
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     // These calculations are based on the input device calibration documentation.
     int32_t rawX = 100;
@@ -8478,7 +8483,7 @@ TEST_F(MultiTouchInputMapperTest, Process_TouchAndToolAxes_SummedLinearCalibrati
     addConfigurationProperty("touch.size.scale", "10");
     addConfigurationProperty("touch.size.bias", "160");
     addConfigurationProperty("touch.size.isSummed", "1");
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     // These calculations are based on the input device calibration documentation.
     // Note: We only provide a single common touch/tool value because the device is assumed
@@ -8528,7 +8533,7 @@ TEST_F(MultiTouchInputMapperTest, Process_TouchAndToolAxes_AreaCalibration) {
     addConfigurationProperty("touch.size.calibration", "area");
     addConfigurationProperty("touch.size.scale", "43");
     addConfigurationProperty("touch.size.bias", "3");
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     // These calculations are based on the input device calibration documentation.
     int32_t rawX = 100;
@@ -8560,7 +8565,7 @@ TEST_F(MultiTouchInputMapperTest, Process_PressureAxis_AmplitudeCalibration) {
     prepareAxes(POSITION | PRESSURE);
     addConfigurationProperty("touch.pressure.calibration", "amplitude");
     addConfigurationProperty("touch.pressure.scale", "0.01");
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     InputDeviceInfo info;
     mapper.populateDeviceInfo(info);
@@ -8592,7 +8597,7 @@ TEST_F(MultiTouchInputMapperTest, Process_ShouldHandleAllButtons) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
     NotifyKeyArgs keyArgs;
@@ -8835,7 +8840,7 @@ TEST_F(MultiTouchInputMapperTest, Process_ShouldHandleMappedStylusButtons) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     mFakeEventHub->addKey(EVENTHUB_ID, BTN_A, 0, AKEYCODE_STYLUS_BUTTON_PRIMARY, 0);
     mFakeEventHub->addKey(EVENTHUB_ID, 0, 0xabcd, AKEYCODE_STYLUS_BUTTON_SECONDARY, 0);
@@ -8892,7 +8897,7 @@ TEST_F(MultiTouchInputMapperTest, Process_ShouldHandleAllToolTypes) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT | TOOL_TYPE);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -9043,7 +9048,7 @@ TEST_F(MultiTouchInputMapperTest, Process_WhenBtnTouchPresent_HoversIfItsValueIs
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT);
     mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOUCH, 0, AKEYCODE_UNKNOWN, 0);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -9113,7 +9118,7 @@ TEST_F(MultiTouchInputMapperTest, Process_WhenAbsMTPressureIsPresent_HoversIfIts
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT | PRESSURE);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -9194,7 +9199,7 @@ TEST_F(MultiTouchInputMapperTest, Configure_AssignsDisplayPort) {
 
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareAxes(POSITION);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     mFakePolicy->addInputPortAssociation(DEVICE_LOCATION, hdmi1);
     mFakePolicy->addInputPortAssociation(usb2, hdmi2);
@@ -9224,7 +9229,7 @@ TEST_F(MultiTouchInputMapperTest, Configure_AssignsDisplayPort) {
 TEST_F(MultiTouchInputMapperTest, Configure_AssignsDisplayUniqueId) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareAxes(POSITION);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     mFakePolicy->addInputUniqueIdAssociation(DEVICE_LOCATION, VIRTUAL_DISPLAY_UNIQUE_ID);
 
@@ -9253,7 +9258,7 @@ TEST_F(MultiTouchInputMapperTest, Process_Pointer_ShouldHandleDisplayId) {
 
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     // Check source is mouse that would obtain the PointerController.
     ASSERT_EQ(AINPUT_SOURCE_MOUSE, mapper.getSources());
@@ -9273,7 +9278,7 @@ TEST_F(MultiTouchInputMapperTest, Process_Pointer_ShouldHandleDisplayId) {
 TEST_F(MultiTouchInputMapperTest, Process_SendsReadTime) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareAxes(POSITION);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     prepareDisplay(ui::ROTATION_0);
     process(mapper, 10, /*readTime=*/11, EV_ABS, ABS_MT_TRACKING_ID, 1);
@@ -9304,7 +9309,7 @@ TEST_F(MultiTouchInputMapperTest, WhenViewportIsNotActive_TouchesAreDropped) {
                                     /*isActive=*/false, UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
     configureDevice(InputReaderConfiguration::Change::DISPLAY_INFO);
     prepareAxes(POSITION);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
     processPosition(mapper, 100, 100);
@@ -9324,7 +9329,7 @@ TEST_F(MultiTouchInputMapperTest, WhenViewportIsNotActive_TouchesAreProcessed) {
                                     /*isActive=*/false, UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
     configureDevice(InputReaderConfiguration::Change::DISPLAY_INFO);
     prepareAxes(POSITION);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
     processPosition(mapper, 100, 100);
@@ -9346,7 +9351,7 @@ TEST_F(MultiTouchInputMapperTest, Process_DeactivateViewport_AbortTouches) {
 
     configureDevice(InputReaderConfiguration::Change::DISPLAY_INFO);
     prepareAxes(POSITION);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     // Finger down
     int32_t x = 100, y = 100;
@@ -9389,7 +9394,7 @@ TEST_F(MultiTouchInputMapperTest, Process_Pointer_ShowTouches) {
     // Setup the first touch screen device.
     prepareAxes(POSITION | ID | SLOT);
     addConfigurationProperty("touch.deviceType", "touchScreen");
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     // Create the second touch screen device, and enable multi fingers.
     const std::string USB2 = "USB2";
@@ -9413,9 +9418,9 @@ TEST_F(MultiTouchInputMapperTest, Process_Pointer_ShowTouches) {
                                             String8("touchScreen"));
 
     // Setup the second touch screen device.
-    MultiTouchInputMapper& mapper2 =
-            device2->addMapper<MultiTouchInputMapper>(SECOND_EVENTHUB_ID,
-                                                      mFakePolicy->getReaderConfiguration());
+    device2->addEmptyEventHubDevice(SECOND_EVENTHUB_ID);
+    MultiTouchInputMapper& mapper2 = device2->constructAndAddMapper<
+            MultiTouchInputMapper>(SECOND_EVENTHUB_ID, mFakePolicy->getReaderConfiguration());
     std::list<NotifyArgs> unused =
             device2->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
                                /*changes=*/{});
@@ -9480,7 +9485,7 @@ TEST_F(MultiTouchInputMapperTest, VideoFrames_ReceivedByListener) {
     prepareAxes(POSITION);
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
     // Unrotated video frame
@@ -9504,7 +9509,7 @@ TEST_F(MultiTouchInputMapperTest, VideoFrames_ReceivedByListener) {
 TEST_F(MultiTouchInputMapperTest, VideoFrames_AreNotRotated) {
     prepareAxes(POSITION);
     addConfigurationProperty("touch.deviceType", "touchScreen");
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
     // Unrotated video frame
     TouchVideoFrame frame(3, 2, {1, 2, 3, 4, 5, 6}, {1, 2});
     NotifyMotionArgs motionArgs;
@@ -9529,7 +9534,7 @@ TEST_F(MultiTouchInputMapperTest, VideoFrames_WhenNotOrientationAware_AreRotated
     // Since InputReader works in the un-rotated coordinate space, only devices that are not
     // orientation-aware are affected by display rotation.
     addConfigurationProperty("touch.orientationAware", "0");
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
     // Unrotated video frame
     TouchVideoFrame frame(3, 2, {1, 2, 3, 4, 5, 6}, {1, 2});
     NotifyMotionArgs motionArgs;
@@ -9560,7 +9565,7 @@ TEST_F(MultiTouchInputMapperTest, VideoFrames_WhenNotOrientationAware_AreRotated
 TEST_F(MultiTouchInputMapperTest, VideoFrames_MultipleFramesAreNotRotated) {
     prepareAxes(POSITION);
     addConfigurationProperty("touch.deviceType", "touchScreen");
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
     // Unrotated video frames. There's no rule that they must all have the same dimensions,
     // so mix these.
     TouchVideoFrame frame1(3, 2, {1, 2, 3, 4, 5, 6}, {1, 2});
@@ -9583,7 +9588,7 @@ TEST_F(MultiTouchInputMapperTest, VideoFrames_WhenNotOrientationAware_MultipleFr
     // Since InputReader works in the un-rotated coordinate space, only devices that are not
     // orientation-aware are affected by display rotation.
     addConfigurationProperty("touch.orientationAware", "0");
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
     // Unrotated video frames. There's no rule that they must all have the same dimensions,
     // so mix these.
     TouchVideoFrame frame1(3, 2, {1, 2, 3, 4, 5, 6}, {1, 2});
@@ -9620,7 +9625,7 @@ TEST_F(MultiTouchInputMapperTest, Configure_EnabledForAssociatedDisplay) {
 
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareAxes(POSITION);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     ASSERT_EQ(mDevice->isEnabled(), false);
 
@@ -9641,7 +9646,7 @@ TEST_F(MultiTouchInputMapperTest, Process_ShouldHandleSingleTouch) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT | TOOL_TYPE);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -9686,7 +9691,7 @@ TEST_F(MultiTouchInputMapperTest, Process_ShouldHandlePalmToolType_SinglePointer
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT | TOOL_TYPE);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -9734,7 +9739,7 @@ TEST_F(MultiTouchInputMapperTest, Process_ShouldHandlePalmToolType_TwoPointers) 
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT | TOOL_TYPE);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -9809,7 +9814,7 @@ TEST_F(MultiTouchInputMapperTest, Process_ShouldHandlePalmToolType_ShouldCancelW
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT | TOOL_TYPE);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -9907,7 +9912,7 @@ TEST_F(MultiTouchInputMapperTest, Process_ShouldHandlePalmToolType_KeepFirstPoin
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT | TOOL_TYPE);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -9979,7 +9984,7 @@ TEST_F(MultiTouchInputMapperTest, Process_MultiTouch_WithInvalidTrackingId) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT | PRESSURE);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -10036,7 +10041,7 @@ TEST_F(MultiTouchInputMapperTest, Reset_PreservesLastTouchState) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT | PRESSURE);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     // First finger down.
     processId(mapper, FIRST_TRACKING_ID);
@@ -10077,7 +10082,7 @@ TEST_F(MultiTouchInputMapperTest, Reset_PreservesLastTouchState_NoPointersDown) 
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT | PRESSURE);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     // First finger touches down and releases.
     processId(mapper, FIRST_TRACKING_ID);
@@ -10105,7 +10110,7 @@ TEST_F(MultiTouchInputMapperTest, StylusSourceIsAddedDynamicallyFromToolType) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT | PRESSURE | TOOL_TYPE);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
 
     // Even if the device supports reporting the ABS_MT_TOOL_TYPE axis, which could give it the
@@ -10160,7 +10165,7 @@ TEST_F(MultiTouchInputMapperTest, Process_WhenConfigEnabled_ShouldShowDirectStyl
             std::make_shared<FakePointerController>();
     mFakePolicy->setPointerController(fakePointerController);
     mFakePolicy->setStylusPointerIconEnabled(true);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     processId(mapper, FIRST_TRACKING_ID);
     processPressure(mapper, RAW_PRESSURE_MIN);
@@ -10187,7 +10192,7 @@ TEST_F(MultiTouchInputMapperTest, Process_WhenConfigDisabled_ShouldNotShowDirect
             std::make_shared<FakePointerController>();
     mFakePolicy->setPointerController(fakePointerController);
     mFakePolicy->setStylusPointerIconEnabled(false);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     processId(mapper, FIRST_TRACKING_ID);
     processPressure(mapper, RAW_PRESSURE_MIN);
@@ -10215,7 +10220,7 @@ TEST_F(MultiTouchInputMapperTest_ExternalDevice, Viewports_Fallback) {
     prepareAxes(POSITION);
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     ASSERT_EQ(AINPUT_SOURCE_TOUCHSCREEN, mapper.getSources());
 
@@ -10250,7 +10255,7 @@ TEST_F(MultiTouchInputMapperTest, Process_TouchpadCapture) {
     mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOUCH, 0, AKEYCODE_UNKNOWN, 0);
     mFakePolicy->setPointerCapture(true);
     mFakePolicy->setPointerController(fakePointerController);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     // captured touchpad should be a touchpad source
     NotifyDeviceResetArgs resetArgs;
@@ -10398,7 +10403,7 @@ TEST_F(MultiTouchInputMapperTest, Process_UnCapturedTouchpadPointer) {
     mFakeEventHub->addKey(EVENTHUB_ID, BTN_LEFT, 0, AKEYCODE_UNKNOWN, 0);
     mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOUCH, 0, AKEYCODE_UNKNOWN, 0);
     mFakePolicy->setPointerController(fakePointerController);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
     // run uncaptured pointer tests - pushes out generic events
     // FINGER 0 DOWN
     processId(mapper, 3);
@@ -10459,7 +10464,7 @@ TEST_F(MultiTouchInputMapperTest, WhenCapturedAndNotCaptured_GetSources) {
     mFakeEventHub->addKey(EVENTHUB_ID, BTN_LEFT, 0, AKEYCODE_UNKNOWN, 0);
     mFakePolicy->setPointerController(fakePointerController);
     mFakePolicy->setPointerCapture(false);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     // uncaptured touchpad should be a pointer device
     ASSERT_EQ(AINPUT_SOURCE_MOUSE, mapper.getSources());
@@ -10483,7 +10488,7 @@ TEST_F(BluetoothMultiTouchInputMapperTest, TimestampSmoothening) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT | PRESSURE);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     nsecs_t kernelEventTime = ARBITRARY_TIME;
     nsecs_t expectedEventTime = ARBITRARY_TIME;
@@ -10570,7 +10575,7 @@ TEST_F(MultiTouchPointerModeTest, PointerGestureMaxSwipeWidthSwipe) {
     // which is greater than fraction of the diagnal length of the touchpad (349).
     // Thus, MaxSwipWidth is 750.
     preparePointerMode(/*xResolution=*/25, /*yResolution=*/25);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
     NotifyMotionArgs motionArgs;
 
     // Two fingers down at once.
@@ -10630,7 +10635,7 @@ TEST_F(MultiTouchPointerModeTest, PointerGestureMaxSwipeWidthLowResolutionSwipe)
     // which is greater than fraction of the diagnal length of the touchpad (349).
     // Thus, MaxSwipWidth is the fraction of the diagnal length, 349.
     preparePointerMode(/*xResolution=*/5, /*yResolution=*/5);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
     NotifyMotionArgs motionArgs;
 
     // Two fingers down at once.
@@ -10686,7 +10691,7 @@ TEST_F(MultiTouchPointerModeTest, PointerGestureMaxSwipeWidthLowResolutionSwipe)
  */
 TEST_F(MultiTouchPointerModeTest, PointerGestureMaxSwipeWidthFreeform) {
     preparePointerMode(/*xResolution=*/25, /*yResolution=*/25);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
     NotifyMotionArgs motionArgs;
 
@@ -10781,7 +10786,7 @@ TEST_F(MultiTouchPointerModeTest, PointerGestureMaxSwipeWidthFreeform) {
 
 TEST_F(MultiTouchPointerModeTest, TwoFingerSwipeOffsets) {
     preparePointerMode(/*xResolution=*/25, /*yResolution=*/25);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
     NotifyMotionArgs motionArgs;
 
     // Place two fingers down.
@@ -10828,7 +10833,7 @@ TEST_F(MultiTouchPointerModeTest, TwoFingerSwipeOffsets) {
 TEST_F(MultiTouchPointerModeTest, WhenViewportActiveStatusChanged_PointerGestureIsReset) {
     preparePointerMode(/*xResolution=*/25, /*yResolution=*/25);
     mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOOL_PEN, 0, AKEYCODE_UNKNOWN, 0);
-    MultiTouchInputMapper& mapper = addMapperAndConfigure<MultiTouchInputMapper>();
+    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
 
     // Start a stylus gesture.
@@ -10904,7 +10909,7 @@ const int32_t JoystickInputMapperTest::RAW_Y_MAX = 32767;
 
 TEST_F(JoystickInputMapperTest, Configure_AssignsDisplayUniqueId) {
     prepareAxes();
-    JoystickInputMapper& mapper = addMapperAndConfigure<JoystickInputMapper>();
+    JoystickInputMapper& mapper = constructAndAddMapper<JoystickInputMapper>();
 
     mFakePolicy->addInputUniqueIdAssociation(DEVICE_LOCATION, VIRTUAL_DISPLAY_UNIQUE_ID);
 

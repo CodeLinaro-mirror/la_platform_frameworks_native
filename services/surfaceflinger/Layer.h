@@ -234,6 +234,7 @@ public:
         float desiredHdrSdrRatio = 1.f;
         gui::CachingHint cachingHint = gui::CachingHint::Enabled;
         int64_t latchedVsyncId = 0;
+        bool useVsyncIdForRefreshRateSelection = false;
     };
 
     explicit Layer(const LayerCreationArgs& args);
@@ -651,7 +652,7 @@ public:
 
     gui::WindowInfo::Type getWindowType() const { return mWindowType; }
 
-    void updateMirrorInfo();
+    bool updateMirrorInfo(const std::deque<Layer*>& cloneRootsPendingUpdates);
 
     /*
      * doTransaction - process the transaction. This is a good place to figure
@@ -876,6 +877,7 @@ public:
     // TODO(b/238781169) Remove direct calls to RenderEngine::drawLayers that don't go through
     // CompositionEngine to create a single path for composing layers.
     void updateSnapshot(bool updateGeometry);
+    void updateChildrenSnapshots(bool updateGeometry);
     void updateMetadataSnapshot(const LayerMetadata& parentMetadata);
     void updateRelativeMetadataSnapshot(const LayerMetadata& relativeLayerMetadata,
                                         std::unordered_set<Layer*>& visited);
@@ -1132,8 +1134,6 @@ private:
     }
 
     bool hasSomethingToDraw() const { return hasEffect() || hasBufferOrSidebandStream(); }
-
-    void updateChildrenSnapshots(bool updateGeometry);
 
     // Fills the provided vector with the currently available JankData and removes the processed
     // JankData from the pending list.
