@@ -15,5 +15,5 @@
 -->
 
 <permissions>
-    <feature name="android.software.midi" />
+    <!--feature name="android.software.midi" / -->
 </permissions>
