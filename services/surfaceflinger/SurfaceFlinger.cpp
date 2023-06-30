@@ -1686,6 +1686,8 @@ void SurfaceFlinger::performSetActiveMode() {
     ATRACE_CALL();
     ALOGV("%s", __FUNCTION__);
 
+    std::optional<PhysicalDisplayId> processDisplayWithModeChange;
+
     for (const auto& iter : mDisplays) {
         const auto& display = iter.second;
         if (!display || !display->isInternal()) {
@@ -1753,16 +1755,26 @@ void SurfaceFlinger::performSetActiveMode() {
 
         const auto upcomingMode = display->getMode(desiredActiveMode->mode->getId());
         if (display->getActiveMode()->getSize() != upcomingMode->getSize()) {
-           auto& state = mCurrentState.displays.editValueFor(display->getDisplayToken());
-           // We need to generate new sequenceId in order to recreate the display (and this
-           // way the framebuffer).
-           state.sequenceId = DisplayDeviceState{}.sequenceId;
-           state.physical->activeMode = upcomingMode;
-           processDisplayChangesLocked();
+           processDisplayWithModeChange = display->getPhysicalId();
         }
 
         // Scheduler will submit an empty frame to HWC if needed.
         mSetActiveModePending = true;
+    }
+
+    if (processDisplayWithModeChange) {
+       const auto display = getDisplayDeviceLocked(*processDisplayWithModeChange);
+       if (!display) {
+           return;
+       }
+       const auto desiredActiveMode = display->getDesiredActiveMode();
+       const auto upcomingMode = display->getMode(desiredActiveMode->mode->getId());
+       auto& state = mCurrentState.displays.editValueFor(display->getDisplayToken());
+       // We need to generate new sequenceId in order to recreate the display (and this
+       // way the framebuffer).
+       state.sequenceId = DisplayDeviceState{}.sequenceId;
+       state.physical->activeMode = upcomingMode;
+       processDisplayChangesLocked();
     }
 }
 
