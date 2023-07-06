@@ -15,5 +15,5 @@
 -->
 
 <permissions>
-    <feature name="android.software.secure_lock_screen" />
+    <feature name="android.software.secure_lock_screen" notLowRam="true" />
 </permissions>

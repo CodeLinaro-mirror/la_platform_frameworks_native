@@ -15,5 +15,5 @@
 -->
 
 <permissions>
-    <feature name="android.software.app_widgets" />
+    <feature name="android.software.app_widgets" notLowRam="true" />
 </permissions>

@@ -15,5 +15,5 @@
 -->
 
 <permissions>
-    <feature name="android.software.companion_device_setup" />
+    <feature name="android.software.companion_device_setup" notLowRam="true" />
 </permissions>

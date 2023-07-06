@@ -15,5 +15,5 @@
 -->
 
 <permissions>
-    <feature name="android.software.backup" />
+    <feature name="android.software.backup" notLowRam="true" />
 </permissions>

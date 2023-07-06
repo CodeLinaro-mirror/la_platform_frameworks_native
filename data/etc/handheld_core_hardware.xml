@@ -51,7 +51,7 @@
     <!--feature name="android.software.activities_on_secondary_displays" notLowRam="true" / -->
     <!--feature name="android.software.print" notLowRam="true" / -->
     <!--feature name="android.software.companion_device_setup" notLowRam="true" / -->
-    <feature name="android.software.autofill" />
+    <feature name="android.software.autofill" notLowRam="true" />
     <feature name="android.software.cant_save_state" />
     <!--feature name="android.software.secure_lock_screen" notLowRam="true" / -->
 
