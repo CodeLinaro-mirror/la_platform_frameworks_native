@@ -15,5 +15,5 @@
 -->
 
 <permissions>
-    <feature name="android.software.picture_in_picture" />
+    <feature name="android.software.picture_in_picture" notLowRam="false" />
 </permissions>

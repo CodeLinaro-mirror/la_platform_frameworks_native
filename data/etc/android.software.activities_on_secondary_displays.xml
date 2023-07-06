@@ -15,5 +15,5 @@
 -->
 
 <permissions>
-    <feature name="android.software.activities_on_secondary_displays" />
+    <feature name="android.software.activities_on_secondary_displays" notLowRam="false" />
 </permissions>
