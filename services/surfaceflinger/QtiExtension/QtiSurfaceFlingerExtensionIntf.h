@@ -77,7 +77,7 @@ public:
      * Methods used by SurfaceFlinger DisplayHardware.
      */
     virtual status_t qtiSetDisplayElapseTime(
-            std::chrono::steady_clock::time_point earliestPresentTime) const = 0;
+            std::optional<std::chrono::steady_clock::time_point> earliestPresentTime) const = 0;
 
     /*
      * Methods that call the DisplayExtension APIs.
@@ -111,8 +111,8 @@ public:
     /*
      * Methods for Virtual, WiFi, and Secure Displays
      */
-    virtual VirtualDisplayId qtiAcquireVirtualDisplay(ui::Size, ui::PixelFormat,
-                                                      bool canAllocateHwcForVDS) = 0;
+    virtual std::optional<VirtualDisplayId> qtiAcquireVirtualDisplay(ui::Size, ui::PixelFormat,
+                                                                     bool canAllocateHwcForVDS) = 0;
     virtual bool qtiCanAllocateHwcDisplayIdForVDS(const DisplayDeviceState& state) = 0;
     virtual bool qtiCanAllocateHwcDisplayIdForVDS(uint64_t usage) = 0;
     virtual void qtiCheckVirtualDisplayHint(const Vector<DisplayState>& displays) = 0;
@@ -130,8 +130,10 @@ public:
     virtual void qtiSetRefreshRateTo(int32_t refreshRate) = 0;
     virtual void qtiSyncToDisplayHardware() = 0;
     virtual void qtiUpdateSmomoState() = 0;
-    virtual void qtiUpdateSmomoLayerInfo(TransactionState& ts, int64_t desiredPresentTime,
-                                         bool isAutoTimestamp, uint64_t transactionId) = 0;
+    virtual void qtiUpdateSmomoLayerInfo(sp<Layer> layer, int64_t desiredPresentTime,
+                                         bool isAutoTimestamp,
+                                         std::shared_ptr<renderengine::ExternalTexture> buffer,
+                                         BufferData& bufferData) = 0;
     virtual void qtiScheduleCompositeImmed() = 0;
     virtual void qtiSetPresentTime(uint32_t layerStackId, int sequence,
                                    nsecs_t desiredPresentTime) = 0;
@@ -156,6 +158,10 @@ public:
      */
     virtual void qtiStartUnifiedDraw() = 0;
     virtual void qtiTryDrawMethod(sp<DisplayDevice> display) = 0;
+
+    virtual bool qtiIsFpsDeferNeeded(float newFpsRequest) = 0;
+    virtual void qtiNotifyResolutionSwitch(int displayId, int32_t width, int32_t height,
+                                           int32_t vsyncPeriod) = 0;
 };
 
 } // namespace android::surfaceflingerextension

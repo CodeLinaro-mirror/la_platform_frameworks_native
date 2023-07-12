@@ -332,7 +332,7 @@ void LayerProtoFromSnapshotGenerator::writeHierarchyToProto(
     if (mTraceFlags & LayerTracing::TRACE_COMPOSITION) {
         auto it = mLegacyLayers.find(layer.id);
         if (it != mLegacyLayers.end()) {
-            it->second->writeCompositionStateToProto(layerProto);
+            it->second->writeCompositionStateToProto(layerProto, snapshot->outputFilter.layerStack);
         }
     }
 
@@ -392,7 +392,11 @@ void LayerProtoHelper::writeSnapshotToProto(LayerProto* layerInfo,
 
     layerInfo->set_id(snapshot.uniqueSequence);
     layerInfo->set_original_id(snapshot.sequence);
-    layerInfo->set_name(requestedState.name);
+    if (!snapshot.path.isClone()) {
+        layerInfo->set_name(requestedState.name);
+    } else {
+        layerInfo->set_name(requestedState.name + "(Mirror)");
+    }
     layerInfo->set_type("Layer");
 
     LayerProtoHelper::writeToProto(requestedState.transparentRegion,

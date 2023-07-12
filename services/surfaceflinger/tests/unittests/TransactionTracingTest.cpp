@@ -21,8 +21,10 @@
 #include <cstdint>
 #include "Client.h"
 
+#include <layerproto/LayerProtoHeader.h>
 #include "FrontEnd/LayerCreationArgs.h"
 #include "FrontEnd/Update.h"
+#include "Tracing/LayerTracing.h"
 #include "Tracing/RingBuffer.h"
 #include "Tracing/TransactionTracing.h"
 
@@ -65,8 +67,14 @@ protected:
         ASSERT_EQ(actualProto.transactions().size(),
                   static_cast<int32_t>(expectedTransactions.size()));
         for (uint32_t i = 0; i < expectedTransactions.size(); i++) {
-            EXPECT_EQ(actualProto.transactions(static_cast<int32_t>(i)).pid(),
-                      expectedTransactions[i].originPid);
+            const auto expectedTransaction = expectedTransactions[i];
+            const auto protoTransaction = actualProto.transactions(static_cast<int32_t>(i));
+            EXPECT_EQ(protoTransaction.transaction_id(), expectedTransaction.id);
+            EXPECT_EQ(protoTransaction.pid(), expectedTransaction.originPid);
+            for (uint32_t i = 0; i < expectedTransaction.mergedTransactionIds.size(); i++) {
+                EXPECT_EQ(protoTransaction.merged_transaction_ids(static_cast<int32_t>(i)),
+                          expectedTransaction.mergedTransactionIds[i]);
+            }
         }
     }
 
@@ -90,6 +98,7 @@ TEST_F(TransactionTracingTest, addTransactions) {
         TransactionState transaction;
         transaction.id = i;
         transaction.originPid = static_cast<int32_t>(i);
+        transaction.mergedTransactionIds = std::vector<uint64_t>{i + 100, i + 102};
         transactions.emplace_back(transaction);
         mTracing.addQueuedTransaction(transaction);
     }
@@ -304,5 +313,25 @@ TEST_F(TransactionTracingMirrorLayerTest, canAddMirrorLayers) {
     EXPECT_EQ(proto.entry(0).added_layers(1).layer_id(), mMirrorLayerId);
     EXPECT_EQ(proto.entry(0).transactions(0).layer_changes().size(), 2);
     EXPECT_EQ(proto.entry(0).transactions(0).layer_changes(1).z(), 43);
+}
+
+// Verify we can write the layers traces by entry to reduce mem pressure
+// on the system when generating large traces.
+TEST(LayerTraceTest, canStreamLayersTrace) {
+    LayersTraceFileProto inProto = LayerTracing::createTraceFileProto();
+    inProto.add_entry();
+    inProto.add_entry();
+
+    std::string output;
+    inProto.SerializeToString(&output);
+    LayersTraceFileProto inProto2 = LayerTracing::createTraceFileProto();
+    inProto2.add_entry();
+    std::string output2;
+    inProto2.SerializeToString(&output2);
+
+    LayersTraceFileProto outProto;
+    outProto.ParseFromString(output + output2);
+    // magic?
+    EXPECT_EQ(outProto.entry().size(), 3);
 }
 } // namespace android

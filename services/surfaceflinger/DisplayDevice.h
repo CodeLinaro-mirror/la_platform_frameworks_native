@@ -125,8 +125,6 @@ public:
     ui::Rotation getPhysicalOrientation() const { return mPhysicalOrientation; }
     ui::Rotation getOrientation() const { return mOrientation; }
 
-    static ui::Transform::RotationFlags getPrimaryDisplayRotationFlags();
-
     std::optional<float> getStagedBrightness() const REQUIRES(kMainThreadContext);
     ui::Transform::RotationFlags getTransformHint() const;
     const ui::Transform& getTransform() const;
@@ -191,6 +189,7 @@ public:
     std::optional<hardware::graphics::composer::hal::PowerMode> getPowerMode() const;
     void setPowerMode(hardware::graphics::composer::hal::PowerMode mode);
     bool isPoweredOn() const;
+    void tracePowerMode();
 
     // Enables layer caching on this DisplayDevice
     void enableLayerCaching(bool enable);
@@ -295,10 +294,9 @@ private:
     const ui::Rotation mPhysicalOrientation;
     ui::Rotation mOrientation = ui::ROTATION_0;
 
-    static ui::Transform::RotationFlags sPrimaryDisplayRotationFlags;
-
     // Allow nullopt as initial power mode.
-    std::optional<hardware::graphics::composer::hal::PowerMode> mPowerMode;
+    using TracedPowerMode = TracedOrdinal<hardware::graphics::composer::hal::PowerMode>;
+    std::optional<TracedPowerMode> mPowerMode;
 
     std::optional<float> mStagedBrightness;
     std::optional<float> mBrightness;

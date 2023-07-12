@@ -36,7 +36,6 @@ using VsyncModulator = android::scheduler::VsyncModulator;
 using VsyncTracker = android::scheduler::VsyncTracker;
 using DisplayStatInfo = android::DisplayStatInfo;
 
-
 namespace android::scheduler::impl {
 
 class VsyncConfiguration;
@@ -56,7 +55,6 @@ composer::ComposerExtnLib composer::ComposerExtnLib::g_composer_ext_lib_;
 namespace android::surfaceflingerextension {
 
 bool QtiSurfaceFlingerExtension::mQtiSDirectStreaming;
-
 
 QtiSurfaceFlingerExtension::QtiSurfaceFlingerExtension() {}
 QtiSurfaceFlingerExtension::~QtiSurfaceFlingerExtension() = default;
@@ -135,6 +133,17 @@ QtiSurfaceFlingerExtensionIntf* QtiSurfaceFlingerExtension::qtiPostInit(
             ALOGE("Failed to retrieve DisplayConfig AIDL binder");
         } else {
             ALOGI("Initialized DisplayConfig AIDL %p successfully", mQtiDisplayConfigAidl.get());
+
+            // Initialize IDC AIDL callback
+            mQtiAidlCallbackHandler =
+                    ndk::SharedRefBase::make<DisplayConfigAidlCallbackHandler>(this);
+            mQtiDisplayConfigAidl->registerCallback(mQtiAidlCallbackHandler, &mQtiCallbackClientId);
+            if (mQtiCallbackClientId >= 0) {
+                ALOGI("Registered to displayconfig aidl service and enabled callback");
+            } else {
+                ALOGW("Failed to register displayconfig aidl service and callback");
+            }
+
             if (mQtiFeatureManager) mQtiFeatureManager->qtiSetIDisplayConfig(mQtiDisplayConfigAidl);
             mQtiEnabledIDC = true;
         }
@@ -171,6 +180,39 @@ QtiSurfaceFlingerExtensionIntf* QtiSurfaceFlingerExtension::qtiPostInit(
     qtiSetupDisplayExtnFeatures();
     qtiUpdateVsyncConfiguration();
     mQtiSFExtnBootComplete = true;
+
+#ifdef FPS_MITIGATION_ENABLED
+    ConditionalLock lock(mQtiFlinger->mStateLock,
+                         std::this_thread::get_id() != mQtiFlinger->mMainThreadId);
+    const auto displayDevice = mQtiFlinger->getDefaultDisplayDeviceLocked();
+    auto currMode = FTL_FAKE_GUARD(kMainThreadContext, displayDevice->getActiveMode());
+
+    const auto displayOpt = mQtiFlinger->mPhysicalDisplays.get(displayDevice->getPhysicalId());
+    const auto& display = displayOpt->get();
+    const auto& snapshot = display.snapshot();
+    const auto& supportedModes = snapshot.displayModes();
+
+    std::vector<float> fps_list;
+    for (const auto& [id, mode] : supportedModes) {
+        if (mode->getWidth() == currMode.modePtr->getWidth() &&
+            mode->getHeight() == currMode.modePtr->getHeight()) {
+            fps_list.push_back(int32_t(mode->getFps().getValue()));
+            ALOGV("%s: Display %dx%d supports %fFPS", __func__, currMode.modePtr->getWidth(),
+                  currMode.modePtr->getHeight(), mode->getFps().getValue());
+        }
+    }
+
+    if (mQtiDisplayExtnIntf) {
+        mQtiDisplayExtnIntf->SetFpsMitigationCallback(
+                [this](float newLevelFps) { qtiSetDesiredModeByThermalLevel(newLevelFps); },
+                fps_list);
+    } else {
+        ALOGV("%s: mQtiDisplayExtnIntf is not available, unable to set FpsMitigation callback",
+              __func__);
+    }
+
+#endif
+
     return this;
 }
 
@@ -344,7 +386,10 @@ void QtiSurfaceFlingerExtension::qtiUpdateOnProcessDisplayHotplug(uint32_t hwcDi
     }
 
     if (qtiIsInternalDisplay) {
-        LOG_ALWAYS_FATAL_IF(!qtiActiveConfigId, "HWC returned no active config");
+        if (!qtiActiveConfigId) {
+            ALOGW("HWC returned no active config");
+            return;
+        }
         qtiUpdateDisplayExtension(hwcDisplayId, *qtiActiveConfigId, qtiIsConnected);
     }
 
@@ -421,7 +466,7 @@ bool QtiSurfaceFlingerExtension::qtiIsExtensionFeatureEnabled(QtiFeature feature
  * Methods used by SurfaceFlinger DisplayHardware.
  */
 status_t QtiSurfaceFlingerExtension::qtiSetDisplayElapseTime(
-        std::chrono::steady_clock::time_point earliestPresentTime) const {
+        std::optional<std::chrono::steady_clock::time_point> earliestPresentTime) const {
     if (!mQtiFlinger->mBootFinished || !mQtiSFExtnBootComplete || !mQtiHWComposerExtnIntf) {
         return OK;
     }
@@ -444,7 +489,7 @@ status_t QtiSurfaceFlingerExtension::qtiSetDisplayElapseTime(
         }
 
         auto timeStamp =
-                std::chrono::time_point_cast<std::chrono::nanoseconds>(earliestPresentTime);
+                std::chrono::time_point_cast<std::chrono::nanoseconds>(*earliestPresentTime);
         const auto id = HalDisplayId::tryCast(display->getId());
         if (!id) {
             return BAD_VALUE;
@@ -536,7 +581,8 @@ void QtiSurfaceFlingerExtension::qtiSetContentFps(uint32_t contentFps) {
             mQtiCurrentFps = contentFps;
             ALOGV("Successfully sent content fps %d", contentFps);
         } else {
-            ALOGW("Failed to send content fps %d", contentFps);
+            // This floods the log with warning. Changed it to verbose
+            ALOGV("Failed to send content fps %d", contentFps);
         }
     }
 }
@@ -605,12 +651,10 @@ void QtiSurfaceFlingerExtension::qtiUpdateVsyncConfiguration() {
             mQtiPhaseOffsetsExtn->qtiUpdateSfOffsets(&mQtiAdvancedSfOffsets);
         }
 
-        /*
-        const auto vsyncConfig = mQtiFlinger->mVsyncModulator->setVsyncConfigSet(
+        const auto vsyncConfig = mQtiFlinger->mScheduler->vsyncModulator().setVsyncConfigSet(
                 mQtiFlinger->mVsyncConfiguration->getCurrentConfigs());
         ALOGV("VsyncConfig sfOffset %" PRId64 "\n", vsyncConfig.sfOffset);
         ALOGV("VsyncConfig appOffset %" PRId64 "\n", vsyncConfig.appOffset);
-        */
     }
 #endif
 }
@@ -946,9 +990,8 @@ void QtiSurfaceFlingerExtension::qtiSetLayerAsMask(uint32_t hwcDisplayId, uint64
 /*
  * Methods for Virtual, WiFi, and Secure Displays
  */
-VirtualDisplayId QtiSurfaceFlingerExtension::qtiAcquireVirtualDisplay(ui::Size resolution,
-                                                                      ui::PixelFormat format,
-                                                                      bool canAllocateHwcForVDS) {
+std::optional<VirtualDisplayId> QtiSurfaceFlingerExtension::qtiAcquireVirtualDisplay(
+        ui::Size resolution, ui::PixelFormat format, bool canAllocateHwcForVDS) {
     auto& generator = mQtiFlinger->mVirtualDisplayIdGenerators.hal;
     if (canAllocateHwcForVDS && generator) {
         if (const auto id = generator->generateId()) {
@@ -965,7 +1008,10 @@ VirtualDisplayId QtiSurfaceFlingerExtension::qtiAcquireVirtualDisplay(ui::Size r
     }
 
     const auto id = mQtiFlinger->mVirtualDisplayIdGenerators.gpu.generateId();
-    LOG_ALWAYS_FATAL_IF(!id, "Failed to generate ID for GPU virtual display");
+    if (!id) {
+        ALOGE("Failed to generate ID for GPU virtual display");
+        return std::nullopt;
+    }
     return *id;
 }
 
@@ -1089,7 +1135,7 @@ void QtiSurfaceFlingerExtension::qtiCreateVirtualDisplay(int width, int height, 
         return;
     }
 
-// Use either IDisplayConfig AIDL or HIDL
+    // Use either IDisplayConfig AIDL or HIDL
     if (mQtiDisplayConfigAidl) {
         mQtiDisplayConfigAidl->createVirtualDisplay(width, height, format);
         return;
@@ -1125,6 +1171,8 @@ bool QtiSurfaceFlingerExtension::qtiIsSecureCamera(sp<const GraphicBuffer> buffe
  * Methods for SmoMo Interface
  */
 void QtiSurfaceFlingerExtension::qtiCreateSmomoInstance(const DisplayDeviceState& state) {
+    ConditionalLock lock(mQtiFlinger->mStateLock,
+                         std::this_thread::get_id() != mQtiFlinger->mMainThreadId);
     const auto displayOpt = mQtiFlinger->mPhysicalDisplays.get(state.physical->id);
     const auto& displayObject = displayOpt->get();
     const auto& snapshot = displayObject.snapshot();
@@ -1298,6 +1346,7 @@ void QtiSurfaceFlingerExtension::qtiSyncToDisplayHardware() NO_THREAD_SAFETY_ANA
 void QtiSurfaceFlingerExtension::qtiUpdateSmomoState() {
     ATRACE_NAME("SmoMoUpdateState");
     Mutex::Autolock lock(mQtiFlinger->mStateLock);
+
     // Check if smomo instances exist.
     if (!mQtiSmomoInstances.size()) {
         return;
@@ -1335,16 +1384,19 @@ void QtiSurfaceFlingerExtension::qtiUpdateSmomoState() {
 
         std::vector<smomo::SmomoLayerStats> layers;
         if (enableSmomo) {
-            bool visibleLayersInfo = (mQtiFlinger->mLayersWithQueuedFrames.size() != 0);
-
-            if (visibleLayersInfo) {
-                for (const auto& layer : mQtiFlinger->mLayersWithQueuedFrames) {
-                    smomo::SmomoLayerStats layerStats;
-                    layerStats.name = layer->getDebugName();
-                    layerStats.id = layer->getSequence();
-                    layers.push_back(layerStats);
+            mQtiFlinger->mDrawingState.traverseInZOrder([&](Layer* layer) {
+                if (mQtiSmomoInstances.size() > 1 &&
+                        instance.layerStackId != layer->qtiGetSmomoLayerStackId()) {
+                    return;
                 }
-            }
+                if (!layer->isVisible()) {
+                    return;
+                }
+                smomo::SmomoLayerStats layerStats;
+                layerStats.name = layer->getDebugName();
+                layerStats.id = layer->getSequence();
+                layers.push_back(layerStats);
+            });
 
             fps = device->getActiveMode().fps.getIntValue();
         }
@@ -1382,44 +1434,39 @@ void QtiSurfaceFlingerExtension::qtiUpdateSmomoState() {
     }
 }
 
-void QtiSurfaceFlingerExtension::qtiUpdateSmomoLayerInfo(TransactionState& ts,
-                                                         int64_t desiredPresentTime,
-                                                         bool isAutoTimestamp,
-                                                         uint64_t transactionId) {
-    ts.traverseStatesWithBuffers([&](const layer_state_t& state) {
-        sp<Layer> layer = LayerHandle::getLayer(state.surface);
+void QtiSurfaceFlingerExtension::qtiUpdateSmomoLayerInfo(
+        sp<Layer> layer, int64_t desiredPresentTime, bool isAutoTimestamp,
+        std::shared_ptr<renderengine::ExternalTexture> buffer, BufferData& bufferData) {
+    if (!layer) {
+        return;
+    }
 
-        SmomoIntf* smoMo = nullptr;
-        if (layer != nullptr) {
-            smoMo = qtiGetSmomoInstance(layer->qtiGetSmomoLayerStackId());
-        }
-
-        if (smoMo) {
-            smomo::SmomoBufferStats bufferStats;
-            bufferStats.id = layer->getSequence();
-            bufferStats.auto_timestamp = isAutoTimestamp;
-            bufferStats.timestamp = desiredPresentTime;
-            bufferStats.dequeue_latency = 0;
-            bufferStats.key = desiredPresentTime;
-#ifdef TIMED_RENDERING_METADATA_FEATURE
-            auto buffer = mQtiFlinger->getExternalTextureFromBufferData(*state.bufferData,
-                                                                        layer->getDebugName(),
-                                                                        transactionId);
-            if (buffer && buffer->getBuffer()) {
-                bufferStats.buffer_hnd = buffer->getBuffer()->handle;
-            }
+    SmomoIntf* smoMo = qtiGetSmomoInstance(layer->qtiGetSmomoLayerStackId());
+    if (smoMo) {
+        smomo::SmomoBufferStats bufferStats;
+        bufferStats.id = layer->getSequence();
+        bufferStats.auto_timestamp = isAutoTimestamp;
+        bufferStats.timestamp = desiredPresentTime;
+        bufferStats.dequeue_latency = 0;
+        bufferStats.key = desiredPresentTime;
+#ifdef FRC_FRAME_PACING_FEATURE
+        bufferStats.frame_number = bufferData.frameNumber;
 #endif
-            smoMo->CollectLayerStats(bufferStats);
-
-            const auto &schedule = mQtiFlinger->mScheduler->getVsyncSchedule();
-            auto vsyncTime =
-                    schedule->getTracker().nextAnticipatedVSyncTimeFrom(SYSTEM_TIME_MONOTONIC);
-
-            if (smoMo->FrameIsLate(bufferStats.id, vsyncTime)) {
-                qtiScheduleCompositeImmed();
-            }
+#ifdef TIMED_RENDERING_METADATA_FEATURE
+        if (buffer && buffer->getBuffer()) {
+            bufferStats.buffer_hnd = buffer->getBuffer()->handle;
         }
-    });
+#endif
+        smoMo->CollectLayerStats(bufferStats);
+
+        const auto &schedule = mQtiFlinger->mScheduler->getVsyncSchedule();
+        auto vsyncTime =
+                schedule->getTracker().nextAnticipatedVSyncTimeFrom(SYSTEM_TIME_MONOTONIC);
+
+        if (smoMo->FrameIsLate(bufferStats.id, vsyncTime)) {
+            qtiScheduleCompositeImmed();
+        }
+    }
 }
 
 void QtiSurfaceFlingerExtension::qtiScheduleCompositeImmed() {
@@ -1588,7 +1635,10 @@ void QtiSurfaceFlingerExtension::qtiSetupDisplayExtnFeatures() {
                     if (displayId) {
                         auto configId =
                                 mQtiFlinger->getHwComposer().getActiveMode(displayId.value());
-                        LOG_ALWAYS_FATAL_IF(!configId, "HWC returned no active config");
+                        if (!configId) {
+                            ALOGW("HWC returned no active config");
+                            return;
+                        }
                         qtiUpdateDisplayExtension(hwcDisplayId, *configId, true);
                         if (enableDynamicSfIdle && display->isPrimary()) {
                             // TODO(rmedel): setupIdleTimeoutHandling(hwcDisplayId);
@@ -1597,6 +1647,208 @@ void QtiSurfaceFlingerExtension::qtiSetupDisplayExtnFeatures() {
                 }
             }
         }
+    }
+}
+
+std::optional<PhysicalDisplayId> QtiSurfaceFlingerExtension::qtiGetInternalDisplayId() {
+    const auto displayIds = mQtiFlinger->getPhysicalDisplayIds();
+    return displayIds.empty() ? std::nullopt : std::make_optional(displayIds.front());
+}
+
+void QtiSurfaceFlingerExtension::qtiSetDesiredModeByThermalLevel(float newLevelFps) {
+    float currFps = 0;
+    float fps = 0;
+    sp<DisplayDevice> display;
+
+    if (!mQtiFlinger->mBootFinished && mQtiThermalLevelFps == newLevelFps) {
+        return;
+    }
+
+    const auto internalDisplayId = qtiGetInternalDisplayId();
+    if (!internalDisplayId) {
+        ALOGV("%s: Failed to retrieve internal display", __func__);
+        return;
+    }
+
+    {
+        ConditionalLock lock(mQtiFlinger->mStateLock,
+                             std::this_thread::get_id() != mQtiFlinger->mMainThreadId);
+        const auto physicalDisplay = mQtiFlinger->mPhysicalDisplays.get(*internalDisplayId);
+        display = mQtiFlinger->getDisplayDeviceLocked(*internalDisplayId);
+
+        currFps = FTL_FAKE_GUARD(kMainThreadContext, display->getActiveMode().fps.getValue());
+    }
+
+    qtiHandleNewLevelFps(currFps, newLevelFps, &fps);
+    if (fps == 0) {
+        ALOGV("%s: No refresh rate change needed for thermal fps mitigation", __func__);
+        return;
+    }
+
+    DisplayModePtr displayModePtr = qtiGetModeFromFps(fps);
+    if (!displayModePtr) {
+        ALOGV("%s: Unable to find mode with %fFPS for thermal fps mitigation", __func__, fps);
+        return;
+    }
+
+    mQtiThermalLevelFps = newLevelFps;
+
+    if (fps == currFps) {
+        mQtiFlinger->mScheduler->qtiUpdateThermalFps(newLevelFps);
+        return;
+    }
+
+    auto future = mQtiFlinger->mScheduler->schedule([=]() FTL_FAKE_GUARD(
+                                                            kMainThreadContext) -> status_t {
+        int ret = 0;
+        if (!display) {
+            ALOGE("%s: Attempt to set desired display modes for invalid display token %p", __func__,
+                  mQtiFlinger->getPhysicalDisplayToken(*internalDisplayId).get());
+            return NAME_NOT_FOUND;
+        }
+
+        if (display->isVirtual()) {
+            ALOGW("%s: Attempt to set desired display modes for virtual display", __func__);
+            return INVALID_OPERATION;
+        }
+
+        // Get some info from the display's current policy
+        scheduler::RefreshRateSelector::Policy currentPolicy =
+                display->refreshRateSelector().getCurrentPolicy();
+        const bool allowGroupSwitching = currentPolicy.allowGroupSwitching;
+        auto primaryRanges = currentPolicy.primaryRanges;
+        auto appRequestRanges = currentPolicy.appRequestRanges;
+
+        if (fps < currentPolicy.primaryRanges.physical.min.getValue() ||
+            fps < currentPolicy.appRequestRanges.physical.min.getValue()) {
+            return ret;
+        }
+
+        mQtiFlinger->mScheduler->qtiUpdateThermalFps(newLevelFps);
+
+        // Update the display's DisplayManagerPolicy
+        primaryRanges.physical.max = Fps::fromValue(fps);
+        primaryRanges.render.max = Fps::fromValue(fps);
+        appRequestRanges.physical.max = Fps::fromValue(fps);
+        appRequestRanges.render.max = Fps::fromValue(fps);
+        const scheduler::RefreshRateSelector::DisplayManagerPolicy policy{displayModePtr->getId(),
+                                                                          primaryRanges,
+                                                                          appRequestRanges,
+                                                                          allowGroupSwitching};
+
+        mQtiAllowThermalFpsChange = true;
+        ret = mQtiFlinger->setDesiredDisplayModeSpecsInternal(display, policy);
+        mQtiAllowThermalFpsChange = false;
+        return ret;
+    });
+}
+
+bool QtiSurfaceFlingerExtension::qtiIsFpsDeferNeeded(float newFpsRequest) {
+    const auto display =
+            FTL_FAKE_GUARD(mQtiFlinger->mStateLock, mQtiFlinger->getDefaultDisplayDeviceLocked());
+    if (!display || mQtiThermalLevelFps == 0) {
+        return false;
+    }
+
+    if (mQtiAllowThermalFpsChange) {
+        return false;
+    }
+
+    mQtiLastCachedFps = newFpsRequest;
+    if ((int32_t)newFpsRequest > mQtiThermalLevelFps) {
+        ALOGI("%s: Requested fps %f is higher than current thermal fps %f, defer the refresh rate "
+              "change",
+              __func__, newFpsRequest, mQtiThermalLevelFps);
+        return true;
+    }
+
+    return false;
+}
+
+DisplayModePtr QtiSurfaceFlingerExtension::qtiGetModeFromFps(float fps) {
+    ConditionalLock lock(mQtiFlinger->mStateLock,
+                         std::this_thread::get_id() != mQtiFlinger->mMainThreadId);
+    const auto displayDevice = mQtiFlinger->getDefaultDisplayDeviceLocked();
+    auto currMode = FTL_FAKE_GUARD(kMainThreadContext, displayDevice->getActiveMode());
+
+    const auto displayOpt = mQtiFlinger->mPhysicalDisplays.get(displayDevice->getPhysicalId());
+    const auto& display = displayOpt->get();
+    const auto& snapshot = display.snapshot();
+    const auto& supportedModes = snapshot.displayModes();
+
+    for (const auto& [id, mode] : supportedModes) {
+        if (mode->getWidth() == currMode.modePtr->getWidth() &&
+            mode->getHeight() == currMode.modePtr->getHeight() &&
+            mode->getFps().getIntValue() == (int32_t)(fps)) {
+            return mode;
+        }
+    }
+
+    return nullptr;
+}
+
+void QtiSurfaceFlingerExtension::qtiHandleNewLevelFps(float currFps, float newLevelFps,
+                                                      float* fpsToSet) {
+    if (mQtiThermalLevelFps == 0) { // Thermal hint not running already, cache current fps
+        mQtiLastCachedFps = currFps;
+    }
+
+    if (newLevelFps > mQtiThermalLevelFps) {
+        *fpsToSet = std::min(newLevelFps, mQtiLastCachedFps);
+    } else if (newLevelFps < mQtiThermalLevelFps && newLevelFps > (int32_t)currFps) {
+        *fpsToSet = currFps;
+    } else if (newLevelFps <= (int32_t)currFps) {
+        *fpsToSet = newLevelFps;
+    }
+}
+
+void QtiSurfaceFlingerExtension::qtiNotifyResolutionSwitch(int displayId, int32_t width,
+                                                           int32_t height, int32_t vsyncPeriod) {
+    const auto dispId = qtiGetInternalDisplayId();
+    if (!dispId) {
+        ALOGE("No internal display found.");
+        return;
+    }
+
+    sp<IBinder> displayToken = mQtiFlinger->getPhysicalDisplayToken(*dispId);
+    sp<DisplayDevice> displayDevice = nullptr;
+    DisplayModes supportedModes;
+    {
+        Mutex::Autolock lock(mQtiFlinger->mStateLock);
+        displayDevice = (mQtiFlinger->getDisplayDeviceLocked(displayToken));
+
+        if (!displayDevice) {
+            ALOGE("Attempt to notify resolution switch for invalid display token %p",
+                  displayToken.get());
+            return;
+        }
+
+        const auto displayOpt = mQtiFlinger->mPhysicalDisplays.get(displayDevice->getPhysicalId());
+        const auto& display = displayOpt->get();
+        const auto& snapshot = display.snapshot();
+        supportedModes = snapshot.displayModes();
+    }
+
+    int32_t newModeId;
+    for (const auto& [id, mode] : supportedModes) {
+        auto modeWidth = mode->getWidth();
+        auto modeHeight = mode->getHeight();
+        const int32_t modePeriod = static_cast<int32_t>(mode->getVsyncPeriod());
+
+        if (modeWidth == width && modeHeight == height && vsyncPeriod == modePeriod) {
+            newModeId = static_cast<int32_t>(mode->getId().value());
+            break;
+        }
+    }
+
+    if (qtiIsSupportedConfigSwitch(displayToken, newModeId) != NO_ERROR) {
+        return;
+    }
+
+    status_t result =
+            mQtiFlinger->setActiveModeFromBackdoor(displayToken, DisplayModeId{newModeId});
+    if (result != NO_ERROR) {
+        return;
     }
 }
 
@@ -1638,6 +1890,55 @@ LayerExtWrapper::~LayerExtWrapper() {
     if (mLayerExtLibHandle) {
         dlclose(mLayerExtLibHandle);
     }
+}
+
+/*
+ * IDisplayConfig AIDL Callback handler
+ */
+DisplayConfigAidlCallbackHandler::DisplayConfigAidlCallbackHandler(
+        android::surfaceflingerextension::QtiSurfaceFlingerExtensionIntf* sfext)
+      : mQtiSFExtnIntf(sfext) {
+    if (!mQtiSFExtnIntf) {
+        ALOGW("%s: QtiSFExtension is null", __func__);
+    }
+}
+
+ndk::ScopedAStatus DisplayConfigAidlCallbackHandler::notifyCameraSmoothInfo(CameraSmoothOp op,
+                                                                            int fps) {
+    return ndk::ScopedAStatus::ok();
+}
+ndk::ScopedAStatus DisplayConfigAidlCallbackHandler::notifyCWBBufferDone(
+        int32_t in_error, const ::aidl::android::hardware::common::NativeHandle& in_buffer) {
+    return ndk::ScopedAStatus::ok();
+}
+ndk::ScopedAStatus DisplayConfigAidlCallbackHandler::notifyQsyncChange(
+        bool in_qsyncEnabled, int32_t in_refreshRate, int32_t in_qsyncRefreshRate) {
+    return ndk::ScopedAStatus::ok();
+}
+ndk::ScopedAStatus DisplayConfigAidlCallbackHandler::notifyIdleStatus(bool in_isIdle) {
+    return ndk::ScopedAStatus::ok();
+}
+ndk::ScopedAStatus DisplayConfigAidlCallbackHandler::notifyResolutionChange(
+        int32_t displayId, const Attributes& attr) {
+    ATRACE_CALL();
+    ALOGI("%s: Received notification for resolution change", __func__);
+
+    if (mQtiSFExtnIntf) {
+        mQtiSFExtnIntf->qtiNotifyResolutionSwitch(displayId, attr.xRes, attr.yRes,
+                                                  attr.vsyncPeriod);
+    }
+    return ndk::ScopedAStatus::ok();
+}
+
+ndk::ScopedAStatus DisplayConfigAidlCallbackHandler::notifyFpsMitigation(int32_t displayId,
+                                                                         const Attributes& attr,
+                                                                         Concurrency concurrency) {
+    return ndk::ScopedAStatus::ok();
+}
+ndk::ScopedAStatus DisplayConfigAidlCallbackHandler::notifyTUIEventDone(int32_t in_error,
+                                                                        DisplayType in_disp_type,
+                                                                        TUIEventType in_eventType) {
+    return ndk::ScopedAStatus::ok();
 }
 
 } // namespace android::surfaceflingerextension

@@ -48,12 +48,17 @@
 #include "TestableScheduler.h"
 #include "mock/DisplayHardware/MockComposer.h"
 #include "mock/DisplayHardware/MockDisplayMode.h"
+#include "mock/DisplayHardware/MockPowerAdvisor.h"
 #include "mock/MockEventThread.h"
 #include "mock/MockFrameTimeline.h"
 #include "mock/MockFrameTracer.h"
 #include "mock/MockSchedulerCallback.h"
+#include "mock/system/window/MockNativeWindow.h"
 
 namespace android {
+
+struct DisplayStatInfo;
+
 namespace renderengine {
 
 class RenderEngine;
@@ -344,10 +349,6 @@ public:
         layer->mDrawingParent = drawingParent;
     }
 
-    void setPowerHintSessionMode(bool early, bool late) {
-        mFlinger->mPowerHintSessionMode = {.late = late, .early = early};
-    }
-
     /* ------------------------------------------------------------------------
      * Forwarding for functions being tested
      */
@@ -379,8 +380,8 @@ public:
 
     void commitAndComposite() { mFlinger->composite(commit(), kVsyncId); }
 
-    auto createDisplay(const String8& displayName, bool secure) {
-        return mFlinger->createDisplay(displayName, secure);
+    auto createDisplay(const String8& displayName, bool secure, float requestedRefreshRate = 0.0f) {
+        return mFlinger->createDisplay(displayName, secure, requestedRefreshRate);
     }
 
     auto destroyDisplay(const sp<IBinder>& displayToken) {
@@ -446,8 +447,10 @@ public:
     }
 
     auto traverseLayersInLayerStack(ui::LayerStack layerStack, int32_t uid,
+                                    std::unordered_set<uint32_t> excludeLayerIds,
                                     const LayerVector::Visitor& visitor) {
-        return mFlinger->SurfaceFlinger::traverseLayersInLayerStack(layerStack, uid, visitor);
+        return mFlinger->SurfaceFlinger::traverseLayersInLayerStack(layerStack, uid,
+                                                                    excludeLayerIds, visitor);
     }
 
     auto getDisplayNativePrimaries(const sp<IBinder>& displayToken,
@@ -463,19 +466,18 @@ public:
         return mFlinger->mTransactionHandler.mPendingTransactionCount.load();
     }
 
-    auto setTransactionState(const FrameTimelineInfo& frameTimelineInfo,
-                             Vector<ComposerState>& states, const Vector<DisplayState>& displays,
-                             uint32_t flags, const sp<IBinder>& applyToken,
-                             const InputWindowCommands& inputWindowCommands,
-                             int64_t desiredPresentTime, bool isAutoTimestamp,
-                             const std::vector<client_cache_t>& uncacheBuffers,
-                             bool hasListenerCallbacks,
-                             std::vector<ListenerCallbacks>& listenerCallbacks,
-                             uint64_t transactionId) {
+    auto setTransactionState(
+            const FrameTimelineInfo& frameTimelineInfo, Vector<ComposerState>& states,
+            const Vector<DisplayState>& displays, uint32_t flags, const sp<IBinder>& applyToken,
+            const InputWindowCommands& inputWindowCommands, int64_t desiredPresentTime,
+            bool isAutoTimestamp, const std::vector<client_cache_t>& uncacheBuffers,
+            bool hasListenerCallbacks, std::vector<ListenerCallbacks>& listenerCallbacks,
+            uint64_t transactionId, const std::vector<uint64_t>& mergedTransactionIds) {
         return mFlinger->setTransactionState(frameTimelineInfo, states, displays, flags, applyToken,
                                              inputWindowCommands, desiredPresentTime,
                                              isAutoTimestamp, uncacheBuffers, hasListenerCallbacks,
-                                             listenerCallbacks, transactionId);
+                                             listenerCallbacks, transactionId,
+                                             mergedTransactionIds);
     }
 
     auto setTransactionStateInternal(TransactionState& transaction) {
@@ -527,6 +529,28 @@ public:
         mFlinger->getDynamicDisplayInfoFromToken(displayToken, dynamicDisplayInfo);
     }
 
+    sp<DisplayDevice> createVirtualDisplayDevice(const sp<IBinder> displayToken,
+                                                 VirtualDisplayId displayId,
+                                                 float requestedRefreshRate) {
+        constexpr ui::Size kResolution = {1080, 1920};
+        auto compositionDisplay = compositionengine::impl::
+                createDisplay(mFlinger->getCompositionEngine(),
+                              compositionengine::DisplayCreationArgsBuilder()
+                                      .setId(displayId)
+                                      .setPixels(kResolution)
+                                      .setPowerAdvisor(&mPowerAdvisor)
+                                      .build());
+        DisplayDeviceCreationArgs creationArgs(mFlinger, mFlinger->getHwComposer(), displayToken,
+                                               compositionDisplay);
+        creationArgs.requestedRefreshRate = Fps::fromValue(requestedRefreshRate);
+        creationArgs.nativeWindow = sp<mock::NativeWindow>::make();
+        return sp<DisplayDevice>::make(creationArgs);
+    }
+
+    status_t getDisplayStats(const sp<IBinder>& displayToken, DisplayStatInfo* outInfo) {
+        return mFlinger->getDisplayStats(displayToken, outInfo);
+    }
+
     /* ------------------------------------------------------------------------
      * Read-only access to private data to assert post-conditions.
      */
@@ -563,6 +587,7 @@ public:
     auto& mutablePhysicalDisplays() { return mFlinger->mPhysicalDisplays; }
     auto& mutableDrawingState() { return mFlinger->mDrawingState; }
     auto& mutableGeometryDirty() { return mFlinger->mGeometryDirty; }
+    auto& mutableVisibleRegionsDirty() { return mFlinger->mVisibleRegionsDirty; }
     auto& mutableMainThreadId() { return mFlinger->mMainThreadId; }
     auto& mutablePendingHotplugEvents() { return mFlinger->mPendingHotplugEvents; }
     auto& mutableTexturePool() { return mFlinger->mTexturePool; }
@@ -574,6 +599,11 @@ public:
     auto& mutableHwcPhysicalDisplayIdMap() { return getHwComposer().mPhysicalDisplayIdMap; }
     auto& mutablePrimaryHwcDisplayId() { return getHwComposer().mPrimaryHwcDisplayId; }
     auto& mutableActiveDisplayId() { return mFlinger->mActiveDisplayId; }
+    auto& mutablePreviouslyComposedLayers() { return mFlinger->mPreviouslyComposedLayers; }
+
+    auto& mutableActiveDisplayRotationFlags() {
+        return SurfaceFlinger::sActiveDisplayRotationFlags;
+    }
 
     auto fromHandle(const sp<IBinder>& handle) { return LayerHandle::getLayer(handle); }
 
@@ -964,6 +994,7 @@ private:
     scheduler::mock::NoOpSchedulerCallback mNoOpSchedulerCallback;
     std::unique_ptr<frametimeline::impl::TokenManager> mTokenManager;
     scheduler::TestableScheduler* mScheduler = nullptr;
+    Hwc2::mock::PowerAdvisor mPowerAdvisor;
 };
 
 } // namespace android

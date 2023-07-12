@@ -49,7 +49,7 @@ public:
      * Methods used by SurfaceFlinger DisplayHardware.
      */
     status_t qtiSetDisplayElapseTime(
-            std::chrono::steady_clock::time_point earliestPresentTime) const override;
+            std::optional<std::chrono::steady_clock::time_point> earliestPresentTime) const override;
 
     /*
      * Methods that call the DisplayExtension APIs.
@@ -80,13 +80,11 @@ public:
     void qtiSetPowerModeOverrideConfig(sp<DisplayDevice> display) override;
     void qtiSetLayerAsMask(uint32_t hwcDisplayId __unused, uint64_t layerId __unused) override{};
 
-
-
     /*
      * Methods for Virtual, WiFi, and Secure Displays
      */
-    VirtualDisplayId qtiAcquireVirtualDisplay(ui::Size, ui::PixelFormat,
-                                              bool canAllocateHwcForVDS) override;
+    std::optional<VirtualDisplayId> qtiAcquireVirtualDisplay(ui::Size, ui::PixelFormat,
+                                                             bool canAllocateHwcForVDS) override;
     bool qtiCanAllocateHwcDisplayIdForVDS(const DisplayDeviceState& state) override;
     bool qtiCanAllocateHwcDisplayIdForVDS(uint64_t usage) override;
     void qtiCheckVirtualDisplayHint(const Vector<DisplayState>& displays) override;
@@ -104,8 +102,9 @@ public:
     void qtiSetRefreshRateTo(int32_t refreshRate) override;
     void qtiSyncToDisplayHardware() override;
     void qtiUpdateSmomoState() override;
-    void qtiUpdateSmomoLayerInfo(TransactionState& ts, int64_t desiredPresentTime,
-                                 bool isAutoTimestamp, uint64_t transactionId) override;
+    void qtiUpdateSmomoLayerInfo(sp<Layer> layer, int64_t desiredPresentTime, bool isAutoTimestamp,
+                                 std::shared_ptr<renderengine::ExternalTexture> buffer,
+                                 BufferData& bufferData) override;
     void qtiScheduleCompositeImmed() override;
     void qtiSetPresentTime(uint32_t layerStackId, int sequence,
                            nsecs_t desiredPresentTime) override;
@@ -129,6 +128,10 @@ public:
     void qtiDolphinTrackBufferIncrement(const char *name);
     void qtiDolphinTrackBufferDecrement(const char *name, int count);
     void qtiDolphinTrackVsyncSignal();
+
+    bool qtiIsFpsDeferNeeded(float newFpsRequest) override;
+    void qtiNotifyResolutionSwitch(int displayId, int32_t width, int32_t height,
+                                   int32_t vsyncPeriod) override;
 
 private:
     SurfaceFlinger* mQtiFlinger = nullptr;

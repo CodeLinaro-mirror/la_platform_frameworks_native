@@ -121,7 +121,7 @@ struct WindowInfo : public Parcelable {
         DOCK_DIVIDER = FIRST_SYSTEM_WINDOW_ + 34,
         ACCESSIBILITY_MAGNIFICATION_OVERLAY = FIRST_SYSTEM_WINDOW_ + 39,
         NOTIFICATION_SHADE = FIRST_SYSTEM_WINDOW_ + 40,
-
+        SYSTEM_BLACKSCREEN_OVERLAY = FIRST_SYSTEM_WINDOW_ + 99,
         FIRST_SYSTEM_WINDOW = FIRST_SYSTEM_WINDOW_,
         LAST_SYSTEM_WINDOW = 2999,
 
@@ -235,6 +235,11 @@ struct WindowInfo : public Parcelable {
     // The window's layout params flags and type set by WM.
     Type layoutParamsType = Type::UNKNOWN;
     ftl::Flags<Flag> layoutParamsFlags;
+
+    // The input token for the window to which focus should be transferred when this input window
+    // can be successfully focused. If null, this input window will not transfer its focus to
+    // any other window.
+    sp<IBinder> focusTransferTarget;
 
     void setInputConfig(ftl::Flags<InputConfig> config, bool value);
 

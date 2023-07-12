@@ -49,6 +49,7 @@
 #include "SurfaceFlingerDefaultFactory.h"
 #include "ThreadContext.h"
 #include "TimeStats/TimeStats.h"
+#include "surfaceflinger_scheduler_fuzzer.h"
 
 #include "renderengine/mock/RenderEngine.h"
 #include "scheduler/TimeKeeper.h"
@@ -237,7 +238,8 @@ public:
         const auto displayId = selectorPtr->getActiveMode().modePtr->getPhysicalDisplayId();
         registerDisplayInternal(displayId, std::move(selectorPtr),
                                 std::shared_ptr<VsyncSchedule>(
-                                        new VsyncSchedule(displayId, std::move(tracker), nullptr,
+                                        new VsyncSchedule(displayId, std::move(tracker),
+                                                          std::make_shared<FuzzImplVSyncDispatch>(),
                                                           std::move(controller))));
     }
 
@@ -588,7 +590,7 @@ public:
         mFlinger->binderDied(display);
         mFlinger->onFirstRef();
 
-        mFlinger->updateInputFlinger();
+        mFlinger->updateInputFlinger(VsyncId{0});
         mFlinger->updateCursorAsync();
 
         mutableScheduler().setVsyncConfig({.sfOffset = mFdp.ConsumeIntegral<nsecs_t>(),
@@ -735,19 +737,18 @@ public:
         return mFlinger->mTransactionHandler.mPendingTransactionQueues;
     }
 
-    auto setTransactionState(const FrameTimelineInfo& frameTimelineInfo,
-                             Vector<ComposerState>& states, const Vector<DisplayState>& displays,
-                             uint32_t flags, const sp<IBinder>& applyToken,
-                             const InputWindowCommands& inputWindowCommands,
-                             int64_t desiredPresentTime, bool isAutoTimestamp,
-                             const std::vector<client_cache_t>& uncacheBuffers,
-                             bool hasListenerCallbacks,
-                             std::vector<ListenerCallbacks>& listenerCallbacks,
-                             uint64_t transactionId) {
+    auto setTransactionState(
+            const FrameTimelineInfo& frameTimelineInfo, Vector<ComposerState>& states,
+            const Vector<DisplayState>& displays, uint32_t flags, const sp<IBinder>& applyToken,
+            const InputWindowCommands& inputWindowCommands, int64_t desiredPresentTime,
+            bool isAutoTimestamp, const std::vector<client_cache_t>& uncacheBuffers,
+            bool hasListenerCallbacks, std::vector<ListenerCallbacks>& listenerCallbacks,
+            uint64_t transactionId, const std::vector<uint64_t>& mergedTransactionIds) {
         return mFlinger->setTransactionState(frameTimelineInfo, states, displays, flags, applyToken,
                                              inputWindowCommands, desiredPresentTime,
                                              isAutoTimestamp, uncacheBuffers, hasListenerCallbacks,
-                                             listenerCallbacks, transactionId);
+                                             listenerCallbacks, transactionId,
+                                             mergedTransactionIds);
     }
 
     auto flushTransactionQueues() {

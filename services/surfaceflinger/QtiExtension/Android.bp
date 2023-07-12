@@ -31,7 +31,6 @@ soong_config_module_type {
     ],
 }
 
-
 qtidisplayextension_cc_defaults {
     name: "displaycommonsys_defaults",
     soong_config_variables: {
@@ -45,7 +44,7 @@ qtidisplayextension_cc_defaults {
                 "libbinder_ndk",
                 "vendor.qti.hardware.display.composer@3.0",
                 "vendor.qti.hardware.display.composer@3.1",
-                "vendor.qti.hardware.display.config-V5-ndk",
+                "vendor.qti.hardware.display.config-V7-ndk",
             ],
         },
         composer3ext: {
@@ -92,11 +91,11 @@ qtidisplayextension_cc_library_static {
     soong_config_variables: {
         displayextension: {
             srcs: [
+                "QtiAidlComposerHalExtension.cpp",
                 "QtiFeatureManager.cpp",
                 "QtiDolphinWrapper.cpp",
                 "QtiFramebufferSurfaceExtension.cpp",
                 "QtiHidlComposerHalExtension.cpp",
-                "QtiAidlComposerHalExtension.cpp",
                 "QtiHWComposerExtension.cpp",
                 "QtiPhaseOffsetsExtension.cpp",
                 "QtiPowerAdvisorExtension.cpp",

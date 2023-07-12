@@ -4,6 +4,8 @@
 #include "QtiNullExtension.h"
 #include <ui/DisplayId.h>
 
+#include "MutexUtils.h"
+
 namespace android::surfaceflingerextension {
 
 QtiNullExtension::QtiNullExtension() {
@@ -64,7 +66,7 @@ bool QtiNullExtension::qtiIsExtensionFeatureEnabled(QtiFeature feature) {
  * Methods used by SurfaceFlinger DisplayHardware.
  */
 status_t QtiNullExtension::qtiSetDisplayElapseTime(
-        std::chrono::steady_clock::time_point earliestPresentTime) const {
+        std::optional<std::chrono::steady_clock::time_point> earliestPresentTime) const {
     return OK;
 }
 
@@ -109,10 +111,10 @@ status_t QtiNullExtension::qtiBinderSetWideModePreference(uint64_t displayId, in
  * Methods for Virtual, WiFi, and Secure Displays
  */
 
-android::VirtualDisplayId QtiNullExtension::qtiAcquireVirtualDisplay(ui::Size resolution,
-                                                                     ui::PixelFormat format,
-                                                                     bool canAllocateHwcForVDS) {
-    // Fix thread safety analysis
+std::optional<android::VirtualDisplayId> QtiNullExtension::qtiAcquireVirtualDisplay(
+        ui::Size resolution, ui::PixelFormat format, bool canAllocateHwcForVDS) {
+    ConditionalLock lock(mQtiFlinger->mStateLock,
+                         std::this_thread::get_id() != mQtiFlinger->mMainThreadId);
     return mQtiFlinger->acquireVirtualDisplay(resolution, format);
 }
 bool QtiNullExtension::qtiCanAllocateHwcDisplayIdForVDS(const DisplayDeviceState& state) {
@@ -145,8 +147,9 @@ void QtiNullExtension::qtiSetRefreshRates(PhysicalDisplayId displayId) {}
 void QtiNullExtension::qtiSetRefreshRateTo(int32_t refreshRate) {}
 void QtiNullExtension::qtiSyncToDisplayHardware() {}
 void QtiNullExtension::qtiUpdateSmomoState() {}
-void QtiNullExtension::qtiUpdateSmomoLayerInfo(TransactionState& ts, int64_t desiredPresentTime,
-                                               bool isAutoTimestamp, uint64_t transactionId) {}
+void QtiNullExtension::qtiUpdateSmomoLayerInfo(
+        sp<Layer> layer, int64_t desiredPresentTime, bool isAutoTimestamp,
+        std::shared_ptr<renderengine::ExternalTexture> buffer, BufferData& bufferData) {}
 void QtiNullExtension::qtiScheduleCompositeImmed() {}
 void QtiNullExtension::qtiSetPresentTime(uint32_t layerStackId, int sequence,
                                          nsecs_t desiredPresentTime) {}
@@ -176,5 +179,11 @@ void QtiNullExtension::qtiDolphinSetVsyncPeriod(nsecs_t vsyncPeriod) {}
 void QtiNullExtension::qtiDolphinTrackBufferIncrement(const char *name) {}
 void QtiNullExtension::qtiDolphinTrackBufferDecrement(const char *name, int count) {}
 void QtiNullExtension::qtiDolphinTrackVsyncSignal() {}
+
+bool QtiNullExtension::qtiIsFpsDeferNeeded(float newFpsRequest) {
+    return false;
+}
+void QtiNullExtension::qtiNotifyResolutionSwitch(int displayId, int32_t width, int32_t height,
+                                                 int32_t vsyncPeriod) {}
 
 } // namespace android::surfaceflingerextension

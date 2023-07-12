@@ -34,6 +34,7 @@
 #include <android/gui/ISurfaceComposerClient.h>
 #include <cutils/atomic.h>
 #include <cutils/compiler.h>
+#include <ftl/algorithm.h>
 #include <ftl/future.h>
 #include <ftl/non_null.h>
 #include <gui/BufferQueue.h>
@@ -188,10 +189,15 @@ enum class LatchUnsignaledConfig {
     // Latch unsignaled is permitted when a single layer is updated in a frame,
     // and the update includes just a buffer update (i.e. no sync transactions
     // or geometry changes).
+    // Latch unsignaled is also only permitted when a single transaction is ready
+    // to be applied. If we pass an unsignaled fence to HWC, HWC might miss presenting
+    // the frame if the fence does not fire in time. If we apply another transaction,
+    // we may penalize the other transaction unfairly.
     AutoSingleLayer,
 
     // All buffers are latched unsignaled. This behaviour is discouraged as it
     // can break sync transactions, stall the display and cause undesired side effects.
+    // This is equivalent to ignoring the acquire fence when applying transactions.
     Always,
 };
 
@@ -304,8 +310,7 @@ public:
     // the client can no longer modify this layer directly.
     void onHandleDestroyed(BBinder* handle, sp<Layer>& layer, uint32_t layerId);
 
-    // TODO: Remove atomic if move dtor to main thread CL lands
-    std::atomic<uint32_t> mNumClones;
+    std::vector<Layer*> mLayerMirrorRoots;
 
     TransactionCallbackInvoker& getTransactionCallbackInvoker() {
         return mTransactionCallbackInvoker;
@@ -337,6 +342,16 @@ public:
     bool mIgnoreHwcPhysicalDisplayOrientation = false;
 
     void forceFutureUpdate(int delayInMs);
+    const DisplayDevice* getDisplayFromLayerStack(ui::LayerStack)
+            REQUIRES(mStateLock, kMainThreadContext);
+
+    // TODO (b/259407931): Remove.
+    // TODO (b/281857977): This should be annotated with REQUIRES(kMainThreadContext), but this
+    // would require thread safety annotations throughout the frontend (in particular Layer and
+    // LayerFE).
+    static ui::Transform::RotationFlags getActiveDisplayRotationFlags() {
+        return sActiveDisplayRotationFlags;
+    }
 
 protected:
     // We're reference counted, never destroy SurfaceFlinger directly
@@ -511,7 +526,7 @@ private:
 
     // Implements ISurfaceComposer
     sp<IBinder> createDisplay(const String8& displayName, bool secure,
-                              float requestedRefreshRate = 0);
+                              float requestedRefreshRate = 0.0f);
     void destroyDisplay(const sp<IBinder>& displayToken);
     std::vector<PhysicalDisplayId> getPhysicalDisplayIds() const EXCLUDES(mStateLock) {
         Mutex::Autolock lock(mStateLock);
@@ -519,15 +534,13 @@ private:
     }
 
     sp<IBinder> getPhysicalDisplayToken(PhysicalDisplayId displayId) const;
-    status_t setTransactionState(const FrameTimelineInfo& frameTimelineInfo,
-                                 Vector<ComposerState>& state, const Vector<DisplayState>& displays,
-                                 uint32_t flags, const sp<IBinder>& applyToken,
-                                 const InputWindowCommands& inputWindowCommands,
-                                 int64_t desiredPresentTime, bool isAutoTimestamp,
-                                 const std::vector<client_cache_t>& uncacheBuffers,
-                                 bool hasListenerCallbacks,
-                                 const std::vector<ListenerCallbacks>& listenerCallbacks,
-                                 uint64_t transactionId) override;
+    status_t setTransactionState(
+            const FrameTimelineInfo& frameTimelineInfo, Vector<ComposerState>& state,
+            const Vector<DisplayState>& displays, uint32_t flags, const sp<IBinder>& applyToken,
+            InputWindowCommands inputWindowCommands, int64_t desiredPresentTime,
+            bool isAutoTimestamp, const std::vector<client_cache_t>& uncacheBuffers,
+            bool hasListenerCallbacks, const std::vector<ListenerCallbacks>& listenerCallbacks,
+            uint64_t transactionId, const std::vector<uint64_t>& mergedTransactionIds) override;
     void bootFinished();
     virtual status_t getSupportedFrameTimestamps(std::vector<FrameEvent>* outSupported) const;
     sp<IDisplayEventConnection> createDisplayEventConnection(
@@ -728,7 +741,7 @@ private:
     void updateLayerHistory(const frontend::LayerSnapshot& snapshot);
     frontend::Update flushLifecycleUpdates() REQUIRES(kMainThreadContext);
 
-    void updateInputFlinger();
+    void updateInputFlinger(VsyncId);
     void persistDisplayBrightness(bool needsComposite) REQUIRES(kMainThreadContext);
     void buildWindowInfos(std::vector<gui::WindowInfo>& outWindowInfos,
                           std::vector<gui::DisplayInfo>& outDisplayInfos);
@@ -743,14 +756,16 @@ private:
     /*
      * Transactions
      */
-    bool applyTransactionState(
-            const FrameTimelineInfo& info, std::vector<ResolvedComposerState>& state,
-            Vector<DisplayState>& displays, uint32_t flags,
-            const InputWindowCommands& inputWindowCommands, const int64_t desiredPresentTime,
-            bool isAutoTimestamp, const std::vector<uint64_t>& uncacheBufferIds,
-            const int64_t postTime, uint32_t permissions, bool hasListenerCallbacks,
-            const std::vector<ListenerCallbacks>& listenerCallbacks, int originPid, int originUid,
-            uint64_t transactionId) REQUIRES(mStateLock);
+    bool applyTransactionState(const FrameTimelineInfo& info,
+                               std::vector<ResolvedComposerState>& state,
+                               Vector<DisplayState>& displays, uint32_t flags,
+                               const InputWindowCommands& inputWindowCommands,
+                               const int64_t desiredPresentTime, bool isAutoTimestamp,
+                               const std::vector<uint64_t>& uncacheBufferIds,
+                               const int64_t postTime, bool hasListenerCallbacks,
+                               const std::vector<ListenerCallbacks>& listenerCallbacks,
+                               int originPid, int originUid, uint64_t transactionId)
+            REQUIRES(mStateLock);
     // Flush pending transactions that were presented after desiredPresentTime.
     // For test only
     bool flushTransactionQueues(VsyncId) REQUIRES(kMainThreadContext);
@@ -771,12 +786,11 @@ private:
 
     uint32_t setClientStateLocked(const FrameTimelineInfo&, ResolvedComposerState&,
                                   int64_t desiredPresentTime, bool isAutoTimestamp,
-                                  int64_t postTime, uint32_t permissions, uint64_t transactionId)
-            REQUIRES(mStateLock);
+                                  int64_t postTime, uint64_t transactionId) REQUIRES(mStateLock);
     uint32_t updateLayerCallbacksAndStats(const FrameTimelineInfo&, ResolvedComposerState&,
                                           int64_t desiredPresentTime, bool isAutoTimestamp,
-                                          int64_t postTime, uint32_t permissions,
-                                          uint64_t transactionId) REQUIRES(mStateLock);
+                                          int64_t postTime, uint64_t transactionId)
+            REQUIRES(mStateLock);
     uint32_t getTransactionFlags() const;
 
     // Sets the masked bits, and schedules a commit if needed.
@@ -816,7 +830,7 @@ private:
     status_t mirrorDisplay(DisplayId displayId, const LayerCreationArgs& args,
                            gui::CreateSurfaceResult& outResult);
 
-    void markLayerPendingRemovalLocked(const sp<Layer>& layer);
+    void markLayerPendingRemovalLocked(const sp<Layer>& layer) REQUIRES(mStateLock);
 
     // add a layer to SurfaceFlinger
     status_t addClientLayer(LayerCreationArgs& args, const sp<IBinder>& handle,
@@ -845,7 +859,9 @@ private:
 
     // If the uid provided is not UNSET_UID, the traverse will skip any layers that don't have a
     // matching ownerUid
-    void traverseLayersInLayerStack(ui::LayerStack, const int32_t uid, const LayerVector::Visitor&);
+    void traverseLayersInLayerStack(ui::LayerStack, const int32_t uid,
+                                    std::unordered_set<uint32_t> excludeLayerIds,
+                                    const LayerVector::Visitor&);
 
     void readPersistentProperties();
 
@@ -864,8 +880,9 @@ private:
     }
 
     sp<DisplayDevice> getDisplayDeviceLocked(const wp<IBinder>& displayToken) REQUIRES(mStateLock) {
-        const sp<DisplayDevice> nullDisplay;
-        return mDisplays.get(displayToken).value_or(std::cref(nullDisplay));
+        return mDisplays.get(displayToken)
+                .or_else(ftl::static_ref<sp<DisplayDevice>>([] { return nullptr; }))
+                .value();
     }
 
     sp<const DisplayDevice> getDisplayDeviceLocked(PhysicalDisplayId id) const
@@ -1008,7 +1025,9 @@ private:
 
     using FenceTimePtr = std::shared_ptr<FenceTime>;
 
-    const FenceTimePtr& getPreviousPresentFence(TimePoint frameTime, Period)
+    bool wouldPresentEarly(TimePoint frameTime, Period) const REQUIRES(kMainThreadContext);
+
+    const FenceTimePtr& getPreviousPresentFence(TimePoint frameTime, Period) const
             REQUIRES(kMainThreadContext);
 
     // Blocks the thread waiting for up to graceTimeMs in case the fence is about to signal.
@@ -1023,10 +1042,10 @@ private:
      */
     sp<display::DisplayToken> getPhysicalDisplayTokenLocked(PhysicalDisplayId displayId) const
             REQUIRES(mStateLock) {
-        const sp<display::DisplayToken> nullToken;
         return mPhysicalDisplays.get(displayId)
                 .transform([](const display::PhysicalDisplay& display) { return display.token(); })
-                .value_or(std::cref(nullToken));
+                .or_else([] { return std::optional<sp<display::DisplayToken>>(nullptr); })
+                .value();
     }
 
     std::optional<PhysicalDisplayId> getPhysicalDisplayIdLocked(
@@ -1203,8 +1222,14 @@ private:
     // Tracks layers that have pending frames which are candidates for being
     // latched.
     std::unordered_set<sp<Layer>, SpHash<Layer>> mLayersWithQueuedFrames;
+    std::unordered_set<sp<Layer>, SpHash<Layer>> mLayersWithBuffersRemoved;
     // Tracks layers that need to update a display's dirty region.
     std::vector<sp<Layer>> mLayersPendingRefresh;
+    // Sorted list of layers that were composed during previous frame. This is used to
+    // avoid an expensive traversal of the layer hierarchy when there are no
+    // visible region changes. Because this is a list of strong pointers, this will
+    // extend the life of the layer but this list is only updated in the main thread.
+    std::vector<sp<Layer>> mPreviouslyComposedLayers;
 
     BootStage mBootStage = BootStage::BOOTLOADER;
 
@@ -1254,6 +1279,9 @@ private:
     const std::unique_ptr<frametimeline::FrameTimeline> mFrameTimeline;
 
     VsyncId mLastCommittedVsyncId;
+
+    VsyncId mLastInputFlingerUpdateVsyncId;
+    nsecs_t mLastInputFlingerUpdateTimestamp;
 
     // If blurs should be enabled on this device.
     bool mSupportsBlur = false;
@@ -1393,6 +1421,10 @@ private:
 
     std::atomic<ui::Transform::RotationFlags> mActiveDisplayTransformHint;
 
+    // Must only be accessed on the main thread.
+    // TODO (b/259407931): Remove.
+    static ui::Transform::RotationFlags sActiveDisplayRotationFlags;
+
     bool isRefreshRateOverlayEnabled() const REQUIRES(mStateLock) {
         return hasDisplay(
                 [](const auto& display) { return display.isRefreshRateOverlayEnabled(); });
@@ -1402,8 +1434,11 @@ private:
             std::function<bool(const frontend::LayerSnapshot&, bool& outStopTraversal)>
                     snapshotFilterFn);
     std::function<std::vector<std::pair<Layer*, sp<LayerFE>>>()> getLayerSnapshotsForScreenshots(
+            std::optional<ui::LayerStack> layerStack, uint32_t uid,
+            std::unordered_set<uint32_t> excludeLayerIds);
+    std::function<std::vector<std::pair<Layer*, sp<LayerFE>>>()> getLayerSnapshotsForScreenshots(
             uint32_t rootLayerId, uint32_t uid, std::unordered_set<uint32_t> excludeLayerIds,
-            bool childrenOnly, const FloatRect& parentCrop);
+            bool childrenOnly, const std::optional<FloatRect>& optionalParentCrop);
 
     const sp<WindowInfosListenerInvoker> mWindowInfosListenerInvoker;
 
@@ -1429,10 +1464,6 @@ private:
     // These classes do not store any client state but help with managing transaction callbacks
     // and stats.
     std::unordered_map<uint32_t, sp<Layer>> mLegacyLayers;
-    struct {
-        bool late = false;
-        bool early = false;
-    } mPowerHintSessionMode;
 
     /* QTI_BEGIN */
     surfaceflingerextension::QtiSurfaceFlingerExtensionIntf* mQtiSFExtnIntf = nullptr;
@@ -1441,6 +1472,9 @@ private:
     TransactionHandler mTransactionHandler;
     display::DisplayMap<ui::LayerStack, frontend::DisplayInfo> mFrontEndDisplayInfos;
     bool mFrontEndDisplayInfosChanged = false;
+
+    // WindowInfo ids visible during the last commit.
+    std::unordered_set<int32_t> mVisibleWindowIds;
 };
 
 class SurfaceComposerAIDL : public gui::BnSurfaceComposer {
