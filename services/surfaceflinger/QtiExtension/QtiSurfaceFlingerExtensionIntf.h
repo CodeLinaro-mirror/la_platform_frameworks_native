@@ -30,6 +30,7 @@ enum QtiFeature {
     kLayerExtension,
     kPluggableVsyncPrioritized,
     kQsyncIdle,
+    kSpecFence,
     kSmomo,
     kSplitLayerExtension,
     kVsyncSourceReliableOnDoze,
@@ -141,9 +142,11 @@ public:
     virtual bool qtiIsFrameEarly(uint32_t layerStackId, int sequence,
                                  nsecs_t desiredPresentTime) = 0;
     virtual void qtiUpdateLayerState(int numLayers) = 0;
-    virtual void qtiUpdateSmomoLayerStackId(hal::HWDisplayId hwcDisplayId, uint32_t curLayerStackId,
-                                            uint32_t drawLayerStackId) = 0;
+    virtual void qtiUpdateSmomoLayerStackId(hal::HWDisplayId hwcDisplayId,
+                                 uint32_t curLayerStackId, uint32_t drawLayerStackId) = 0;
     virtual uint32_t qtiGetLayerClass(std::string mName) = 0;
+    virtual void qtiSetVisibleLayerInfo(DisplayId displayId,
+                                 const char* name, int32_t sequence) = 0;
 
     /*
      * Methods for Dolphin APIs
@@ -162,6 +165,14 @@ public:
     virtual bool qtiIsFpsDeferNeeded(float newFpsRequest) = 0;
     virtual void qtiNotifyResolutionSwitch(int displayId, int32_t width, int32_t height,
                                            int32_t vsyncPeriod) = 0;
+    virtual void qtiSetFrameBufferSizeForScaling(sp<DisplayDevice> displayDevice,
+                                                 DisplayDeviceState& currentState,
+                                                 const DisplayDeviceState& drawingState) = 0;
+    virtual void qtiFbScalingOnBoot() = 0;
+    virtual bool qtiFbScalingOnDisplayChange(const wp<IBinder>& displayToken,
+                                             sp<DisplayDevice> display,
+                                             const DisplayDeviceState& drawingState) = 0;
+    virtual void qtiFbScalingOnPowerChange(sp<DisplayDevice> display) = 0;
 };
 
 } // namespace android::surfaceflingerextension

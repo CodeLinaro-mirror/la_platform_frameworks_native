@@ -165,6 +165,8 @@ void QtiNullExtension::qtiUpdateSmomoLayerStackId(hal::HWDisplayId hwcDisplayId,
 uint32_t QtiNullExtension::qtiGetLayerClass(std::string mName) {
     return 0;
 }
+void QtiNullExtension::qtiSetVisibleLayerInfo(DisplayId displayId,
+                                                  const char* name, int32_t sequence) {}
 
 /*
  * Methods for speculative fence
@@ -185,5 +187,16 @@ bool QtiNullExtension::qtiIsFpsDeferNeeded(float newFpsRequest) {
 }
 void QtiNullExtension::qtiNotifyResolutionSwitch(int displayId, int32_t width, int32_t height,
                                                  int32_t vsyncPeriod) {}
+void QtiNullExtension::qtiSetFrameBufferSizeForScaling(sp<DisplayDevice> displayDevice,
+                                                       DisplayDeviceState& currentState,
+                                                       const DisplayDeviceState& drawingState) {}
+void QtiNullExtension::qtiFbScalingOnBoot() {}
+bool QtiNullExtension::qtiFbScalingOnDisplayChange(const wp<IBinder>& displayToken,
+                                                   sp<DisplayDevice> display,
+                                                   const DisplayDeviceState& drawingState) {
+    return false;
+}
+
+void QtiNullExtension::qtiFbScalingOnPowerChange(sp<DisplayDevice> display) {}
 
 } // namespace android::surfaceflingerextension

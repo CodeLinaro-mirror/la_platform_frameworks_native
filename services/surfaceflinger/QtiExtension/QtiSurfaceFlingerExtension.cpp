@@ -9,7 +9,6 @@
 #include "QtiGralloc.h"
 #include "vendor/qti/hardware/display/composer/3.1/IQtiComposer.h"
 
-#include <Scheduler/VsyncConfiguration.h>
 #include <aidl/vendor/qti/hardware/display/config/IDisplayConfig.h>
 #include <aidl/vendor/qti/hardware/display/config/IDisplayConfigCallback.h>
 #include <vendor/qti/hardware/display/composer/3.1/IQtiComposerClient.h>
@@ -18,9 +17,13 @@
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
 #include <composer_extn_intf.h>
+#include <compositionengine/Display.h>
+#include <compositionengine/RenderSurface.h>
 #include <config/client_interface.h>
 #include <ftl/non_null.h>
+#include "../CompositionEngine/QtiExtension/QtiRenderSurfaceExtension.h"
 
+#include <compositionengine/impl/Display.h>
 #include <Scheduler/VSyncPredictor.h>
 #include <Scheduler/VsyncConfiguration.h>
 #include <ui/DisplayStatInfo.h>
@@ -29,6 +32,8 @@
 using aidl::vendor::qti::hardware::display::config::IDisplayConfig;
 using vendor::qti::hardware::display::composer::V3_1::IQtiComposerClient;
 
+using android::compositionengine::Display;
+using android::compositionengineextension::QtiRenderSurfaceExtension;
 using android::hardware::graphics::common::V1_0::BufferUsage;
 using PerfHintType = composer::PerfHintType;
 using VsyncConfiguration = android::scheduler::VsyncConfiguration;
@@ -1377,26 +1382,22 @@ void QtiSurfaceFlingerExtension::qtiUpdateSmomoState() {
             }
         }
 
-        instance.active = device->getPowerMode() != hal::PowerMode::OFF;
+        instance.active = device ? device->getPowerMode() != hal::PowerMode::OFF : false;
         if (!instance.active) {
             continue;
         }
 
         std::vector<smomo::SmomoLayerStats> layers;
         if (enableSmomo) {
-            mQtiFlinger->mDrawingState.traverseInZOrder([&](Layer* layer) {
-                if (mQtiSmomoInstances.size() > 1 &&
-                        instance.layerStackId != layer->qtiGetSmomoLayerStackId()) {
-                    return;
+            auto& visibleLayerInfo = mQtiVisibleLayerInfoMap[device->getId()];
+            if (visibleLayerInfo.layerName.size() != 0) {
+                for (size_t i = 0; i < visibleLayerInfo.layerName.size(); i++) {
+                    smomo::SmomoLayerStats layerStats;
+                    layerStats.name = visibleLayerInfo.layerName.at(i);
+                    layerStats.id = visibleLayerInfo.layerSequence.at(i);
+                    layers.push_back(layerStats);
                 }
-                if (!layer->isVisible()) {
-                    return;
-                }
-                smomo::SmomoLayerStats layerStats;
-                layerStats.name = layer->getDebugName();
-                layerStats.id = layer->getSequence();
-                layers.push_back(layerStats);
-            });
+            }
 
             fps = device->getActiveMode().fps.getIntValue();
         }
@@ -1505,16 +1506,29 @@ bool QtiSurfaceFlingerExtension::qtiIsFrameEarly(uint32_t layerStackId, int sequ
     return isEarly;
 }
 
+void QtiSurfaceFlingerExtension::qtiSetVisibleLayerInfo(DisplayId displayId,
+        const char* name, int32_t sequence) {
+    auto& visibleLayerInfo = mQtiVisibleLayerInfoMap[displayId];
+    visibleLayerInfo.layerName.push_back(name);
+    visibleLayerInfo.layerSequence.push_back(sequence);
+}
+
 void QtiSurfaceFlingerExtension::qtiUpdateLayerState(int numLayers) {
     bool mSplitLayerExt = mQtiFeatureManager->qtiIsExtensionFeatureEnabled(kSplitLayerExtension);
 
-    if (mSplitLayerExt && mQtiLayerExt) {
-        if (mQtiVisibleLayerInfo.layerName.size() != 0) {
-            mQtiLayerExt->UpdateLayerState(mQtiVisibleLayerInfo.layerName, numLayers);
+    ConditionalLock lock(mQtiFlinger->mStateLock,
+                             std::this_thread::get_id() != mQtiFlinger->mMainThreadId);
+    for (const auto& [token, displayDevice] : mQtiFlinger->mDisplays) {
+        auto& VisibleLayerInfo = mQtiVisibleLayerInfoMap[displayDevice->getId()];
+
+        if (mSplitLayerExt && mQtiLayerExt) {
+            if (VisibleLayerInfo.layerName.size() != 0) {
+                mQtiLayerExt->UpdateLayerState(VisibleLayerInfo.layerName, numLayers);
+            }
         }
+        VisibleLayerInfo.layerName.clear();
+        VisibleLayerInfo.layerSequence.clear();
     }
-    mQtiVisibleLayerInfo.layerName.clear();
-    mQtiVisibleLayerInfo.layerSequence.clear();
 }
 
 void QtiSurfaceFlingerExtension::qtiUpdateSmomoLayerStackId(hal::HWDisplayId hwcDisplayId,
@@ -1608,13 +1622,17 @@ void QtiSurfaceFlingerExtension::qtiDolphinTrackVsyncSignal() {
  * Methods internal to QtiSurfaceFlingerExtension
  */
 bool QtiSurfaceFlingerExtension::qtiIsInternalDisplay(const sp<DisplayDevice>& display) {
-    if (display) {
-        const auto displayOpt = mQtiFlinger->mPhysicalDisplays.get(display->getPhysicalId());
-        const auto& physicalDisplay = displayOpt->get();
-        const auto& snapshot = physicalDisplay.snapshot();
+    if (display && mQtiFlinger) {
+        ConditionalLock lock(mQtiFlinger->mStateLock,
+                             std::this_thread::get_id() != mQtiFlinger->mMainThreadId);
+        if (!mQtiFlinger->mPhysicalDisplays.empty()) {
+            const auto displayOpt = mQtiFlinger->mPhysicalDisplays.get(display->getPhysicalId());
+            const auto& physicalDisplay = displayOpt->get();
+            const auto& snapshot = physicalDisplay.snapshot();
 
-        const auto connectionType = snapshot.connectionType();
-        return (connectionType == ui::DisplayConnectionType::Internal);
+            const auto connectionType = snapshot.connectionType();
+            return (connectionType == ui::DisplayConnectionType::Internal);
+        }
     }
     return false;
 }
@@ -1829,7 +1847,7 @@ void QtiSurfaceFlingerExtension::qtiNotifyResolutionSwitch(int displayId, int32_
         supportedModes = snapshot.displayModes();
     }
 
-    int32_t newModeId;
+    int32_t newModeId = -1;
     for (const auto& [id, mode] : supportedModes) {
         auto modeWidth = mode->getWidth();
         auto modeHeight = mode->getHeight();
@@ -1841,7 +1859,13 @@ void QtiSurfaceFlingerExtension::qtiNotifyResolutionSwitch(int displayId, int32_
         }
     }
 
+    if (newModeId == -1) {
+        ALOGW("Unable to find new mode");
+        return;
+    }
+
     if (qtiIsSupportedConfigSwitch(displayToken, newModeId) != NO_ERROR) {
+        ALOGW("Unable to switch to new mode %d", newModeId);
         return;
     }
 
@@ -1850,6 +1874,135 @@ void QtiSurfaceFlingerExtension::qtiNotifyResolutionSwitch(int displayId, int32_
     if (result != NO_ERROR) {
         return;
     }
+}
+
+void QtiSurfaceFlingerExtension::qtiSetFrameBufferSizeForScaling(
+        sp<DisplayDevice> displayDevice, DisplayDeviceState& currentState,
+        const DisplayDeviceState& drawingState) {
+    base::unique_fd fd;
+    auto display = displayDevice->getCompositionDisplay();
+    int newWidth = currentState.layerStackSpaceRect.width();
+    int newHeight = currentState.layerStackSpaceRect.height();
+    int currentWidth = drawingState.layerStackSpaceRect.width();
+    int currentHeight = drawingState.layerStackSpaceRect.height();
+    int displayWidth = displayDevice->getWidth();
+    int displayHeight = displayDevice->getHeight();
+    bool update_needed = false;
+
+    ALOGV("%s: newWidth %d newHeight %d currentWidth %d currentHeight %d displayWidth %d "
+          "displayHeight %d",
+          __func__, newWidth, newHeight, currentWidth, currentHeight, displayWidth, displayHeight);
+
+    if (newWidth != currentWidth || newHeight != currentHeight) {
+        update_needed = true;
+        if (!((newWidth > newHeight && displayWidth > displayHeight) ||
+              (newWidth < newHeight && displayWidth < displayHeight))) {
+            std::swap(newWidth, newHeight);
+            ALOGV("%s: Width %d or height %d was updated. Swap the values of newWidth %d and "
+                  "newHeight %d",
+                  __func__, (newWidth != currentWidth), (newHeight != currentHeight), newWidth,
+                  newHeight);
+        }
+    }
+
+    if (displayDevice->getWidth() == newWidth && displayDevice->getHeight() == newHeight &&
+        !update_needed) {
+        ALOGV("%s: No changes on the configuration", __func__);
+        displayDevice->setProjection(currentState.orientation, currentState.layerStackSpaceRect,
+                                     currentState.orientedDisplaySpaceRect);
+        return;
+    }
+
+    if (newWidth > 0 && newHeight > 0) {
+        currentState.width = static_cast<uint32_t>(newWidth);
+        currentState.height = static_cast<uint32_t>(newHeight);
+        ALOGV("%s: Update currentState's width %d and height %d", __func__, currentState.width,
+              currentState.height);
+    }
+
+    currentState.orientedDisplaySpaceRect = currentState.layerStackSpaceRect;
+    ALOGV("%s: Update currentState's orientedDisplaySpaceRect left %f top %f right %f bottom %f",
+          __func__, currentState.orientedDisplaySpaceRect.left,
+          currentState.orientedDisplaySpaceRect.top, currentState.orientedDisplaySpaceRect.right,
+          currentState.orientedDisplaySpaceRect.bottom);
+
+    if (mQtiFlinger->mBootFinished) {
+        displayDevice->setDisplaySize(static_cast<int>(currentState.width),
+                                      static_cast<int>(currentState.height));
+        displayDevice->setProjection(currentState.orientation, currentState.layerStackSpaceRect,
+                                     currentState.orientedDisplaySpaceRect);
+
+        auto qtiRSExtnIntf = display->getRenderSurface()->qtiGetRenderSurfaceExtension();
+        if (!qtiRSExtnIntf) {
+            ALOGV("%s: QtiRenderSurfaceExtension is invalid", __func__);
+            return;
+        }
+        qtiRSExtnIntf->qtiSetViewportAndProjection();
+        if (displayDevice->isPoweredOn()) {
+            // queue a scratch buffer to flip Client Target with updated size
+            display->getRenderSurface()->queueBuffer(std::move(fd));
+            // releases the FrameBuffer that was acquired as part of queueBuffer()
+            display->getRenderSurface()->onPresentDisplayCompleted();
+        } else {
+            mQtiDisplaySizeChanged = true;
+        }
+    }
+}
+
+void QtiSurfaceFlingerExtension::qtiFbScalingOnBoot() {
+    bool useFbScaling = mQtiFeatureManager->qtiIsExtensionFeatureEnabled(QtiFeature::kFbScaling);
+    if (useFbScaling) {
+        ALOGV("%s: Qti FrameBuffer Scaling is enabled %d", __func__, useFbScaling);
+        Mutex::Autolock _l(mQtiFlinger->mStateLock);
+        ssize_t index = mQtiFlinger->mCurrentState.displays.indexOfKey(
+                mQtiFlinger->getPrimaryDisplayTokenLocked());
+        if (index < 0) {
+            ALOGE("%s: Invalid token %p", __func__,
+                  mQtiFlinger->getPrimaryDisplayTokenLocked().get());
+        } else {
+            DisplayDeviceState& curState =
+                    mQtiFlinger->mCurrentState.displays.editValueAt(static_cast<size_t>(index));
+            DisplayDeviceState& drawState =
+                    mQtiFlinger->mDrawingState.displays.editValueAt(static_cast<size_t>(index));
+            qtiSetFrameBufferSizeForScaling(mQtiFlinger->getDefaultDisplayDeviceLocked(), curState,
+                                            drawState);
+        }
+    }
+}
+
+bool QtiSurfaceFlingerExtension::qtiFbScalingOnDisplayChange(
+        const wp<IBinder>& displayToken, sp<DisplayDevice> display,
+        const DisplayDeviceState& drawingState) {
+    bool useFbScaling = mQtiFeatureManager->qtiIsExtensionFeatureEnabled(QtiFeature::kFbScaling);
+    if (useFbScaling && display->isPrimary()) {
+        const ssize_t index = mQtiFlinger->mCurrentState.displays.indexOfKey(displayToken);
+        DisplayDeviceState& curState =
+                mQtiFlinger->mCurrentState.displays.editValueAt(static_cast<size_t>(index));
+        qtiSetFrameBufferSizeForScaling(display, curState, drawingState);
+        return true;
+    }
+
+    return false;
+}
+
+void QtiSurfaceFlingerExtension::qtiFbScalingOnPowerChange(sp<DisplayDevice> display) {
+    bool useFbScaling = mQtiFeatureManager->qtiIsExtensionFeatureEnabled(QtiFeature::kFbScaling);
+    if (!useFbScaling || !mQtiDisplaySizeChanged) {
+        return;
+    }
+
+    base::unique_fd fd;
+    auto compositionDisplay = display->getCompositionDisplay();
+    auto qtiRSExtnIntf = compositionDisplay->getRenderSurface()->qtiGetRenderSurfaceExtension();
+    if (!qtiRSExtnIntf) {
+        ALOGV("%s: QtiRenderSurfaceExtension is invalid", __func__);
+        return;
+    }
+    // qtueue a scratch buffer to flip client target with updated size
+    compositionDisplay->getRenderSurface()->queueBuffer(std::move(fd));
+    // releases the FrameBuffer that was acquired as part of queueBuffer()
+    compositionDisplay->getRenderSurface()->onPresentDisplayCompleted();
+    mQtiDisplaySizeChanged = false;
 }
 
 /*

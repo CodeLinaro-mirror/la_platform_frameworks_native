@@ -114,6 +114,8 @@ public:
     void qtiUpdateSmomoLayerStackId(hal::HWDisplayId hwcDisplayId, uint32_t curLayerStackId,
                                     uint32_t drawLayerStackId) override;
     uint32_t qtiGetLayerClass(std::string mName) override;
+    void qtiSetVisibleLayerInfo(DisplayId displayId,
+                                    const char* name, int32_t sequence) override;
 
     /*
      * Methods for speculative fence
@@ -132,6 +134,13 @@ public:
     bool qtiIsFpsDeferNeeded(float newFpsRequest) override;
     void qtiNotifyResolutionSwitch(int displayId, int32_t width, int32_t height,
                                    int32_t vsyncPeriod) override;
+    void qtiSetFrameBufferSizeForScaling(sp<DisplayDevice> displayDevice,
+                                         DisplayDeviceState& currentState,
+                                         const DisplayDeviceState& drawingState) override;
+    void qtiFbScalingOnBoot() override;
+    bool qtiFbScalingOnDisplayChange(const wp<IBinder>& displayToken, sp<DisplayDevice> display,
+                                     const DisplayDeviceState& drawingState) override;
+    void qtiFbScalingOnPowerChange(sp<DisplayDevice> display) override;
 
 private:
     SurfaceFlinger* mQtiFlinger = nullptr;
