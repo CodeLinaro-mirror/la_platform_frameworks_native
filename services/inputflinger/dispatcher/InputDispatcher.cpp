@@ -65,7 +65,6 @@ using android::gui::WindowInfo;
 using android::gui::WindowInfoHandle;
 using android::os::InputEventInjectionResult;
 using android::os::InputEventInjectionSync;
-using android::base::GetBoolProperty;
 
 namespace android::inputdispatcher {
 
@@ -739,12 +738,9 @@ InputDispatcher::InputDispatcher(InputDispatcherPolicyInterface& policy,
     mReporter = createInputReporter();
 
     mWindowInfoListener = sp<DispatcherWindowListener>::make(*this);
-
-if (GetBoolProperty("ro.config.headless", 0) != 1) {
 #if defined(__ANDROID__)
     SurfaceComposerClient::getDefault()->addWindowInfosListener(mWindowInfoListener);
 #endif
-}
     mKeyRepeatState.lastKeyEntry = nullptr;
 }
 
