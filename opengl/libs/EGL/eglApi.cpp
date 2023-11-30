@@ -657,3 +657,23 @@ EGLBoolean eglGetFrameTimestampSupportedANDROID(EGLDisplay dpy, EGLSurface surfa
     egl_connection_t* const cnx = &gEGLImpl;
     return cnx->platform.eglGetFrameTimestampSupportedANDROID(dpy, surface, timestamp);
 }
+
+EGLBoolean eglExportDMABUFImageQueryMESA(EGLDisplay dpy, EGLImageKHR image, int* fourcc,
+        int* num_planes, EGLuint64KHR* modifiers)
+{
+    clearError();
+
+    EGLBoolean result = EGL_FALSE;
+    egl_connection_t* const cnx = &gEGLImpl;
+    return result = cnx->platform.eglExportDMABUFImageQueryMESA(dpy, image, fourcc, num_planes, modifiers);
+}
+
+EGLBoolean eglExportDMABUFImageMESA(EGLDisplay dpy,  EGLImageKHR image,
+        int* fds,  EGLint* strides, EGLint* offsets)
+{
+    clearError();
+
+    EGLBoolean result = EGL_FALSE;
+    egl_connection_t* const cnx = &gEGLImpl;
+    return result = cnx->platform.eglExportDMABUFImageMESA(dpy, image, fds, strides, offsets);
+}

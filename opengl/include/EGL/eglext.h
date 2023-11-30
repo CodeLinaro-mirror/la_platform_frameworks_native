@@ -553,6 +553,17 @@ EGLAPI EGLint EGLAPIENTRY eglDupNativeFenceFDANDROID (EGLDisplay dpy, EGLSyncKHR
 #endif
 #endif /* EGL_ANDROID_native_fence_sync */
 
+#ifndef EGL_MESA_dma_export
+#define EGL_MESA_dma_export 1
+
+typedef EGLBoolean(EGLAPIENTRYP PFNEGLEXPORTDMABUFIMAGEQUERYMESAPROC)(EGLDisplay dpy,EGLImageKHR image,int *fourcc, int *num_planes,EGLuint64KHR *modifiers);
+typedef EGLBoolean(EGLAPIENTRYP PFNEGLEXPORTDMABUFIMAGEMESAPROC)(EGLDisplay dpy, EGLImageKHR image,int *fds, EGLint *strides,EGLint *offsets);
+#ifdef EGL_EGLEXT_PROTOTYPES
+EGLAPI EGLBoolean EGLAPIENTRY eglExportDMABUFImageQueryMESA(EGLDisplay dpy, EGLImageKHR image,int *fourcc, int *num_planes,EGLuint64KHR *modifiers);
+EGLAPI EGLBoolean EGLAPIENTRY eglExportDMABUFImageMESA(EGLDisplay dpy, EGLImageKHR image, int *fds,EGLint *strides, EGLint *offsets);
+#endif // EGL_EGLEXT_PROTOTYPES
+#endif // !EGL_MESA_dma_export
+
 #ifndef EGL_ANDROID_presentation_time
 #define EGL_ANDROID_presentation_time 1
 typedef EGLBoolean (EGLAPIENTRYP PFNEGLPRESENTATIONTIMEANDROIDPROC) (EGLDisplay dpy, EGLSurface surface, EGLnsecsANDROID time);
