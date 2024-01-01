@@ -55,6 +55,8 @@ bool QtiNullExtension::qtiLatchMediaContent(sp<Layer> layer) {
 }
 void QtiNullExtension::qtiUpdateBufferData(bool qtiLatchMediaContent, const layer_state_t& s) {}
 
+void QtiNullExtension::qtiOnComposerHalRefresh() {}
+
 /*
  * Methods that call the FeatureManager APIs.
  */
@@ -78,7 +80,7 @@ void QtiNullExtension::qtiSendInitialFps(uint32_t fps) {}
 void QtiNullExtension::qtiNotifyDisplayUpdateImminent() {}
 void QtiNullExtension::qtiSetContentFps(uint32_t contentFps) {}
 void QtiNullExtension::qtiSetEarlyWakeUpConfig(const sp<DisplayDevice>& display,
-                                               hal::PowerMode mode) {}
+                                               hal::PowerMode mode, bool isInternal) {}
 void QtiNullExtension::qtiUpdateVsyncConfiguration() {}
 
 /*
@@ -147,6 +149,7 @@ void QtiNullExtension::qtiSetRefreshRates(PhysicalDisplayId displayId) {}
 void QtiNullExtension::qtiSetRefreshRateTo(int32_t refreshRate) {}
 void QtiNullExtension::qtiSyncToDisplayHardware() {}
 void QtiNullExtension::qtiUpdateSmomoState() {}
+void QtiNullExtension::qtiSetDisplayAnimating() {}
 void QtiNullExtension::qtiUpdateSmomoLayerInfo(
         sp<Layer> layer, int64_t desiredPresentTime, bool isAutoTimestamp,
         std::shared_ptr<renderengine::ExternalTexture> buffer, BufferData& bufferData) {}
@@ -167,6 +170,9 @@ uint32_t QtiNullExtension::qtiGetLayerClass(std::string mName) {
 }
 void QtiNullExtension::qtiSetVisibleLayerInfo(DisplayId displayId,
                                                   const char* name, int32_t sequence) {}
+bool QtiNullExtension::qtiIsSmomoOptimalRefreshActive() {
+    return false;
+}
 
 /*
  * Methods for speculative fence
