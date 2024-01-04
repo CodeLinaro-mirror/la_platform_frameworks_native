@@ -78,6 +78,8 @@ EGL_ENTRY(EGLBoolean, eglGetCompositorTimingANDROID, EGLDisplay, EGLSurface, EGL
 EGL_ENTRY(EGLBoolean, eglGetCompositorTimingSupportedANDROID, EGLDisplay, EGLSurface, EGLint)
 EGL_ENTRY(EGLBoolean, eglGetFrameTimestampsANDROID, EGLDisplay, EGLSurface, EGLuint64KHR, EGLint, const EGLint*, EGLnsecsANDROID*)
 EGL_ENTRY(EGLBoolean, eglGetFrameTimestampSupportedANDROID, EGLDisplay, EGLSurface, EGLint)
+EGL_ENTRY(EGLBoolean, eglExportDMABUFImageQueryMESA, EGLDisplay, EGLImageKHR image,int*, int*,EGLuint64KHR*)
+EGL_ENTRY(EGLBoolean, eglExportDMABUFImageMESA, EGLDisplay, EGLImageKHR image, int*,EGLint*, EGLint*)
 GL_ENTRY(const GLubyte*, glGetString, GLenum)
 GL_ENTRY(const GLubyte*, glGetStringi, GLenum, GLuint)
 GL_ENTRY(void, glGetBooleanv, GLenum, GLboolean*)
