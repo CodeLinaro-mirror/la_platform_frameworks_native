@@ -190,7 +190,6 @@ QtiSurfaceFlingerExtensionIntf* QtiSurfaceFlingerExtension::qtiPostInit(
     qtiUpdateVsyncConfiguration();
     mQtiSFExtnBootComplete = true;
 
-#ifdef FPS_MITIGATION_ENABLED
     ConditionalLock lock(mQtiFlinger->mStateLock,
                          std::this_thread::get_id() != mQtiFlinger->mMainThreadId);
     const auto displayDevice = mQtiFlinger->getDefaultDisplayDeviceLocked();
@@ -211,6 +210,11 @@ QtiSurfaceFlingerExtensionIntf* QtiSurfaceFlingerExtension::qtiPostInit(
         }
     }
 
+    if (mQtiDisplayExtnIntf) {
+        mQtiDisplayExtnIntf->SetSupportedRefreshRates(fps_list);
+    }
+
+#ifdef FPS_MITIGATION_ENABLED
     if (mQtiDisplayExtnIntf) {
         mQtiDisplayExtnIntf->SetFpsMitigationCallback(
                 [this](float newLevelFps) { qtiSetDesiredModeByThermalLevel(newLevelFps); },
@@ -466,6 +470,10 @@ void QtiSurfaceFlingerExtension::qtiUpdateBufferData(bool qtiLatchMediaContent,
     }
 }
 
+void QtiSurfaceFlingerExtension::qtiOnComposerHalRefresh() {
+  mComposerRefreshNotified = true;
+}
+
 /*
  * Methods that call the FeatureManager APIs.
  */
@@ -548,6 +556,11 @@ void QtiSurfaceFlingerExtension::qtiSendInitialFps(uint32_t fps) {
 }
 
 void QtiSurfaceFlingerExtension::qtiNotifyDisplayUpdateImminent() {
+    if(mQtiDisplayExtnIntf && !mComposerRefreshNotified) {
+        mQtiDisplayExtnIntf->NotifyDisplayUpdateImminent();
+    }
+    mComposerRefreshNotified = false;
+
     if (!mQtiFeatureManager->qtiIsExtensionFeatureEnabled(QtiFeature::kEarlyWakeUp)) {
         mQtiFlinger->mPowerAdvisor->notifyDisplayUpdateImminentAndCpuReset();
         return;
@@ -1106,7 +1119,10 @@ void QtiSurfaceFlingerExtension::qtiCheckVirtualDisplayHint(const Vector<Display
     bool createVirtualDisplay = false;
     int width = 0, height = 0, format = 0;
     {
-        Mutex::Autolock lock(mQtiFlinger->mStateLock);
+        if (!mQtiFlinger->mRequestDisplayModeFlag ||
+            (mQtiFlinger->mFlagThread != std::this_thread::get_id())) {
+            Mutex::Autolock lock(mQtiFlinger->mStateLock);
+        }
         for (const DisplayState& s : displays) {
             const ssize_t index = mQtiFlinger->mCurrentState.displays.indexOfKey(s.token);
             if (index < 0) continue;
@@ -1376,10 +1392,15 @@ void QtiSurfaceFlingerExtension::qtiSyncToDisplayHardware() {
     }
 }
 
+bool QtiSurfaceFlingerExtension::qtiIsSmomoOptimalRefreshActive() {
+  return mQtiSmomoOptimalRefreshActive;
+}
+
 void QtiSurfaceFlingerExtension::qtiUpdateSmomoState() {
     ATRACE_NAME("SmoMoUpdateState");
     Mutex::Autolock lock(mQtiFlinger->mStateLock);
 
+    mQtiSmomoOptimalRefreshActive = false;
     // Check if smomo instances exist.
     if (!mQtiSmomoInstances.size()) {
         return;
@@ -1457,6 +1478,23 @@ void QtiSurfaceFlingerExtension::qtiUpdateSmomoState() {
                                               : static_cast<uint32_t>(fps));
     }
 
+    if (numActiveDisplays == 1) {
+        std::map<int, int> refresh_rate_votes;
+        for (auto& instance : mQtiSmomoInstances) {
+            if (!instance.active) {
+                continue;
+            }
+            instance.smoMo->GetRefreshRateVote(refresh_rate_votes);
+            mQtiFlinger->mScheduler->qtiUpdateSmoMoRefreshRateVote(refresh_rate_votes);
+            for (auto it = refresh_rate_votes.begin(); it != refresh_rate_votes.end(); it++) {
+              if (it->second != -1) {
+                mQtiSmomoOptimalRefreshActive = true;
+                break;
+              }
+            }
+        }
+    }
+
     // Disable DRC if active displays is more than 1.
     for (auto& instance : mQtiSmomoInstances) {
         instance.smoMo->SetRefreshRateChangeStatus((numActiveDisplays == 1));
@@ -1468,8 +1506,8 @@ void QtiSurfaceFlingerExtension::qtiSetDisplayAnimating() {
     uint32_t hwcDisplayId;
     for (const auto& pair : FTL_FAKE_GUARD(mQtiFlinger->mStateLock, mQtiFlinger->mDisplays)) {
         const auto& displayDevice = pair.second;
-        if (qtiGetHwcDisplayId(displayDevice, &hwcDisplayId) &&
-            qtiIsInternalDisplay(displayDevice)) {
+        if (!(qtiGetHwcDisplayId(displayDevice, &hwcDisplayId) &&
+              !qtiIsInternalDisplay(displayDevice))) {
             continue;
         }
 
@@ -1484,8 +1522,8 @@ void QtiSurfaceFlingerExtension::qtiSetDisplayAnimating() {
         for (const auto& [token, displayDevice] :
              FTL_FAKE_GUARD(mQtiFlinger->mStateLock, mQtiFlinger->mDisplays)) {
             auto display = displayDevice->getCompositionDisplay();
-            if (qtiGetHwcDisplayId(displayDevice, &hwcDisplayId) &&
-                qtiIsInternalDisplay(displayDevice)) {
+            if (!(qtiGetHwcDisplayId(displayDevice, &hwcDisplayId) &&
+                  !qtiIsInternalDisplay(displayDevice))) {
                 continue;
             }
             if (display->includesLayer(layer->getOutputFilter())) {
@@ -1496,8 +1534,8 @@ void QtiSurfaceFlingerExtension::qtiSetDisplayAnimating() {
 
     for (const auto& [token, displayDevice] :
          FTL_FAKE_GUARD(mQtiFlinger->mStateLock, mQtiFlinger->mDisplays)) {
-        if (qtiGetHwcDisplayId(displayDevice, &hwcDisplayId) &&
-            qtiIsInternalDisplay(displayDevice)) {
+        if (!(qtiGetHwcDisplayId(displayDevice, &hwcDisplayId) &&
+              !qtiIsInternalDisplay(displayDevice))) {
             continue;
         }
 
@@ -1540,10 +1578,19 @@ void QtiSurfaceFlingerExtension::qtiUpdateSmomoLayerInfo(
 #endif
         smoMo->CollectLayerStats(bufferStats);
 
-        const auto& schedule = mQtiFlinger->mScheduler->getVsyncSchedule();
-        auto vsyncTime = schedule->getTracker().nextAnticipatedVSyncTimeFrom(SYSTEM_TIME_MONOTONIC);
+        const auto &schedule = mQtiFlinger->mScheduler->getVsyncSchedule();
+        nsecs_t sfOffset = mQtiFlinger->mVsyncConfiguration->getCurrentConfigs().late.sfOffset;
+        const nsecs_t now = systemTime(SYSTEM_TIME_MONOTONIC);
+        auto vsyncTime = schedule->getTracker().nextAnticipatedVSyncTimeFrom(now);
+        nsecs_t sfVsyncTime = vsyncTime + sfOffset;
+        auto vsyncPeriod = schedule->getTracker().currentPeriod();
+        if (now >= sfVsyncTime) {
+          sfVsyncTime += vsyncPeriod;
+        } else if (now <= sfVsyncTime - vsyncPeriod) {
+          sfVsyncTime -= vsyncPeriod;
+        }
 
-        if (smoMo->FrameIsLate(bufferStats.id, vsyncTime)) {
+        if (smoMo->FrameIsLate(bufferStats.id, sfVsyncTime)) {
             qtiScheduleCompositeImmed();
         }
     }
@@ -1622,7 +1669,10 @@ void QtiSurfaceFlingerExtension::qtiUpdateSmomoLayerStackId(hal::HWDisplayId hwc
 }
 
 uint32_t QtiSurfaceFlingerExtension::qtiGetLayerClass(std::string mName) {
-    if (mQtiLayerExt) {
+    bool mUseLayerExt =
+            mQtiFeatureManager->qtiIsExtensionFeatureEnabled(QtiFeature::kLayerExtension);
+
+    if (mUseLayerExt && mQtiLayerExt) {
         uint32_t layerClass = static_cast<uint32_t>(mQtiLayerExt->GetLayerClass(mName));
         return layerClass;
     }
@@ -1962,34 +2012,21 @@ void QtiSurfaceFlingerExtension::qtiSetFrameBufferSizeForScaling(
     auto display = displayDevice->getCompositionDisplay();
     int newWidth = currentState.layerStackSpaceRect.width();
     int newHeight = currentState.layerStackSpaceRect.height();
-    int currentWidth = drawingState.layerStackSpaceRect.width();
-    int currentHeight = drawingState.layerStackSpaceRect.height();
     int displayWidth = displayDevice->getWidth();
     int displayHeight = displayDevice->getHeight();
-    bool update_needed = false;
 
-    ALOGV("%s: newWidth %d newHeight %d currentWidth %d currentHeight %d displayWidth %d "
-          "displayHeight %d",
-          __func__, newWidth, newHeight, currentWidth, currentHeight, displayWidth, displayHeight);
+    ALOGV("%s: newWidth %d newHeight %d displayWidth %d displayHeight %d",
+          __func__, newWidth, newHeight, displayWidth, displayHeight);
 
-    if (newWidth != currentWidth || newHeight != currentHeight) {
-        update_needed = true;
+    if (newWidth != displayWidth || newHeight != displayHeight) {
         if (!((newWidth > newHeight && displayWidth > displayHeight) ||
               (newWidth < newHeight && displayWidth < displayHeight))) {
             std::swap(newWidth, newHeight);
             ALOGV("%s: Width %d or height %d was updated. Swap the values of newWidth %d and "
                   "newHeight %d",
-                  __func__, (newWidth != currentWidth), (newHeight != currentHeight), newWidth,
+                  __func__, (newWidth != displayWidth), (newHeight != displayHeight), newWidth,
                   newHeight);
         }
-    }
-
-    if (displayDevice->getWidth() == newWidth && displayDevice->getHeight() == newHeight &&
-        !update_needed) {
-        ALOGV("%s: No changes on the configuration", __func__);
-        displayDevice->setProjection(currentState.orientation, currentState.layerStackSpaceRect,
-                                     currentState.orientedDisplaySpaceRect);
-        return;
     }
 
     if (newWidth > 0 && newHeight > 0) {
@@ -2000,6 +2037,14 @@ void QtiSurfaceFlingerExtension::qtiSetFrameBufferSizeForScaling(
     }
 
     currentState.orientedDisplaySpaceRect = currentState.layerStackSpaceRect;
+
+    if (displayWidth == newWidth && displayHeight == newHeight) {
+        ALOGV("%s: No changes on the configuration", __func__);
+        displayDevice->setProjection(currentState.orientation, currentState.layerStackSpaceRect,
+                                     currentState.orientedDisplaySpaceRect);
+        return;
+    }
+
     ALOGV("%s: Update currentState's orientedDisplaySpaceRect left %f top %f right %f bottom %f",
           __func__, currentState.orientedDisplaySpaceRect.left,
           currentState.orientedDisplaySpaceRect.top, currentState.orientedDisplaySpaceRect.right,
@@ -2027,6 +2072,7 @@ void QtiSurfaceFlingerExtension::qtiSetFrameBufferSizeForScaling(
         } else {
             mQtiDisplaySizeChanged = true;
         }
+        mQtiFlinger->setTransactionFlags(eDisplayTransactionNeeded);
     }
 }
 
@@ -2055,7 +2101,7 @@ bool QtiSurfaceFlingerExtension::qtiFbScalingOnDisplayChange(
         const wp<IBinder>& displayToken, sp<DisplayDevice> display,
         const DisplayDeviceState& drawingState) {
     bool useFbScaling = mQtiFeatureManager->qtiIsExtensionFeatureEnabled(QtiFeature::kFbScaling);
-    if (useFbScaling && display->isPrimary()) {
+    if (mQtiFlinger->mBootFinished && useFbScaling && display->isPrimary()) {
         const ssize_t index = mQtiFlinger->mCurrentState.displays.indexOfKey(displayToken);
         DisplayDeviceState& curState =
                 mQtiFlinger->mCurrentState.displays.editValueAt(static_cast<size_t>(index));
