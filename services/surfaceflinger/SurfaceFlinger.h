@@ -353,6 +353,11 @@ public:
         return sActiveDisplayRotationFlags;
     }
 
+    /* QTI_BEGIN */
+    bool mRequestDisplayModeFlag = false;
+    std::thread::id mFlagThread = std::this_thread::get_id();
+    /* QTI_END */
+
 protected:
     // We're reference counted, never destroy SurfaceFlinger directly
     virtual ~SurfaceFlinger();
@@ -631,7 +636,8 @@ private:
 
     status_t getMaxAcquiredBufferCount(int* buffers) const;
 
-    status_t addWindowInfosListener(const sp<gui::IWindowInfosListener>& windowInfosListener);
+    status_t addWindowInfosListener(const sp<gui::IWindowInfosListener>& windowInfosListener,
+                                    gui::WindowInfosListenerInfo* outResult);
     status_t removeWindowInfosListener(
             const sp<gui::IWindowInfosListener>& windowInfosListener) const;
 
@@ -1464,6 +1470,7 @@ private:
 
     /* QTI_BEGIN */
     surfaceflingerextension::QtiSurfaceFlingerExtensionIntf* mQtiSFExtnIntf = nullptr;
+    std::mutex mSmomoMutex;
     /* QTI_END */
 
     TransactionHandler mTransactionHandler;
@@ -1581,8 +1588,8 @@ public:
     binder::Status setOverrideFrameRate(int32_t uid, float frameRate) override;
     binder::Status getGpuContextPriority(int32_t* outPriority) override;
     binder::Status getMaxAcquiredBufferCount(int32_t* buffers) override;
-    binder::Status addWindowInfosListener(
-            const sp<gui::IWindowInfosListener>& windowInfosListener) override;
+    binder::Status addWindowInfosListener(const sp<gui::IWindowInfosListener>& windowInfosListener,
+                                          gui::WindowInfosListenerInfo* outInfo) override;
     binder::Status removeWindowInfosListener(
             const sp<gui::IWindowInfosListener>& windowInfosListener) override;
 
