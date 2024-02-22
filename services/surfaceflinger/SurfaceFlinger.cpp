@@ -1122,7 +1122,8 @@ void SurfaceFlinger::init() {
     mCompositionEngine->getHwComposer().setCallback(this);
     ClientCache::getInstance().setRenderEngine(&getRenderEngine());
 
-    if (base::GetBoolProperty("debug.sf.enable_hwc_vds"s, false)) {
+    bool enableHwcVDS = base::GetBoolProperty("debug.sf.enable_hwc_vds"s, false);
+    if (enableHwcVDS || base::GetBoolProperty("vendor.display.vds_allow_hwc"s, false)) {
         enableHalVirtualDisplays(true);
     }
 
@@ -8409,7 +8410,7 @@ bool SurfaceFlinger::canAllocateHwcDisplayIdForVDS(uint64_t usage) {
     uint64_t flag_mask_hw_video = ~0;
     char value[PROPERTY_VALUE_MAX] = {};
     property_get("vendor.display.vds_allow_hwc", value, "0");
-    int allowHwcForVDS = atoi(value);
+    int allowHwcForVDS = atoi(value) && base::GetBoolProperty("debug.sf.enable_hwc_vds"s, false);
     // Reserve hardware acceleration for WFD use-case
     // GRALLOC_USAGE_PRIVATE_WFD + GRALLOC_USAGE_HW_VIDEO_ENCODER = WFD using HW composer.
     flag_mask_pvt_wfd = GRALLOC_USAGE_PRIVATE_WFD;
