@@ -131,6 +131,7 @@ const char* const gExtensionString  =
         "EGL_KHR_wait_sync "                    // strongly recommended
         "EGL_NV_context_priority_realtime "
         "EGL_NV_system_time "
+        "EGL_MESA_image_dma_buf_export "
         ;
 
 const char* const gClientExtensionString =
@@ -205,7 +206,16 @@ static const extension_map_t sExtensionMap[] = {
     { "eglGetFrameTimestampSupportedANDROID", (__eglMustCastToProperFunctionPointerType)&eglGetFrameTimestampSupportedANDROID },
 
     // EGL_ANDROID_native_fence_sync
+
     { "eglDupNativeFenceFDANDROID", (__eglMustCastToProperFunctionPointerType)&eglDupNativeFenceFDANDROID },
+
+
+    // EGL_MESA_image_dma_buf_export
+    { "eglExportDMABUFImageQueryMESA",
+            (__eglMustCastToProperFunctionPointerType)&eglExportDMABUFImageQueryMESA },
+    { "eglExportDMABUFImageMESA",
+            (__eglMustCastToProperFunctionPointerType)&eglExportDMABUFImageMESA },
+
 };
 // clang-format on
 
@@ -2412,8 +2422,33 @@ EGLBoolean eglGetFrameTimestampSupportedANDROIDImpl(EGLDisplay dpy, EGLSurface s
     }
 }
 
-const GLubyte* glGetStringImpl(GLenum name) {
-    const GLubyte* ret = egl_get_string_for_current_context(name);
+
+EGLBoolean eglExportDMABUFImageQueryMESAImpl(EGLDisplay dpy, EGLImageKHR image, int* fourcc,
+        int* num_planes, EGLuint64KHR* modifiers)
+{
+     const egl_display_t* dp = validate_display(dpy);
+    if (!dp) return EGL_FALSE;
+
+    EGLBoolean result = EGL_FALSE;
+    egl_connection_t* const cnx = &gEGLImpl;
+    return result = cnx->egl.eglExportDMABUFImageQueryMESA(dp->disp.dpy, image, fourcc, num_planes, modifiers);
+}
+
+EGLBoolean eglExportDMABUFImageMESAImpl(EGLDisplay dpy,  EGLImageKHR image,
+        int* fds,  EGLint* strides, EGLint* offsets)
+{
+
+    const egl_display_t* dp = validate_display(dpy);
+    if (!dp) return EGL_FALSE;
+
+    EGLBoolean result = EGL_FALSE;
+    egl_connection_t* const cnx = &gEGLImpl;
+    return result = cnx->egl.eglExportDMABUFImageMESA(dp->disp.dpy, image, fds, strides, offsets);
+}
+
+const GLubyte * glGetStringImpl(GLenum name) {
+    const GLubyte * ret = egl_get_string_for_current_context(name);
+
     if (ret == NULL) {
         gl_hooks_t::gl_t const* const _c = &getGlThreadSpecific()->gl;
         if (_c) ret = _c->glGetString(name);
@@ -2569,6 +2604,8 @@ static const implementation_map_t sPlatformImplMap[] = {
     { "eglGetCompositorTimingSupportedANDROID", (EGLFuncPointer)&eglGetCompositorTimingSupportedANDROIDImpl },
     { "eglGetFrameTimestampsANDROID", (EGLFuncPointer)&eglGetFrameTimestampsANDROIDImpl },
     { "eglGetFrameTimestampSupportedANDROID", (EGLFuncPointer)&eglGetFrameTimestampSupportedANDROIDImpl },
+    { "eglExportDMABUFImageQueryMESA", (EGLFuncPointer)&eglExportDMABUFImageQueryMESAImpl },
+    { "eglExportDMABUFImageMESA", (EGLFuncPointer)&eglExportDMABUFImageMESAImpl },
     { "glGetString", (EGLFuncPointer)&glGetStringImpl },
     { "glGetStringi", (EGLFuncPointer)&glGetStringiImpl },
     { "glGetBooleanv", (EGLFuncPointer)&glGetBooleanvImpl },
