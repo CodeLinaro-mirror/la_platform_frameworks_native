@@ -41,19 +41,19 @@
     <feature name="android.hardware.security.model.compatible" />
 
     <!-- basic system services -->
-    <feature name="android.software.app_widgets" notLowRam="true" />
+    <!-- feature name="android.software.app_widgets" notLowRam="true" / -->
     <feature name="android.software.telecom" />
-    <feature name="android.software.voice_recognizers" notLowRam="false" />
-    <feature name="android.software.backup" notLowRam="true" />
+    <!-- feature name="android.software.voice_recognizers" notLowRam="false" / -->
+    <!-- feature name="android.software.backup" notLowRam="true" / -->
     <feature name="android.software.home_screen" />
     <feature name="android.software.input_methods" />
-    <feature name="android.software.picture_in_picture" notLowRam="false" />
-    <feature name="android.software.activities_on_secondary_displays" notLowRam="false" />
-    <feature name="android.software.print" notLowRam="true" />
-    <feature name="android.software.companion_device_setup" notLowRam="true" />
-    <feature name="android.software.autofill" notLowRam="true" />
+    <!-- feature name="android.software.picture_in_picture" notLowRam="false" / -->
+    <!-- feature name="android.software.activities_on_secondary_displays" notLowRam="false" / -->
+    <!-- feature name="android.software.print" notLowRam="true" / -->
+    <!-- feature name="android.software.companion_device_setup" notLowRam="true" / -->
+    <!-- feature name="android.software.autofill" notLowRam="true" / -->
     <feature name="android.software.cant_save_state" />
-    <feature name="android.software.secure_lock_screen" notLowRam="true" />
+    <!-- feature name="android.software.secure_lock_screen" notLowRam="true" / -->
     <feature name="android.software.window_magnification" />
 
     <!-- Feature to specify if the device supports adding device admins. -->
