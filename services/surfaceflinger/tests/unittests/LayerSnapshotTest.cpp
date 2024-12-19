@@ -1454,6 +1454,23 @@ TEST_F(LayerSnapshotTest, alphaChangesPropagateToInput) {
     EXPECT_EQ(getSnapshot(1)->inputInfo.alpha, 0.5f);
 }
 
+TEST_F(LayerSnapshotTest, shouldUpdateInputWhenNoInputInfo) {
+    // If a layer has no buffer or no color, it doesn't have an input info
+    setColor(111, {-1._hf, -1._hf, -1._hf});
+    UPDATE_AND_VERIFY(mSnapshotBuilder, {1, 11, 12, 121, 122, 1221, 13, 2});
+    EXPECT_FALSE(getSnapshot(111)->hasInputInfo());
+
+    setBuffer(111,
+              std::make_shared<renderengine::mock::FakeExternalTexture>(1U /*width*/, 1U /*height*/,
+                                                                        1ULL /* bufferId */,
+                                                                        HAL_PIXEL_FORMAT_RGBA_8888,
+                                                                        0 /*usage*/));
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+
+    EXPECT_TRUE(getSnapshot(111)->hasInputInfo());
+    EXPECT_TRUE(getSnapshot(111)->inputInfo.inputConfig.test(
+            gui::WindowInfo::InputConfig::NO_INPUT_CHANNEL));
+}
 TEST_F(LayerSnapshotTest, isFrontBuffered) {
     setBuffer(1,
               std::make_shared<renderengine::mock::FakeExternalTexture>(
