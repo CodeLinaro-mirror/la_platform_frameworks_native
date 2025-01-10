@@ -19,6 +19,7 @@
 #include "FakeInputDispatcherPolicy.h"
 #include "FakeInputTracingBackend.h"
 #include "FakeWindows.h"
+#include "ScopedFlagOverride.h"
 #include "TestEventMatchers.h"
 
 #include <NotifyArgsBuilders.h>
@@ -137,40 +138,6 @@ static KeyEvent getTestKeyEvent() {
                      AKEYCODE_A, KEY_A, AMETA_NONE, 0, ARBITRARY_TIME, ARBITRARY_TIME);
     return event;
 }
-
-/**
- * Provide a local override for a flag value. The value is restored when the object of this class
- * goes out of scope.
- * This class is not intended to be used directly, because its usage is cumbersome.
- * Instead, a wrapper macro SCOPED_FLAG_OVERRIDE is provided.
- */
-class ScopedFlagOverride {
-public:
-    ScopedFlagOverride(std::function<bool()> read, std::function<void(bool)> write, bool value)
-          : mInitialValue(read()), mWriteValue(write) {
-        mWriteValue(value);
-    }
-    ~ScopedFlagOverride() { mWriteValue(mInitialValue); }
-
-private:
-    const bool mInitialValue;
-    std::function<void(bool)> mWriteValue;
-};
-
-typedef bool (*readFlagValueFunction)();
-typedef void (*writeFlagValueFunction)(bool);
-
-/**
- * Use this macro to locally override a flag value.
- * Example usage:
- *    SCOPED_FLAG_OVERRIDE(enable_multi_device_same_window_stream, false);
- * Note: this works by creating a local variable in your current scope. Don't call this twice for
- * the same flag, because the variable names will clash!
- */
-#define SCOPED_FLAG_OVERRIDE(NAME, VALUE)                                  \
-    readFlagValueFunction read##NAME = com::android::input::flags::NAME;   \
-    writeFlagValueFunction write##NAME = com::android::input::flags::NAME; \
-    ScopedFlagOverride override##NAME(read##NAME, write##NAME, (VALUE))
 
 } // namespace
 
@@ -1568,6 +1535,60 @@ TEST_F(InputDispatcherTest, HoverEventInconsistentPolicy) {
                                       .pointer(PointerBuilder(0, ToolType::STYLUS).x(201).y(202))
                                       .build());
     window->consumeMotionEvent(WithMotionAction(ACTION_HOVER_EXIT));
+}
+
+// Still send inject motion events to window which already be touched.
+TEST_F(InputDispatcherTest, AlwaysDispatchInjectMotionEventWhenAlreadyDownForWindow) {
+    std::shared_ptr<FakeApplicationHandle> application1 = std::make_shared<FakeApplicationHandle>();
+    sp<FakeWindowHandle> window1 =
+            sp<FakeWindowHandle>::make(application1, mDispatcher, "window1",
+                                       ui::LogicalDisplayId::DEFAULT);
+    window1->setFrame(Rect(0, 0, 100, 100));
+    window1->setWatchOutsideTouch(false);
+
+    std::shared_ptr<FakeApplicationHandle> application2 = std::make_shared<FakeApplicationHandle>();
+    sp<FakeWindowHandle> window2 =
+            sp<FakeWindowHandle>::make(application2, mDispatcher, "window2",
+                                       ui::LogicalDisplayId::DEFAULT);
+    window2->setFrame(Rect(50, 50, 100, 100));
+    window2->setWatchOutsideTouch(true);
+    mDispatcher->onWindowInfosChanged({{*window2->getInfo(), *window1->getInfo()}, {}, 0, 0});
+
+    std::chrono::milliseconds injectionTimeout = INJECT_EVENT_TIMEOUT;
+    InputEventInjectionSync injectionMode = InputEventInjectionSync::WAIT_FOR_RESULT;
+    std::optional<gui::Uid> targetUid = {};
+    uint32_t policyFlags = DEFAULT_POLICY_FLAGS;
+
+    const MotionEvent eventDown1 = MotionEventBuilder(ACTION_DOWN, AINPUT_SOURCE_TOUCHSCREEN)
+        .pointer(PointerBuilder(0, ToolType::FINGER).x(60).y(60)).deviceId(-1)
+        .build();
+    injectMotionEvent(*mDispatcher, eventDown1, injectionTimeout, injectionMode, targetUid,
+        policyFlags);
+    window2->consumeMotionEvent(WithMotionAction(ACTION_DOWN));
+
+    const MotionEvent eventUp1 = MotionEventBuilder(ACTION_UP, AINPUT_SOURCE_TOUCHSCREEN)
+        .pointer(PointerBuilder(0, ToolType::FINGER).x(60).y(60)).deviceId(-1)
+        .downTime(eventDown1.getDownTime()).build();
+    // Inject UP event, without the POLICY_FLAG_PASS_TO_USER (to simulate policy behaviour
+    // when screen is off).
+    injectMotionEvent(*mDispatcher, eventUp1, injectionTimeout, injectionMode, targetUid,
+        /*policyFlags=*/0);
+    window2->consumeMotionEvent(WithMotionAction(ACTION_UP));
+    const MotionEvent eventDown2 = MotionEventBuilder(ACTION_DOWN, AINPUT_SOURCE_TOUCHSCREEN)
+        .pointer(PointerBuilder(0, ToolType::FINGER).x(40).y(40)).deviceId(-1)
+        .build();
+    injectMotionEvent(*mDispatcher, eventDown2, injectionTimeout, injectionMode, targetUid,
+        policyFlags);
+    window1->consumeMotionEvent(WithMotionAction(ACTION_DOWN));
+    window2->consumeMotionEvent(WithMotionAction(ACTION_OUTSIDE));
+
+    const MotionEvent eventUp2 = MotionEventBuilder(ACTION_UP, AINPUT_SOURCE_TOUCHSCREEN)
+        .pointer(PointerBuilder(0, ToolType::FINGER).x(60).y(60)).deviceId(-1)
+        .downTime(eventDown2.getDownTime()).build();
+    injectMotionEvent(*mDispatcher, eventUp2, injectionTimeout, injectionMode, targetUid,
+        /*policyFlags=*/0);
+    window1->consumeMotionEvent(WithMotionAction(ACTION_UP));
+    window2->assertNoEvents();
 }
 
 /**
