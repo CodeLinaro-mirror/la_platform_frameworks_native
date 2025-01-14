@@ -630,7 +630,7 @@ private:
     void updateLastAnrStateLocked(const std::string& windowLabel, const std::string& reason)
             REQUIRES(mLock);
 
-    // Outbound policy interactions.
+// Outbound policy interactions.
     void doNotifyConfigurationChangedLockedInterruptible(CommandEntry* commandEntry)
             REQUIRES(mLock);
     void doNotifyInputChannelBrokenLockedInterruptible(CommandEntry* commandEntry) REQUIRES(mLock);
@@ -651,7 +651,7 @@ private:
     void doDispatchCycleFinishedLockedInterruptible(CommandEntry* commandEntry) REQUIRES(mLock);
     void doSetPointerCaptureLockedInterruptible(CommandEntry* commandEntry) REQUIRES(mLock);
     bool afterKeyEventLockedInterruptible(const sp<Connection>& connection,
-                                          DispatchEntry* dispatchEntry, KeyEntry& keyEntry,
+                                          DispatchEntry* dispatchEntry,
                                           bool handled) REQUIRES(mLock);
     bool afterMotionEventLockedInterruptible(const sp<Connection>& connection,
                                              DispatchEntry* dispatchEntry, MotionEntry& motionEntry,
