@@ -173,7 +173,7 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     layerSettings.edgeExtensionEffect = mSnapshot->edgeExtensionEffect;
     // Record the name of the layer for debugging further down the stack.
     layerSettings.name = mSnapshot->name;
-    layerSettings.luts = mSnapshot->luts;
+    layerSettings.luts = mSnapshot->luts ? mSnapshot->luts : targetSettings.luts;
 
     if (hasEffect() && !hasBufferOrSidebandStream()) {
         prepareEffectsClientComposition(layerSettings, targetSettings);
@@ -427,4 +427,14 @@ ftl::Future<FenceResult> LayerFE::createReleaseFenceFuture() {
 LayerFE::ReleaseFencePromiseStatus LayerFE::getReleaseFencePromiseStatus() {
     return mReleaseFencePromiseStatus;
 }
+
+void LayerFE::setHwcCompositionType(
+        aidl::android::hardware::graphics::composer3::Composition type) {
+    mLastHwcCompositionType = type;
+}
+
+aidl::android::hardware::graphics::composer3::Composition LayerFE::getHwcCompositionType() const {
+    return mLastHwcCompositionType;
+}
+
 } // namespace android
