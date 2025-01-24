@@ -105,8 +105,7 @@ public:
         binder::ScopedTrace aidlTrace(ATRACE_TAG_AIDL,
                                       "BinderCacheWithInvalidation::setItem Successfully Cached");
         std::lock_guard<std::mutex> lock(mCacheMutex);
-        Entry entry = {.service = item, .deathRecipient = deathRecipient};
-        mCache[key] = entry;
+        mCache[key] = {.service = item, .deathRecipient = deathRecipient};
         return binder::Status::ok();
     }
 
@@ -123,7 +122,8 @@ public:
 
     binder::Status getService(const ::std::string& name, sp<IBinder>* _aidl_return) override;
     binder::Status getService2(const ::std::string& name, os::Service* out) override;
-    binder::Status checkService(const ::std::string& name, os::Service* out) override;
+    binder::Status checkService(const ::std::string& name, sp<IBinder>* _aidl_return) override;
+    binder::Status checkService2(const ::std::string& name, os::Service* out) override;
     binder::Status addService(const ::std::string& name, const sp<IBinder>& service,
                               bool allowIsolated, int32_t dumpPriority) override;
     binder::Status listServices(int32_t dumpPriority,
@@ -147,22 +147,30 @@ public:
                                         const sp<IBinder>& service) override;
     binder::Status getServiceDebugInfo(::std::vector<os::ServiceDebugInfo>* _aidl_return) override;
 
+    void enableAddServiceCache(bool value) { mEnableAddServiceCache = value; }
     // for legacy ABI
     const String16& getInterfaceDescriptor() const override {
         return mTheRealServiceManager->getInterfaceDescriptor();
     }
 
 private:
+    bool mEnableAddServiceCache = true;
     std::shared_ptr<BinderCacheWithInvalidation> mCacheForGetService;
     sp<os::IServiceManager> mTheRealServiceManager;
     binder::Status toBinderService(const ::std::string& name, const os::Service& in,
                                    os::Service* _out);
     binder::Status updateCache(const std::string& serviceName, const os::Service& service);
+    binder::Status updateCache(const std::string& serviceName, const sp<IBinder>& binder,
+                               bool isLazyService);
     bool returnIfCached(const std::string& serviceName, os::Service* _out);
 };
 
 sp<BackendUnifiedServiceManager> getBackendUnifiedServiceManager();
 
 android::binder::Status getInjectedAccessor(const std::string& name, android::os::Service* service);
+void appendInjectedAccessorServices(std::vector<std::string>* list);
+// Do not call any other service manager APIs that might take the accessor
+// mutex because this will be holding it!
+void forEachInjectedAccessorService(const std::function<void(const std::string&)>& f);
 
 } // namespace android

@@ -60,7 +60,6 @@ using types::V1_2::PixelFormat;
 
 using V2_1::Config;
 using V2_1::Display;
-using V2_1::Error;
 using V2_1::Layer;
 using V2_4::CommandReaderBase;
 using V2_4::CommandWriterBase;
@@ -215,6 +214,10 @@ public:
     Error getReleaseFences(Display display, std::vector<Layer>* outLayers,
                            std::vector<int>* outReleaseFences) override;
 
+    Error getLayerPresentFences(Display display, std::vector<Layer>* outLayers,
+                                std::vector<int>* outFences,
+                                std::vector<int64_t>* outLatenciesNanos) override;
+
     Error presentDisplay(Display display, int* outPresentFence) override;
 
     Error setActiveConfig(Display display, Config config) override;
@@ -308,7 +311,7 @@ public:
     V2_4::Error getDisplayConnectionType(Display display,
                                          IComposerClient::DisplayConnectionType* outType) override;
     V2_4::Error getDisplayVsyncPeriod(Display display, VsyncPeriodNanos* outVsyncPeriod) override;
-    V2_4::Error setActiveConfigWithConstraints(
+    Error setActiveConfigWithConstraints(
             Display display, Config config,
             const IComposerClient::VsyncPeriodChangeConstraints& vsyncPeriodChangeConstraints,
             VsyncPeriodChangeTimeline* outTimeline) override;
@@ -357,6 +360,11 @@ public:
             override;
     Error setLayerLuts(Display, Layer,
                        aidl::android::hardware::graphics::composer3::Luts&) override;
+    Error getMaxLayerPictureProfiles(Display, int32_t* outMaxProfiles) override;
+    Error setDisplayPictureProfileId(Display, PictureProfileId) override;
+    Error setLayerPictureProfileId(Display, Layer, PictureProfileId) override;
+    Error getLuts(Display, const std::vector<sp<GraphicBuffer>>&,
+                  std::vector<aidl::android::hardware::graphics::composer3::Luts>*) override;
 
 private:
     class CommandWriter : public CommandWriterBase {

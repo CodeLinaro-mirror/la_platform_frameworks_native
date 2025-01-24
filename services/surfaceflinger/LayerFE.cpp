@@ -27,7 +27,6 @@
 #include "LayerFE.h"
 #include "SurfaceFlinger.h"
 #include "ui/FenceResult.h"
-#include "ui/LayerStack.h"
 
 namespace android {
 
@@ -174,7 +173,7 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     layerSettings.edgeExtensionEffect = mSnapshot->edgeExtensionEffect;
     // Record the name of the layer for debugging further down the stack.
     layerSettings.name = mSnapshot->name;
-    layerSettings.luts = mSnapshot->luts;
+    layerSettings.luts = mSnapshot->luts ? mSnapshot->luts : targetSettings.luts;
 
     if (hasEffect() && !hasBufferOrSidebandStream()) {
         prepareEffectsClientComposition(layerSettings, targetSettings);
@@ -192,6 +191,7 @@ void LayerFE::prepareClearClientComposition(LayerFE::LayerSettings& layerSetting
     layerSettings.disableBlending = true;
     layerSettings.bufferId = 0;
     layerSettings.frameNumber = 0;
+    layerSettings.sequence = -1;
 
     // If layer is blacked out, force alpha to 1 so that we draw a black color layer.
     layerSettings.alpha = blackout ? 1.0f : 0.0f;
@@ -263,6 +263,7 @@ void LayerFE::prepareBufferStateClientComposition(
     layerSettings.source.buffer.maxLuminanceNits = maxLuminance;
     layerSettings.frameNumber = mSnapshot->frameNumber;
     layerSettings.bufferId = mSnapshot->externalTexture->getId();
+    layerSettings.sequence = mSnapshot->sequence;
 
     const bool useFiltering = targetSettings.needsFiltering ||
                               mSnapshot->geomLayerTransform.needsBilinearFiltering();
@@ -343,13 +344,15 @@ void LayerFE::prepareShadowClientComposition(LayerFE::LayerSettings& caster,
     caster.shadow = state;
 }
 
-void LayerFE::onLayerDisplayed(ftl::SharedFuture<FenceResult> futureFenceResult,
-                               ui::LayerStack layerStack) {
-    mCompositionResult.releaseFences.emplace_back(std::move(futureFenceResult), layerStack);
+void LayerFE::onPictureProfileCommitted() {
+    mCompositionResult.wasPictureProfileCommitted = true;
+    mCompositionResult.pictureProfileHandle = mSnapshot->pictureProfileHandle;
 }
 
-CompositionResult&& LayerFE::stealCompositionResult() {
-    return std::move(mCompositionResult);
+CompositionResult LayerFE::stealCompositionResult() {
+    CompositionResult result;
+    std::swap(mCompositionResult, result);
+    return result;
 }
 
 const char* LayerFE::getDebugName() const {
@@ -424,4 +427,14 @@ ftl::Future<FenceResult> LayerFE::createReleaseFenceFuture() {
 LayerFE::ReleaseFencePromiseStatus LayerFE::getReleaseFencePromiseStatus() {
     return mReleaseFencePromiseStatus;
 }
+
+void LayerFE::setHwcCompositionType(
+        aidl::android::hardware::graphics::composer3::Composition type) {
+    mLastHwcCompositionType = type;
+}
+
+aidl::android::hardware::graphics::composer3::Composition LayerFE::getHwcCompositionType() const {
+    return mLastHwcCompositionType;
+}
+
 } // namespace android

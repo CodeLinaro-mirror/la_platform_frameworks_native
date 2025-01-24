@@ -127,6 +127,8 @@ public:
     }
     IBinder* onAsBinder() override { return IInterface::asBinder(mUnifiedServiceManager).get(); }
 
+    void enableAddServiceCache(bool value) { mUnifiedServiceManager->enableAddServiceCache(value); }
+
 protected:
     sp<BackendUnifiedServiceManager> mUnifiedServiceManager;
     // AidlRegistrationCallback -> services that its been registered for
@@ -150,7 +152,8 @@ protected:
     virtual Status realGetService(const std::string& name, sp<IBinder>* _aidl_return) {
         Service service;
         Status status = mUnifiedServiceManager->getService2(name, &service);
-        *_aidl_return = service.get<Service::Tag::binder>();
+        auto serviceWithMetadata = service.get<Service::Tag::serviceWithMetadata>();
+        *_aidl_return = serviceWithMetadata.service;
         return status;
     }
 };
@@ -299,6 +302,25 @@ android::binder::Status getInjectedAccessor(const std::string& name,
 
     *service = os::Service::make<os::Service::Tag::accessor>(nullptr);
     return android::binder::Status::ok();
+}
+
+void appendInjectedAccessorServices(std::vector<std::string>* list) {
+    LOG_ALWAYS_FATAL_IF(list == nullptr,
+                        "Attempted to get list of services from Accessors with nullptr");
+    std::lock_guard<std::mutex> lock(gAccessorProvidersMutex);
+    for (const auto& entry : gAccessorProviders) {
+        list->insert(list->end(), entry.mProvider->instances().begin(),
+                     entry.mProvider->instances().end());
+    }
+}
+
+void forEachInjectedAccessorService(const std::function<void(const std::string&)>& f) {
+    std::lock_guard<std::mutex> lock(gAccessorProvidersMutex);
+    for (const auto& entry : gAccessorProviders) {
+        for (const auto& instance : entry.mProvider->instances()) {
+            f(instance);
+        }
+    }
 }
 
 sp<IServiceManager> defaultServiceManager()
@@ -602,10 +624,10 @@ sp<IBinder> CppBackendShim::getService(const String16& name) const {
 
 sp<IBinder> CppBackendShim::checkService(const String16& name) const {
     Service ret;
-    if (!mUnifiedServiceManager->checkService(String8(name).c_str(), &ret).isOk()) {
+    if (!mUnifiedServiceManager->checkService2(String8(name).c_str(), &ret).isOk()) {
         return nullptr;
     }
-    return ret.get<Service::Tag::binder>();
+    return ret.get<Service::Tag::serviceWithMetadata>().service;
 }
 
 status_t CppBackendShim::addService(const String16& name, const sp<IBinder>& service,

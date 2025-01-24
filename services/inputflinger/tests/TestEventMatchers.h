@@ -32,6 +32,17 @@
 
 namespace android {
 
+namespace {
+
+template <typename T>
+static bool valuesMatch(T value1, T value2) {
+    if constexpr (std::is_floating_point_v<T>) {
+        return std::abs(value1 - value2) < EPSILON;
+    } else {
+        return value1 == value2;
+    }
+}
+
 struct PointF {
     float x;
     float y;
@@ -41,6 +52,8 @@ struct PointF {
 inline std::string pointFToString(const PointF& p) {
     return std::string("(") + std::to_string(p.x) + ", " + std::to_string(p.y) + ")";
 }
+
+} // namespace
 
 /// Source
 class WithSourceMatcher {
@@ -108,20 +121,33 @@ public:
     using is_gtest_matcher = void;
     explicit WithMotionActionMatcher(int32_t action) : mAction(action) {}
 
-    bool MatchAndExplain(const NotifyMotionArgs& args, std::ostream*) const {
-        bool matches = mAction == args.action;
-        if (args.action == AMOTION_EVENT_ACTION_CANCEL) {
-            matches &= (args.flags & AMOTION_EVENT_FLAG_CANCELED) != 0;
+    bool MatchAndExplain(const NotifyMotionArgs& args,
+                         testing::MatchResultListener* listener) const {
+        if (mAction != args.action) {
+            *listener << "expected " << MotionEvent::actionToString(mAction) << ", but got "
+                      << MotionEvent::actionToString(args.action);
+            return false;
         }
-        return matches;
+        if (args.action == AMOTION_EVENT_ACTION_CANCEL &&
+            (args.flags & AMOTION_EVENT_FLAG_CANCELED) == 0) {
+            *listener << "event with CANCEL action is missing FLAG_CANCELED";
+            return false;
+        }
+        return true;
     }
 
-    bool MatchAndExplain(const MotionEvent& event, std::ostream*) const {
-        bool matches = mAction == event.getAction();
-        if (event.getAction() == AMOTION_EVENT_ACTION_CANCEL) {
-            matches &= (event.getFlags() & AMOTION_EVENT_FLAG_CANCELED) != 0;
+    bool MatchAndExplain(const MotionEvent& event, testing::MatchResultListener* listener) const {
+        if (mAction != event.getAction()) {
+            *listener << "expected " << MotionEvent::actionToString(mAction) << ", but got "
+                      << MotionEvent::actionToString(event.getAction());
+            return false;
         }
-        return matches;
+        if (event.getAction() == AMOTION_EVENT_ACTION_CANCEL &&
+            (event.getFlags() & AMOTION_EVENT_FLAG_CANCELED) == 0) {
+            *listener << "event with CANCEL action is missing FLAG_CANCELED";
+            return false;
+        }
+        return true;
     }
 
     void DescribeTo(std::ostream* os) const {
@@ -693,8 +719,8 @@ public:
         }
 
         const PointerCoords& coords = event.pointerCoords[mPointerIndex];
-        bool matches = mRelX == coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X) &&
-                mRelY == coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y);
+        bool matches = valuesMatch(mRelX, coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X)) &&
+                valuesMatch(mRelY, coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y));
         if (!matches) {
             *os << "expected relative motion (" << mRelX << ", " << mRelY << ") at pointer index "
                 << mPointerIndex << ", but got ("
