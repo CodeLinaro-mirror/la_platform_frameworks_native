@@ -135,7 +135,6 @@
 #include "DisplayDevice.h"
 #include "DisplayHardware/ComposerHal.h"
 #include "DisplayHardware/FramebufferSurface.h"
-#include "DisplayHardware/HWComposer.h"
 #include "DisplayHardware/Hal.h"
 #include "DisplayHardware/VirtualDisplaySurface.h"
 #include "DisplayRenderArea.h"
@@ -1071,7 +1070,8 @@ void SurfaceFlinger::init() FTL_FAKE_GUARD(kMainThreadContext) {
 void SurfaceFlinger::initBootProperties() {
     property_set("service.sf.present_timestamp", mHasReliablePresentFences ? "1" : "0");
 
-    if (base::GetBoolProperty("debug.sf.boot_animation"s, true)) {
+    if (base::GetBoolProperty("debug.sf.boot_animation"s, true) &&
+        (base::GetIntProperty("debug.sf.nobootanimation"s, 0) == 0)) {
         // Reset and (if needed) start BootAnimation.
         property_set("service.bootanim.exit", "0");
         property_set("service.bootanim.progress", "0");
@@ -2292,12 +2292,12 @@ void SurfaceFlinger::onComposerHalVsync(hal::HWDisplayId hwcDisplayId, int64_t t
 void SurfaceFlinger::onComposerHalHotplugEvent(hal::HWDisplayId hwcDisplayId,
                                                DisplayHotplugEvent event) {
     if (event == DisplayHotplugEvent::CONNECTED || event == DisplayHotplugEvent::DISCONNECTED) {
-        hal::Connection connection = (event == DisplayHotplugEvent::CONNECTED)
-                ? hal::Connection::CONNECTED
-                : hal::Connection::DISCONNECTED;
+        const HWComposer::HotplugEvent hotplugEvent = event == DisplayHotplugEvent::CONNECTED
+                ? HWComposer::HotplugEvent::Connected
+                : HWComposer::HotplugEvent::Disconnected;
         {
             std::lock_guard<std::mutex> lock(mHotplugMutex);
-            mPendingHotplugEvents.push_back(HotplugEvent{hwcDisplayId, connection});
+            mPendingHotplugEvents.push_back(HotplugEvent{hwcDisplayId, hotplugEvent});
         }
 
         if (mScheduler) {
@@ -3658,13 +3658,13 @@ bool SurfaceFlinger::configureLocked() {
         events = std::move(mPendingHotplugEvents);
     }
 
-    for (const auto [hwcDisplayId, connection] : events) {
-        if (auto info = getHwComposer().onHotplug(hwcDisplayId, connection)) {
+    for (const auto [hwcDisplayId, event] : events) {
+        if (auto info = getHwComposer().onHotplug(hwcDisplayId, event)) {
             const auto displayId = info->id;
             const ftl::Concat displayString("display ", displayId.value, "(HAL ID ", hwcDisplayId,
                                             ')');
 
-            if (connection == hal::Connection::CONNECTED) {
+            if (event == HWComposer::HotplugEvent::Connected) {
                 const auto activeModeIdOpt =
                         processHotplugConnect(displayId, hwcDisplayId, std::move(*info),
                                               displayString.c_str());
@@ -3975,9 +3975,6 @@ void SurfaceFlinger::processDisplayAdded(const wp<IBinder>& displayToken,
                                                  displaySurface, producer);
 
     if (mScheduler && !display->isVirtual()) {
-        // TODO(b/241285876): Annotate `processDisplayAdded` instead.
-        ftl::FakeGuard guard(kMainThreadContext);
-
         // For hotplug reconnect, renew the registration since display modes have been reloaded.
         mScheduler->registerDisplay(display->getPhysicalId(), display->holdRefreshRateSelector(),
                                     mActiveDisplayId);
@@ -4608,27 +4605,6 @@ void SurfaceFlinger::invalidateLayerStack(const ui::LayerFilter& layerFilter, co
 status_t SurfaceFlinger::addClientLayer(LayerCreationArgs& args, const sp<IBinder>& handle,
                                         const sp<Layer>& layer, const wp<Layer>& parent,
                                         uint32_t* outTransformHint) {
-    if (mNumLayers >= MAX_LAYERS) {
-        static std::atomic<nsecs_t> lasttime{0};
-        nsecs_t now = systemTime();
-        if (lasttime != 0 && ns2s(now - lasttime.load()) < 10) {
-            ALOGE("AddClientLayer already dumped 10s before");
-            return NO_MEMORY;
-        } else {
-            lasttime = now;
-        }
-
-        ALOGE("AddClientLayer failed, mNumLayers (%zu) >= MAX_LAYERS (%zu)", mNumLayers.load(),
-              MAX_LAYERS);
-        static_cast<void>(mScheduler->schedule([&]() FTL_FAKE_GUARD(kMainThreadContext) {
-            ALOGE("Dumping on-screen layers.");
-            mLayerHierarchyBuilder.dumpLayerSample(mLayerHierarchyBuilder.getHierarchy());
-            ALOGE("Dumping off-screen layers.");
-            mLayerHierarchyBuilder.dumpLayerSample(mLayerHierarchyBuilder.getOffscreenHierarchy());
-        }));
-        return NO_MEMORY;
-    }
-
     if (outTransformHint) {
         *outTransformHint = mActiveDisplayTransformHint;
     }
@@ -5411,14 +5387,13 @@ status_t SurfaceFlinger::mirrorDisplay(DisplayId displayId, const LayerCreationA
         mirrorArgs.addToRoot = true;
         mirrorArgs.layerStackToMirror = layerStack;
         result = createEffectLayer(mirrorArgs, &outResult.handle, &rootMirrorLayer);
+        if (result != NO_ERROR) {
+            return result;
+        }
         outResult.layerId = rootMirrorLayer->sequence;
         outResult.layerName = String16(rootMirrorLayer->getDebugName());
-        result |= addClientLayer(mirrorArgs, outResult.handle, rootMirrorLayer /* layer */,
-                                 nullptr /* parent */, nullptr /* outTransformHint */);
-    }
-
-    if (result != NO_ERROR) {
-        return result;
+        addClientLayer(mirrorArgs, outResult.handle, rootMirrorLayer /* layer */,
+                       nullptr /* parent */, nullptr /* outTransformHint */);
     }
 
     setTransactionFlags(eTransactionFlushNeeded);
@@ -5438,6 +5413,9 @@ status_t SurfaceFlinger::createLayer(LayerCreationArgs& args, gui::CreateSurface
             [[fallthrough]];
         case ISurfaceComposerClient::eFXSurfaceEffect: {
             result = createBufferStateLayer(args, &outResult.handle, &layer);
+            if (result != NO_ERROR) {
+                return result;
+            }
             std::atomic<int32_t>* pendingBufferCounter = layer->getPendingBufferCounter();
             if (pendingBufferCounter) {
                 std::string counterName = layer->getPendingBufferCounterName();
@@ -5478,6 +5456,9 @@ status_t SurfaceFlinger::createLayer(LayerCreationArgs& args, gui::CreateSurface
 
 status_t SurfaceFlinger::createBufferStateLayer(LayerCreationArgs& args, sp<IBinder>* handle,
                                                 sp<Layer>* outLayer) {
+    if (checkLayerLeaks() != NO_ERROR) {
+        return NO_MEMORY;
+    }
     *outLayer = getFactory().createBufferStateLayer(args);
     *handle = (*outLayer)->getHandle();
     return NO_ERROR;
@@ -5485,8 +5466,35 @@ status_t SurfaceFlinger::createBufferStateLayer(LayerCreationArgs& args, sp<IBin
 
 status_t SurfaceFlinger::createEffectLayer(const LayerCreationArgs& args, sp<IBinder>* handle,
                                            sp<Layer>* outLayer) {
+    if (checkLayerLeaks() != NO_ERROR) {
+        return NO_MEMORY;
+    }
     *outLayer = getFactory().createEffectLayer(args);
     *handle = (*outLayer)->getHandle();
+    return NO_ERROR;
+}
+
+status_t SurfaceFlinger::checkLayerLeaks() {
+    if (mNumLayers >= MAX_LAYERS) {
+        static std::atomic<nsecs_t> lasttime{0};
+        nsecs_t now = systemTime();
+        if (lasttime != 0 && ns2s(now - lasttime.load()) < 10) {
+            ALOGE("CreateLayer already dumped 10s before");
+            return NO_MEMORY;
+        } else {
+            lasttime = now;
+        }
+
+        ALOGE("CreateLayer failed, mNumLayers (%zu) >= MAX_LAYERS (%zu)", mNumLayers.load(),
+              MAX_LAYERS);
+        static_cast<void>(mScheduler->schedule([&]() FTL_FAKE_GUARD(kMainThreadContext) {
+            ALOGE("Dumping on-screen layers.");
+            mLayerHierarchyBuilder.dumpLayerSample(mLayerHierarchyBuilder.getHierarchy());
+            ALOGE("Dumping off-screen layers.");
+            mLayerHierarchyBuilder.dumpLayerSample(mLayerHierarchyBuilder.getOffscreenHierarchy());
+        }));
+        return NO_MEMORY;
+    }
     return NO_ERROR;
 }
 
@@ -7116,7 +7124,7 @@ status_t SurfaceFlinger::setSchedFifo(bool enabled) {
 
     struct sched_param param = {0};
     int sched_policy;
-    if (enabled) {
+    if (enabled && !FlagManager::getInstance().disable_sched_fifo_sf()) {
         sched_policy = SCHED_FIFO;
         param.sched_priority = kFifoPriority;
     } else {
@@ -7907,9 +7915,8 @@ status_t SurfaceFlinger::applyRefreshRateSelectorPolicy(
     const scheduler::RefreshRateSelector::Policy currentPolicy = selector.getCurrentPolicy();
     ALOGV("Setting desired display mode specs: %s", currentPolicy.toString().c_str());
 
-    if (const bool isPacesetter =
-                mScheduler->onDisplayModeChanged(displayId, selector.getActiveMode(),
-                                                 /*clearContentRequirements*/ true)) {
+    if (mScheduler->onDisplayModeChanged(displayId, selector.getActiveMode(),
+                                         /*clearContentRequirements*/ true)) {
         mDisplayModeController.updateKernelIdleTimer(displayId);
     }
 
