@@ -44,22 +44,22 @@
 #include "NativeWindowSurface.h"
 #include "RenderArea.h"
 #include "Scheduler/RefreshRateSelector.h"
+#include "Scheduler/VSyncTracker.h"
+#include "Scheduler/VsyncController.h"
 #include "SurfaceFlinger.h"
 #include "TestableScheduler.h"
 #include "android/gui/ISurfaceComposerClient.h"
+
 #include "mock/DisplayHardware/MockComposer.h"
 #include "mock/DisplayHardware/MockDisplayMode.h"
-#include "mock/DisplayHardware/MockPowerAdvisor.h"
 #include "mock/MockEventThread.h"
 #include "mock/MockFrameTimeline.h"
 #include "mock/MockFrameTracer.h"
 #include "mock/MockSchedulerCallback.h"
-#include "mock/system/window/MockNativeWindow.h"
-
-#include "Scheduler/VSyncTracker.h"
-#include "Scheduler/VsyncController.h"
 #include "mock/MockVSyncTracker.h"
 #include "mock/MockVsyncController.h"
+#include "mock/PowerAdvisor/MockPowerAdvisor.h"
+#include "mock/system/window/MockNativeWindow.h"
 
 namespace android {
 
@@ -184,13 +184,13 @@ public:
     }
 
     void setupComposer(std::unique_ptr<Hwc2::Composer> composer) {
-        mFlinger->mCompositionEngine->setHwComposer(
-                std::make_unique<impl::HWComposer>(std::move(composer)));
+        mFlinger->mHWComposer = std::make_unique<impl::HWComposer>(std::move(composer));
+        mFlinger->mCompositionEngine->setHwComposer(mFlinger->mHWComposer.get());
         mFlinger->mDisplayModeController.setHwComposer(
                 &mFlinger->mCompositionEngine->getHwComposer());
     }
 
-    void setupPowerAdvisor(std::unique_ptr<Hwc2::PowerAdvisor> powerAdvisor) {
+    void setupPowerAdvisor(std::unique_ptr<adpf::PowerAdvisor> powerAdvisor) {
         mFlinger->mPowerAdvisor = std::move(powerAdvisor);
     }
 
@@ -472,12 +472,10 @@ public:
         ScreenCaptureResults captureResults;
         auto displayState = std::optional{display->getCompositionDisplay()->getState()};
         auto layers = getLayerSnapshotsFn();
-        auto layerFEs = mFlinger->extractLayerFEs(layers);
 
-        return mFlinger->renderScreenImpl(renderArea.get(), buffer, regionSampling,
+        return mFlinger->renderScreenImpl(std::move(renderArea), buffer, regionSampling,
                                           false /* grayscale */, false /* isProtected */,
-                                          false /* attachGainmap */, captureResults, displayState,
-                                          layers, layerFEs);
+                                          captureResults, displayState, layers);
     }
 
     auto getLayerSnapshotsForScreenshotsFn(ui::LayerStack layerStack, uint32_t uid) {
@@ -516,7 +514,7 @@ public:
                                              mergedTransactionIds);
     }
 
-    auto setTransactionStateInternal(TransactionState& transaction) {
+    auto setTransactionStateInternal(QueuedTransactionState& transaction) {
         return FTL_FAKE_GUARD(kMainThreadContext,
                               mFlinger->mTransactionHandler.queueTransaction(
                                       std::move(transaction)));
@@ -773,7 +771,8 @@ public:
         mutableCurrentState().displays.clear();
         mutableDrawingState().displays.clear();
         mFlinger->mScheduler.reset();
-        mFlinger->mCompositionEngine->setHwComposer(std::unique_ptr<HWComposer>());
+        mFlinger->mHWComposer = std::unique_ptr<HWComposer>();
+        mFlinger->mCompositionEngine->setHwComposer(mFlinger->mHWComposer.get());
         mFlinger->mRenderEngine = std::unique_ptr<renderengine::RenderEngine>();
         mFlinger->mCompositionEngine->setRenderEngine(mFlinger->mRenderEngine.get());
         mFlinger->mTransactionTracing.reset();
@@ -949,11 +948,13 @@ public:
         FakeDisplayDeviceInjector(TestableSurfaceFlinger& flinger,
                                   std::shared_ptr<compositionengine::Display> display,
                                   std::optional<ui::DisplayConnectionType> connectionType,
+                                  std::optional<uint8_t> port,
                                   std::optional<hal::HWDisplayId> hwcDisplayId, bool isPrimary)
               : mFlinger(flinger),
                 mCreationArgs(flinger.mFlinger, flinger.mFlinger->getHwComposer(), mDisplayToken,
                               display),
                 mConnectionType(connectionType),
+                mPort(port),
                 mHwcDisplayId(hwcDisplayId) {
             mCreationArgs.isPrimary = isPrimary;
             mCreationArgs.initialPowerMode = hal::PowerMode::ON;
@@ -1102,11 +1103,12 @@ public:
                                   .hwcDisplayId = *mHwcDisplayId,
                                   .activeMode = activeModeOpt->get()};
 
-                const auto it = mFlinger.mutablePhysicalDisplays()
-                                        .emplace_or_replace(*physicalId, mDisplayToken, *physicalId,
-                                                            *mConnectionType, std::move(modes),
-                                                            ui::ColorModes(), std::nullopt)
-                                        .first;
+                const auto it =
+                        mFlinger.mutablePhysicalDisplays()
+                                .emplace_or_replace(*physicalId, mDisplayToken, *physicalId, *mPort,
+                                                    *mConnectionType, std::move(modes),
+                                                    ui::ColorModes(), std::nullopt)
+                                .first;
 
                 mFlinger.mutableDisplayModeController()
                         .registerDisplay(*physicalId, it->second.snapshot(),
@@ -1140,6 +1142,7 @@ public:
         DisplayModeId mActiveModeId;
         bool mSchedulerRegistration = true;
         const std::optional<ui::DisplayConnectionType> mConnectionType;
+        const std::optional<uint8_t> mPort;
         const std::optional<hal::HWDisplayId> mHwcDisplayId;
     };
 
@@ -1162,7 +1165,7 @@ private:
     scheduler::mock::NoOpSchedulerCallback mNoOpSchedulerCallback;
     std::unique_ptr<frametimeline::impl::TokenManager> mTokenManager;
     scheduler::TestableScheduler* mScheduler = nullptr;
-    Hwc2::mock::PowerAdvisor mPowerAdvisor;
+    adpf::mock::PowerAdvisor mPowerAdvisor;
 };
 
 } // namespace android

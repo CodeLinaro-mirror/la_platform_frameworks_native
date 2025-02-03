@@ -47,6 +47,7 @@
 #include <ui/BlurRegion.h>
 #include <ui/GraphicTypes.h>
 #include <ui/LayerStack.h>
+#include <ui/PictureProfileHandle.h>
 #include <ui/Rect.h>
 #include <ui/Region.h>
 #include <ui/Rotation.h>
@@ -170,6 +171,10 @@ struct layer_state_t {
         // Sets a property on this layer indicating that its visible region should be considered
         // when computing TrustedPresentation Thresholds.
         eCanOccludePresentation = 0x1000,
+        // Indicates that the SurfaceControl should recover from buffer stuffing when
+        // possible. This is the case when the SurfaceControl is the root SurfaceControl
+        // owned by ViewRootImpl.
+        eRecoverableFromBufferStuffing = 0x2000,
     };
 
     enum {
@@ -224,6 +229,10 @@ struct layer_state_t {
         eExtendedRangeBrightnessChanged = 0x10000'00000000,
         eEdgeExtensionChanged = 0x20000'00000000,
         eBufferReleaseChannelChanged = 0x40000'00000000,
+        ePictureProfileHandleChanged = 0x80000'00000000,
+        eAppContentPriorityChanged = 0x100000'00000000,
+        eClientDrawnCornerRadiusChanged = 0x200000'00000000,
+        eClientDrawnShadowsChanged = 0x400000'00000000,
     };
 
     layer_state_t();
@@ -244,9 +253,9 @@ struct layer_state_t {
     // Geometry updates.
     static constexpr uint64_t GEOMETRY_CHANGES = layer_state_t::eBufferCropChanged |
             layer_state_t::eBufferTransformChanged | layer_state_t::eCornerRadiusChanged |
-            layer_state_t::eCropChanged | layer_state_t::eDestinationFrameChanged |
-            layer_state_t::eMatrixChanged | layer_state_t::ePositionChanged |
-            layer_state_t::eTransformToDisplayInverseChanged |
+            layer_state_t::eClientDrawnCornerRadiusChanged | layer_state_t::eCropChanged |
+            layer_state_t::eDestinationFrameChanged | layer_state_t::eMatrixChanged |
+            layer_state_t::ePositionChanged | layer_state_t::eTransformToDisplayInverseChanged |
             layer_state_t::eTransparentRegionChanged | layer_state_t::eEdgeExtensionChanged;
 
     // Buffer and related updates.
@@ -267,7 +276,8 @@ struct layer_state_t {
             layer_state_t::eColorSpaceAgnosticChanged | layer_state_t::eColorTransformChanged |
             layer_state_t::eCornerRadiusChanged | layer_state_t::eDimmingEnabledChanged |
             layer_state_t::eHdrMetadataChanged | layer_state_t::eShadowRadiusChanged |
-            layer_state_t::eStretchChanged;
+            layer_state_t::eClientDrawnShadowsChanged | layer_state_t::eStretchChanged |
+            layer_state_t::ePictureProfileHandleChanged | layer_state_t::eAppContentPriorityChanged;
 
     // Changes which invalidates the layer's visible region in CE.
     static constexpr uint64_t CONTENT_DIRTY = layer_state_t::CONTENT_CHANGES |
@@ -291,6 +301,11 @@ struct layer_state_t {
     // Changes that affect the visible region on a display.
     static constexpr uint64_t VISIBLE_REGION_CHANGES = layer_state_t::GEOMETRY_CHANGES |
             layer_state_t::HIERARCHY_CHANGES | layer_state_t::eAlphaChanged;
+
+    // Changes that force GPU composition.
+    static constexpr uint64_t COMPOSITION_EFFECTS = layer_state_t::eBackgroundBlurRadiusChanged |
+            layer_state_t::eBlurRegionsChanged | layer_state_t::eCornerRadiusChanged |
+            layer_state_t::eShadowRadiusChanged | layer_state_t::eStretchChanged;
 
     bool hasValidBuffer() const;
     void sanitize(int32_t permissions);
@@ -320,6 +335,8 @@ struct layer_state_t {
     uint8_t reserved;
     matrix22_t matrix;
     float cornerRadius;
+    float clientDrawnCornerRadius;
+    float clientDrawnShadowRadius;
     uint32_t backgroundBlurRadius;
 
     sp<SurfaceControl> relativeLayerSurfaceControl;
@@ -411,6 +428,15 @@ struct layer_state_t {
     bool dimmingEnabled;
     float currentHdrSdrRatio = 1.f;
     float desiredHdrSdrRatio = 1.f;
+
+    // Enhance the quality of the buffer contents by configurating a picture processing pipeline
+    // with values as specified by this picture profile.
+    PictureProfileHandle pictureProfileHandle{PictureProfileHandle::NONE};
+
+    // A value indicating the significance of the layer's content to the app's desired user
+    // experience. A higher value will result in more likelihood of getting access to limited
+    // resources, such as picture processing hardware.
+    int32_t appContentPriority = 0;
 
     gui::CachingHint cachingHint = gui::CachingHint::Enabled;
 

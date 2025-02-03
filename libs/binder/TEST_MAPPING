@@ -37,6 +37,9 @@
       "name": "binderStabilityTest"
     },
     {
+      "name": "binderStabilityIntegrationTest"
+    },
+    {
       "name": "binderRpcWireProtocolTest"
     },
     {
@@ -67,15 +70,10 @@
       "name": "fuzz_service_test"
     },
     {
-      "name": "CtsOsTestCases",
-      "options": [
-        {
-          "include-filter": "android.os.cts.BinderTest"
-        },
-        {
-          "include-filter": "android.os.cts.ParcelTest"
-        }
-      ]
+      "name": "CtsOsTestCases_ParcelAndBinderTests"
+    },
+    {
+      "name": "FrameworksCoreTests_all_binder"
     },
     {
       "name": "libbinder_rs-internal_test"

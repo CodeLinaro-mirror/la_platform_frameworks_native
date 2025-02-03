@@ -81,7 +81,6 @@ GestureConverter::GestureConverter(InputReaderContext& readerContext,
                                    const InputDeviceContext& deviceContext, int32_t deviceId)
       : mDeviceId(deviceId),
         mReaderContext(readerContext),
-        mEnableFlingStop(input_flags::enable_touchpad_fling_stop()),
         mEnableNoFocusChange(input_flags::enable_touchpad_no_focus_change()),
         // We can safely assume that ABS_MT_POSITION_X and _Y axes will be available, as EventHub
         // won't classify a device as a touchpad if they're not present.
@@ -99,6 +98,8 @@ std::string GestureConverter::dump() const {
     out << "Current classification: " << ftl::enum_string(mCurrentClassification) << "\n";
     out << "Is hovering: " << mIsHovering << "\n";
     out << "Enable Tap Timestamp: " << mWhenToEnableTapToClick << "\n";
+    out << "Three finger tap shortcut enabled: "
+        << (mThreeFingerTapShortcutEnabled ? "enabled" : "disabled") << "\n";
     return out.str();
 }
 
@@ -127,6 +128,15 @@ std::list<NotifyArgs> GestureConverter::reset(nsecs_t when) {
     }
     mCurrentClassification = MotionClassification::NONE;
     mDownTime = 0;
+    return out;
+}
+
+std::list<NotifyArgs> GestureConverter::setEnableSystemGestures(nsecs_t when, bool enable) {
+    std::list<NotifyArgs> out;
+    if (!enable && mCurrentClassification == MotionClassification::MULTI_FINGER_SWIPE) {
+        out += handleMultiFingerSwipeLift(when, when);
+    }
+    mEnableSystemGestures = enable;
     return out;
 }
 
@@ -261,6 +271,14 @@ std::list<NotifyArgs> GestureConverter::handleButtonsChange(nsecs_t when, nsecs_
     }
 
     const uint32_t buttonsPressed = gesture.details.buttons.down;
+    const uint32_t buttonsReleased = gesture.details.buttons.up;
+
+    if (mThreeFingerTapShortcutEnabled && gesture.details.buttons.is_tap &&
+        buttonsPressed == GESTURES_BUTTON_MIDDLE && buttonsReleased == GESTURES_BUTTON_MIDDLE) {
+        mReaderContext.getPolicy()->notifyTouchpadThreeFingerTap();
+        return out;
+    }
+
     bool pointerDown = isPointerDown(mButtonState) ||
             buttonsPressed &
                     (GESTURES_BUTTON_LEFT | GESTURES_BUTTON_MIDDLE | GESTURES_BUTTON_RIGHT);
@@ -291,7 +309,6 @@ std::list<NotifyArgs> GestureConverter::handleButtonsChange(nsecs_t when, nsecs_
     // changes: a set of buttons going down, followed by a set of buttons going up.
     mButtonState = newButtonState;
 
-    const uint32_t buttonsReleased = gesture.details.buttons.up;
     for (uint32_t button = 1; button <= GESTURES_BUTTON_FORWARD; button <<= 1) {
         if (buttonsReleased & button) {
             uint32_t actionButton = gesturesButtonToMotionEventButton(button);
@@ -388,7 +405,7 @@ std::list<NotifyArgs> GestureConverter::handleFling(nsecs_t when, nsecs_t readTi
             break;
         case GESTURES_FLING_TAP_DOWN:
             if (mCurrentClassification == MotionClassification::NONE) {
-                if (mEnableFlingStop && mFlingMayBeInProgress) {
+                if (mFlingMayBeInProgress) {
                     // The user has just touched the pad again after ending a two-finger scroll
                     // motion, which might have started a fling. We want to stop the fling, but
                     // unfortunately there's currently no API for doing so. Instead, send and
@@ -452,6 +469,9 @@ std::list<NotifyArgs> GestureConverter::endScroll(nsecs_t when, nsecs_t readTime
                                                                              uint32_t fingerCount,
                                                                              float dx, float dy) {
     std::list<NotifyArgs> out = {};
+    if (!mEnableSystemGestures) {
+        return out;
+    }
 
     if (mCurrentClassification != MotionClassification::MULTI_FINGER_SWIPE) {
         // If the user changes the number of fingers mid-way through a swipe (e.g. they start with

@@ -21,6 +21,7 @@
 #include <android/gui/ISurfaceComposerClient.h>
 #include <android/native_window.h>
 #include <binder/Parcel.h>
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/FrameRateUtils.h>
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/LayerState.h>
@@ -65,6 +66,8 @@ layer_state_t::layer_state_t()
         mask(0),
         reserved(0),
         cornerRadius(0.0f),
+        clientDrawnCornerRadius(0.0f),
+        clientDrawnShadowRadius(0.0f),
         backgroundBlurRadius(0),
         color(0),
         bufferTransform(0),
@@ -91,7 +94,9 @@ layer_state_t::layer_state_t()
         trustedOverlay(gui::TrustedOverlay::UNSET),
         bufferCrop(Rect::INVALID_RECT),
         destinationFrame(Rect::INVALID_RECT),
-        dropInputMode(gui::DropInputMode::NONE) {
+        dropInputMode(gui::DropInputMode::NONE),
+        pictureProfileHandle(PictureProfileHandle::NONE),
+        appContentPriority(0) {
     matrix.dsdx = matrix.dtdy = 1.0f;
     matrix.dsdy = matrix.dtdx = 0.0f;
     hdrMetadata.validTypes = 0;
@@ -137,6 +142,8 @@ status_t layer_state_t::write(Parcel& output) const
 
     SAFE_PARCEL(output.write, colorTransform.asArray(), 16 * sizeof(float));
     SAFE_PARCEL(output.writeFloat, cornerRadius);
+    SAFE_PARCEL(output.writeFloat, clientDrawnCornerRadius);
+    SAFE_PARCEL(output.writeFloat, clientDrawnShadowRadius);
     SAFE_PARCEL(output.writeUint32, backgroundBlurRadius);
     SAFE_PARCEL(output.writeParcelable, metadata);
     SAFE_PARCEL(output.writeFloat, bgColor.r);
@@ -202,6 +209,16 @@ status_t layer_state_t::write(Parcel& output) const
     if (hasBufferReleaseChannel) {
         SAFE_PARCEL(output.writeParcelable, *bufferReleaseChannel);
     }
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS_APPLY_PICTURE_PROFILES
+    SAFE_PARCEL(output.writeInt64, pictureProfileHandle.getId());
+    SAFE_PARCEL(output.writeInt32, appContentPriority);
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS_APPLY_PICTURE_PROFILES
+
+    const bool hasLuts = (luts != nullptr);
+    SAFE_PARCEL(output.writeBool, hasLuts);
+    if (hasLuts) {
+        SAFE_PARCEL(output.writeParcelable, *luts);
+    }
 
     return NO_ERROR;
 }
@@ -261,6 +278,8 @@ status_t layer_state_t::read(const Parcel& input)
 
     SAFE_PARCEL(input.read, &colorTransform, 16 * sizeof(float));
     SAFE_PARCEL(input.readFloat, &cornerRadius);
+    SAFE_PARCEL(input.readFloat, &clientDrawnCornerRadius);
+    SAFE_PARCEL(input.readFloat, &clientDrawnShadowRadius);
     SAFE_PARCEL(input.readUint32, &backgroundBlurRadius);
     SAFE_PARCEL(input.readParcelable, &metadata);
 
@@ -356,6 +375,21 @@ status_t layer_state_t::read(const Parcel& input)
     if (hasBufferReleaseChannel) {
         bufferReleaseChannel = std::make_shared<gui::BufferReleaseChannel::ProducerEndpoint>();
         SAFE_PARCEL(input.readParcelable, bufferReleaseChannel.get());
+    }
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS_APPLY_PICTURE_PROFILES
+    int64_t pictureProfileId;
+    SAFE_PARCEL(input.readInt64, &pictureProfileId);
+    pictureProfileHandle = PictureProfileHandle(pictureProfileId);
+    SAFE_PARCEL(input.readInt32, &appContentPriority);
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS_APPLY_PICTURE_PROFILES
+
+    bool hasLuts;
+    SAFE_PARCEL(input.readBool, &hasLuts);
+    if (hasLuts) {
+        luts = std::make_shared<gui::DisplayLuts>();
+        SAFE_PARCEL(input.readParcelable, luts.get());
+    } else {
+        luts = nullptr;
     }
 
     return NO_ERROR;
@@ -568,6 +602,14 @@ void layer_state_t::merge(const layer_state_t& other) {
         what |= eCornerRadiusChanged;
         cornerRadius = other.cornerRadius;
     }
+    if (other.what & eClientDrawnCornerRadiusChanged) {
+        what |= eClientDrawnCornerRadiusChanged;
+        clientDrawnCornerRadius = other.clientDrawnCornerRadius;
+    }
+    if (other.what & eClientDrawnShadowsChanged) {
+        what |= eClientDrawnShadowsChanged;
+        clientDrawnShadowRadius = other.clientDrawnShadowRadius;
+    }
     if (other.what & eBackgroundBlurRadiusChanged) {
         what |= eBackgroundBlurRadiusChanged;
         backgroundBlurRadius = other.backgroundBlurRadius;
@@ -745,6 +787,16 @@ void layer_state_t::merge(const layer_state_t& other) {
         what |= eBufferReleaseChannelChanged;
         bufferReleaseChannel = other.bufferReleaseChannel;
     }
+    if (com_android_graphics_libgui_flags_apply_picture_profiles()) {
+        if (other.what & ePictureProfileHandleChanged) {
+            what |= ePictureProfileHandleChanged;
+            pictureProfileHandle = other.pictureProfileHandle;
+        }
+        if (other.what & eAppContentPriorityChanged) {
+            what |= eAppContentPriorityChanged;
+            appContentPriority = other.appContentPriority;
+        }
+    }
     if ((other.what & what) != other.what) {
         ALOGE("Unmerged SurfaceComposer Transaction properties. LayerState::merge needs updating? "
               "other.what=0x%" PRIX64 " what=0x%" PRIX64 " unmerged flags=0x%" PRIX64,
@@ -771,6 +823,8 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     }
     CHECK_DIFF(diff, eLayerStackChanged, other, layerStack);
     CHECK_DIFF(diff, eCornerRadiusChanged, other, cornerRadius);
+    CHECK_DIFF(diff, eClientDrawnCornerRadiusChanged, other, clientDrawnCornerRadius);
+    CHECK_DIFF(diff, eClientDrawnShadowsChanged, other, clientDrawnShadowRadius);
     CHECK_DIFF(diff, eBackgroundBlurRadiusChanged, other, backgroundBlurRadius);
     if (other.what & eBlurRegionsChanged) diff |= eBlurRegionsChanged;
     if (other.what & eRelativeLayerChanged) {
@@ -826,6 +880,8 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     CHECK_DIFF(diff, eDimmingEnabledChanged, other, dimmingEnabled);
     if (other.what & eBufferReleaseChannelChanged) diff |= eBufferReleaseChannelChanged;
     if (other.what & eLutsChanged) diff |= eLutsChanged;
+    CHECK_DIFF(diff, ePictureProfileHandleChanged, other, pictureProfileHandle);
+    CHECK_DIFF(diff, eAppContentPriorityChanged, other, appContentPriority);
 
     return diff;
 }

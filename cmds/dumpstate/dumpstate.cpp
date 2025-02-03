@@ -128,6 +128,9 @@ using android::os::dumpstate::PropertiesHelper;
 using android::os::dumpstate::TaskQueue;
 using android::os::dumpstate::WaitForTask;
 
+// BAD - See README.md: "Dumpstate philosophy: exec not link"
+// Do not add more complicated variables here, prefer to execute only. Don't link more code here.
+
 // Keep in sync with
 // frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java
 static const int TRACE_DUMP_TIMEOUT_MS = 10000; // 10 seconds
@@ -1264,6 +1267,17 @@ static void DumpIpAddrAndRules() {
     RunCommand("IP RULES v6", {"ip", "-6", "rule", "show"});
 }
 
+static void DumpKernelMemoryAllocations() {
+    if (!access("/proc/allocinfo", F_OK)) {
+        // Print the top 100 biggest memory allocations of at least one byte.
+        // The output is sorted by size, descending.
+        RunCommand("KERNEL MEMORY ALLOCATIONS",
+                   {"alloctop", "--once", "--sort", "s", "--min", "1", "--lines", "100"});
+    }
+}
+
+// BAD - See README.md: "Dumpstate philosophy: exec not link"
+// This should all be moved into a separate binary rather than have complex logic here.
 static Dumpstate::RunStatus RunDumpsysTextByPriority(const std::string& title, int priority,
                                                      std::chrono::milliseconds timeout,
                                                      std::chrono::milliseconds service_timeout) {
@@ -1344,6 +1358,8 @@ static Dumpstate::RunStatus RunDumpsysTextNormalPriority(const std::string& titl
                                     service_timeout);
 }
 
+// BAD - See README.md: "Dumpstate philosophy: exec not link"
+// This should all be moved into a separate binary rather than have complex logic here.
 static Dumpstate::RunStatus RunDumpsysProto(const std::string& title, int priority,
                                             std::chrono::milliseconds timeout,
                                             std::chrono::milliseconds service_timeout) {
@@ -1425,6 +1441,8 @@ static Dumpstate::RunStatus RunDumpsysNormal() {
  * Dumpstate can pick up later and output to the bugreport. Using STDOUT_FILENO
  * if it's not running in the parallel task.
  */
+// BAD - See README.md: "Dumpstate philosophy: exec not link"
+// This should all be moved into a separate binary rather than have complex logic here.
 static void DumpHals(int out_fd = STDOUT_FILENO) {
     RunCommand("HARDWARE HALS", {"lshal", "--all", "--types=all"},
                CommandOptions::WithTimeout(10).AsRootIfAvailable().Build(),
@@ -1481,6 +1499,9 @@ static void DumpHals(int out_fd = STDOUT_FILENO) {
     }
 }
 
+// BAD - See README.md: "Dumpstate philosophy: exec not link"
+// This should all be moved into a separate binary rather than have complex logic here.
+//
 // Dump all of the files that make up the vendor interface.
 // See the files listed in dumpFileList() for the latest list of files.
 static void DumpVintf() {
@@ -1510,6 +1531,8 @@ static void DumpExternalFragmentationInfo() {
     printf("------ EXTERNAL FRAGMENTATION INFO ------\n");
     std::ifstream ifs("/proc/buddyinfo");
     auto unusable_index_regex = std::regex{"Node\\s+([0-9]+),\\s+zone\\s+(\\S+)\\s+(.*)"};
+    // BAD - See README.md: "Dumpstate philosophy: exec not link"
+    // This should all be moved into a separate binary rather than have complex logic here.
     for (std::string line; std::getline(ifs, line);) {
         std::smatch match_results;
         if (std::regex_match(line, match_results, unusable_index_regex)) {
@@ -1773,6 +1796,8 @@ Dumpstate::RunStatus Dumpstate::dumpstate() {
 
     DoKmsg();
 
+    DumpKernelMemoryAllocations();
+
     DumpShutdownCheckpoints();
 
     DumpIpAddrAndRules();
@@ -1840,6 +1865,11 @@ Dumpstate::RunStatus Dumpstate::dumpstate() {
         }
         RunCommand("DUMP VENDOR RIL LOGS", {"vril-dump"}, options.Build());
     }
+
+    /* Dump USB information */
+    RunCommand("typec_connector_class", {"typec_connector_class"},
+               CommandOptions::WithTimeout(10).AsRootIfAvailable().Build());
+    RunCommand("lsusb", {"lsusb"}, CommandOptions::WithTimeout(10).AsRootIfAvailable().Build());
 
     printf("========================================================\n");
     printf("== Android Framework Services\n");
@@ -2448,6 +2478,8 @@ static dumpstate_hal_aidl::IDumpstateDevice::DumpstateMode GetDumpstateHalModeAi
     return dumpstate_hal_aidl::IDumpstateDevice::DumpstateMode::DEFAULT;
 }
 
+// BAD - See README.md: "Dumpstate philosophy: exec not link"
+// This should all be moved into a separate binary rather than have complex logic here.
 static void DoDumpstateBoardHidl(
     const sp<dumpstate_hal_hidl_1_0::IDumpstateDevice> dumpstate_hal_1_0,
     const std::vector<::ndk::ScopedFileDescriptor>& dumpstate_fds,
@@ -4651,7 +4683,7 @@ void Dumpstate::UpdateProgress(int32_t delta_sec) {
 void Dumpstate::TakeScreenshot(const std::string& path) {
     const std::string& real_path = path.empty() ? screenshot_path_ : path;
     int status =
-        RunCommand("", {"/system/bin/screencap", "-p", real_path},
+        RunCommand("", {"screencap", "-p", real_path},
                    CommandOptions::WithTimeout(10).Always().DropRoot().RedirectStderr().Build());
     if (status == 0) {
         MYLOGD("Screenshot saved on %s\n", real_path.c_str());

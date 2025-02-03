@@ -107,6 +107,8 @@ RequestedLayerState::RequestedLayerState(const LayerCreationArgs& args)
     hdrMetadata.validTypes = 0;
     surfaceDamageRegion = Region::INVALID_REGION;
     cornerRadius = 0.0f;
+    clientDrawnCornerRadius = 0.0f;
+    clientDrawnShadowRadius = 0.0f;
     backgroundBlurRadius = 0;
     api = -1;
     hasColorTransform = false;
@@ -163,7 +165,7 @@ void RequestedLayerState::merge(const ResolvedComposerState& resolvedComposerSta
     uint64_t clientChanges = what | layer_state_t::diff(clientState);
     layer_state_t::merge(clientState);
     what = clientChanges;
-    LLOGV(layerId, "requested=%" PRIu64 "flags=%" PRIu64, clientState.what, clientChanges);
+    LLOGV(layerId, "requested=%" PRIu64 " flags=%" PRIu64 " ", clientState.what, clientChanges);
 
     if (clientState.what & layer_state_t::eFlagsChanged) {
         if ((oldFlags ^ flags) &
@@ -347,6 +349,16 @@ void RequestedLayerState::merge(const ResolvedComposerState& resolvedComposerSta
         const auto category = Layer::FrameRate::convertCategory(clientState.frameRateCategory);
         requestedFrameRate.category = category;
         changes |= RequestedLayerState::Changes::FrameRate;
+    }
+
+    if (clientState.what & layer_state_t::eClientDrawnCornerRadiusChanged) {
+        clientDrawnCornerRadius = clientState.clientDrawnCornerRadius;
+        changes |= RequestedLayerState::Changes::Geometry;
+    }
+
+    if (clientState.what & layer_state_t::eClientDrawnShadowsChanged) {
+        clientDrawnShadowRadius = clientState.clientDrawnShadowRadius;
+        changes |= RequestedLayerState::Changes::Geometry;
     }
 }
 
@@ -624,6 +636,8 @@ bool RequestedLayerState::isSimpleBufferUpdate(const layer_state_t& s) const {
     const uint64_t deniedChanges = layer_state_t::ePositionChanged | layer_state_t::eAlphaChanged |
             layer_state_t::eColorTransformChanged | layer_state_t::eBackgroundColorChanged |
             layer_state_t::eMatrixChanged | layer_state_t::eCornerRadiusChanged |
+            layer_state_t::eClientDrawnCornerRadiusChanged |
+            layer_state_t::eClientDrawnShadowsChanged |
             layer_state_t::eBackgroundBlurRadiusChanged | layer_state_t::eBufferTransformChanged |
             layer_state_t::eTransformToDisplayInverseChanged | layer_state_t::eCropChanged |
             layer_state_t::eDataspaceChanged | layer_state_t::eHdrMetadataChanged |
@@ -633,7 +647,7 @@ bool RequestedLayerState::isSimpleBufferUpdate(const layer_state_t& s) const {
             layer_state_t::eEdgeExtensionChanged | layer_state_t::eBufferCropChanged |
             layer_state_t::eDestinationFrameChanged | layer_state_t::eDimmingEnabledChanged |
             layer_state_t::eExtendedRangeBrightnessChanged |
-            layer_state_t::eDesiredHdrHeadroomChanged |
+            layer_state_t::eDesiredHdrHeadroomChanged | layer_state_t::eLutsChanged |
             (FlagManager::getInstance().latch_unsignaled_with_auto_refresh_changed()
                      ? layer_state_t::eFlagsChanged
                      : 0);

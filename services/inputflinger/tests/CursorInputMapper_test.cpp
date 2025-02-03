@@ -27,6 +27,7 @@
 #include <com_android_input_flags.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <input/AccelerationCurve.h>
 #include <input/DisplayViewport.h>
 #include <input/InputEventLabels.h>
 #include <linux/input-event-codes.h>
@@ -1028,6 +1029,34 @@ TEST_F(CursorInputMapperUnitTest, ConfigureDisplayIdNoAssociatedViewport) {
                               WithCoords(0.0f, 0.0f)))));
 }
 
+TEST_F(CursorInputMapperUnitTest, PointerAccelerationDisabled) {
+    mReaderConfiguration.mousePointerAccelerationEnabled = false;
+    mReaderConfiguration.mousePointerSpeed = 3;
+    mPropertyMap.addProperty("cursor.mode", "pointer");
+    createMapper();
+
+    std::list<NotifyArgs> reconfigureArgs;
+
+    reconfigureArgs += mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
+                                            InputReaderConfiguration::Change::POINTER_SPEED);
+
+    std::vector<AccelerationCurveSegment> curve =
+            createFlatAccelerationCurve(mReaderConfiguration.mousePointerSpeed);
+    double baseGain = curve[0].baseGain;
+
+    std::list<NotifyArgs> motionArgs;
+    motionArgs += process(ARBITRARY_TIME, EV_REL, REL_X, 10);
+    motionArgs += process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
+    motionArgs += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+
+    const float expectedRelX = 10 * baseGain;
+    const float expectedRelY = 20 * baseGain;
+    ASSERT_THAT(motionArgs,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(HOVER_MOVE),
+                              WithRelativeMotion(expectedRelX, expectedRelY)))));
+}
+
 TEST_F(CursorInputMapperUnitTest, ConfigureAccelerationWithAssociatedViewport) {
     mPropertyMap.addProperty("cursor.mode", "pointer");
     DisplayViewport primaryViewport = createPrimaryViewport(ui::Rotation::Rotation0);
@@ -1049,7 +1078,7 @@ TEST_F(CursorInputMapperUnitTest, ConfigureAccelerationWithAssociatedViewport) {
     ASSERT_GT(coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y), 20.f);
 
     // Disable acceleration for the display, and verify that acceleration is no longer applied.
-    mReaderConfiguration.displaysWithMousePointerAccelerationDisabled.emplace(DISPLAY_ID);
+    mReaderConfiguration.displaysWithMouseScalingDisabled.emplace(DISPLAY_ID);
     args += mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
                                  InputReaderConfiguration::Change::POINTER_SPEED);
     args.clear();
@@ -1068,7 +1097,7 @@ TEST_F(CursorInputMapperUnitTest, ConfigureAccelerationOnDisplayChange) {
     DisplayViewport primaryViewport = createPrimaryViewport(ui::Rotation::Rotation0);
     mReaderConfiguration.setDisplayViewports({primaryViewport});
     // Disable acceleration for the display.
-    mReaderConfiguration.displaysWithMousePointerAccelerationDisabled.emplace(DISPLAY_ID);
+    mReaderConfiguration.displaysWithMouseScalingDisabled.emplace(DISPLAY_ID);
 
     // Don't associate the device with the display yet.
     EXPECT_CALL((*mDevice), getAssociatedViewport).WillRepeatedly(Return(std::nullopt));

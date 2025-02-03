@@ -36,6 +36,10 @@
 #include <utils/RefBase.h>
 #include <utils/Timers.h>
 
+namespace aidl::android::hardware::graphics::composer3 {
+enum class Composition;
+}
+
 namespace android {
 
 class Fence;
@@ -121,6 +125,8 @@ public:
 
         // True if layers with 170M dataspace should be overridden to sRGB.
         const bool treat170mAsSrgb;
+
+        std::shared_ptr<gui::DisplayLuts> luts;
     };
 
     // A superset of LayerSettings required by RenderEngine to compose a layer
@@ -131,6 +137,9 @@ public:
 
         // Currently latched frame number, 0 if invalid.
         uint64_t frameNumber = 0;
+
+        // layer serial number, -1 if invalid.
+        int32_t sequence = -1;
     };
 
     // Describes the states of the release fence. Checking the states allows checks
@@ -148,9 +157,6 @@ public:
     virtual std::optional<LayerSettings> prepareClientComposition(
             ClientCompositionTargetSettings&) const = 0;
 
-    // Called after the layer is displayed to update the presentation fence
-    virtual void onLayerDisplayed(ftl::SharedFuture<FenceResult>, ui::LayerStack layerStack) = 0;
-
     // Initializes a promise for a buffer release fence and provides the future for that
     // fence. This should only be called when a promise has not yet been created, or
     // after the previous promise has already been fulfilled. Attempting to call this
@@ -164,6 +170,9 @@ public:
     // Checks if the buffer's release fence has been set
     virtual LayerFE::ReleaseFencePromiseStatus getReleaseFencePromiseStatus() = 0;
 
+    // Indicates that the picture profile request was applied to this layer.
+    virtual void onPictureProfileCommitted() = 0;
+
     // Gets some kind of identifier for the layer for debug purposes.
     virtual const char* getDebugName() const = 0;
 
@@ -173,6 +182,11 @@ public:
     // Whether the layer should be rendered with rounded corners.
     virtual bool hasRoundedCorners() const = 0;
     virtual void setWasClientComposed(const sp<Fence>&) {}
+    virtual void setHwcCompositionType(
+            aidl::android::hardware::graphics::composer3::Composition) = 0;
+    virtual aidl::android::hardware::graphics::composer3::Composition getHwcCompositionType()
+            const = 0;
+
     virtual const gui::LayerMetadata* getMetadata() const = 0;
     virtual const gui::LayerMetadata* getRelativeMetadata() const = 0;
 };

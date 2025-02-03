@@ -37,18 +37,13 @@
 
 namespace android {
 
-using hardware::hidl_handle;
-using hardware::hidl_vec;
-using hardware::Return;
-
 using aidl::android::hardware::graphics::composer3::BnComposerCallback;
 using aidl::android::hardware::graphics::composer3::Capability;
 using aidl::android::hardware::graphics::composer3::ClientTargetPropertyWithBrightness;
+using aidl::android::hardware::graphics::composer3::CommandResultPayload;
 using aidl::android::hardware::graphics::composer3::Luts;
 using aidl::android::hardware::graphics::composer3::PowerMode;
 using aidl::android::hardware::graphics::composer3::VirtualDisplay;
-
-using aidl::android::hardware::graphics::composer3::CommandResultPayload;
 
 using AidlColorMode = aidl::android::hardware::graphics::composer3::ColorMode;
 using AidlContentType = aidl::android::hardware::graphics::composer3::ContentType;
@@ -525,11 +520,15 @@ Error AidlComposer::getColorModes(Display display, std::vector<ColorMode>* outMo
 
 Error AidlComposer::getDisplayAttribute(Display display, Config config,
                                         IComposerClient::Attribute attribute, int32_t* outValue) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     const auto status =
             mAidlComposerClient->getDisplayAttribute(translate<int64_t>(display),
                                                      translate<int32_t>(config),
                                                      static_cast<AidlDisplayAttribute>(attribute),
                                                      outValue);
+#pragma clang diagnostic pop
+
     if (!status.isOk()) {
         ALOGE("getDisplayAttribute failed %s", status.getDescription().c_str());
         return static_cast<Error>(status.getServiceSpecificError());
@@ -539,8 +538,13 @@ Error AidlComposer::getDisplayAttribute(Display display, Config config,
 
 Error AidlComposer::getDisplayConfigs(Display display, std::vector<Config>* outConfigs) {
     std::vector<int32_t> configs;
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     const auto status =
             mAidlComposerClient->getDisplayConfigs(translate<int64_t>(display), &configs);
+#pragma clang diagnostic pop
+
     if (!status.isOk()) {
         ALOGE("getDisplayConfigs failed %s", status.getDescription().c_str());
         return static_cast<Error>(status.getServiceSpecificError());
@@ -678,6 +682,36 @@ Error AidlComposer::getReleaseFences(Display display, std::vector<Layer>* outLay
         const int fenceOwner = fence.fence.get();
         *fence.fence.getR() = -1;
         outReleaseFences->emplace_back(fenceOwner);
+    }
+    return error;
+}
+
+Error AidlComposer::getLayerPresentFences(Display display, std::vector<Layer>* outLayers,
+                                          std::vector<int>* outFences,
+                                          std::vector<int64_t>* outLatenciesNanos) {
+    Error error = Error::NONE;
+    std::vector<PresentFence::LayerPresentFence> fences;
+    {
+        mMutex.lock_shared();
+        if (auto reader = getReader(display)) {
+            fences = reader->get().takeLayerPresentFences(translate<int64_t>(display));
+        } else {
+            error = Error::BAD_DISPLAY;
+        }
+        mMutex.unlock_shared();
+    }
+
+    outLayers->reserve(fences.size());
+    outFences->reserve(fences.size());
+    outLatenciesNanos->reserve(fences.size());
+
+    for (auto& fence : fences) {
+        outLayers->emplace_back(translate<Layer>(fence.layer));
+        // take ownership
+        const int fenceOwner = fence.bufferFence.get();
+        *fence.bufferFence.getR() = -1;
+        outFences->emplace_back(fenceOwner);
+        outLatenciesNanos->emplace_back(fence.bufferLatencyNanos);
     }
     return error;
 }
@@ -1385,7 +1419,7 @@ V2_4::Error AidlComposer::getDisplayVsyncPeriod(Display display, VsyncPeriodNano
     return V2_4::Error::NONE;
 }
 
-V2_4::Error AidlComposer::setActiveConfigWithConstraints(
+Error AidlComposer::setActiveConfigWithConstraints(
         Display display, Config config,
         const IComposerClient::VsyncPeriodChangeConstraints& vsyncPeriodChangeConstraints,
         VsyncPeriodChangeTimeline* outTimeline) {
@@ -1399,10 +1433,10 @@ V2_4::Error AidlComposer::setActiveConfigWithConstraints(
                                                      &timeline);
     if (!status.isOk()) {
         ALOGE("setActiveConfigWithConstraints failed %s", status.getDescription().c_str());
-        return static_cast<V2_4::Error>(status.getServiceSpecificError());
+        return static_cast<Error>(status.getServiceSpecificError());
     }
     *outTimeline = translate<VsyncPeriodChangeTimeline>(timeline);
-    return V2_4::Error::NONE;
+    return Error::NONE;
 }
 
 V2_4::Error AidlComposer::setAutoLowLatencyMode(Display display, bool on) {
@@ -1636,6 +1670,64 @@ Error AidlComposer::getPhysicalDisplayOrientation(Display displayId,
         ALOGE("getPhysicalDisplayOrientation failed %s", status.getDescription().c_str());
         return static_cast<Error>(status.getServiceSpecificError());
     }
+    return Error::NONE;
+}
+
+Error AidlComposer::getMaxLayerPictureProfiles(Display display, int32_t* outMaxProfiles) {
+    const auto status = mAidlComposerClient->getMaxLayerPictureProfiles(translate<int64_t>(display),
+                                                                        outMaxProfiles);
+    if (!status.isOk()) {
+        ALOGE("getMaxLayerPictureProfiles failed %s", status.getDescription().c_str());
+        return static_cast<Error>(status.getServiceSpecificError());
+    }
+    return Error::NONE;
+}
+
+Error AidlComposer::setDisplayPictureProfileId(Display display, PictureProfileId id) {
+    Error error = Error::NONE;
+    mMutex.lock_shared();
+    if (auto writer = getWriter(display)) {
+        writer->get().setDisplayPictureProfileId(translate<int64_t>(display), id);
+    } else {
+        error = Error::BAD_DISPLAY;
+    }
+    mMutex.unlock_shared();
+    return error;
+}
+
+Error AidlComposer::setLayerPictureProfileId(Display display, Layer layer, PictureProfileId id) {
+    Error error = Error::NONE;
+    mMutex.lock_shared();
+    if (auto writer = getWriter(display)) {
+        writer->get().setLayerPictureProfileId(translate<int64_t>(display),
+                                               translate<int64_t>(layer), id);
+    } else {
+        error = Error::BAD_DISPLAY;
+    }
+    mMutex.unlock_shared();
+    return error;
+}
+
+Error AidlComposer::getLuts(Display display, const std::vector<sp<GraphicBuffer>>& buffers,
+                            std::vector<aidl::android::hardware::graphics::composer3::Luts>* luts) {
+    std::vector<aidl::android::hardware::graphics::composer3::Buffer> aidlBuffers;
+    aidlBuffers.reserve(buffers.size());
+
+    for (auto& buffer : buffers) {
+        if (buffer.get()) {
+            aidl::android::hardware::graphics::composer3::Buffer aidlBuffer;
+            aidlBuffer.handle.emplace(::android::dupToAidl(buffer->getNativeBuffer()->handle));
+            aidlBuffers.emplace_back(std::move(aidlBuffer));
+        }
+    }
+
+    const auto status =
+            mAidlComposerClient->getLuts(translate<int64_t>(display), aidlBuffers, luts);
+    if (!status.isOk()) {
+        ALOGE("getLuts failed %s", status.getDescription().c_str());
+        return static_cast<Error>(status.getServiceSpecificError());
+    }
+
     return Error::NONE;
 }
 

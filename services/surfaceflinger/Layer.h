@@ -18,6 +18,7 @@
 
 #include <android/gui/DropInputMode.h>
 #include <android/gui/ISurfaceComposerClient.h>
+#include <com_android_graphics_surfaceflinger_flags.h>
 #include <ftl/small_map.h>
 #include <gui/BufferQueue.h>
 #include <gui/LayerState.h>
@@ -44,6 +45,7 @@
 #include <scheduler/Seamlessness.h>
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -433,8 +435,12 @@ protected:
 
     uint32_t mTransactionFlags{0};
 
+    // Leverages FrameTimeline to generate FrameStats. Since FrameTimeline already has the data,
+    // statistical history needs to only be tracked by count of frames.
+    // TODO: Deprecate the '--latency-clear' and get rid of this.
+    std::atomic<uint16_t> mFrameStatsHistorySize;
     // Timestamp history for UIAutomation. Thread safe.
-    FrameTracker mFrameTracker;
+    FrameTracker mDeprecatedFrameTracker;
 
     // main thread
     sp<NativeHandle> mSidebandStream;
@@ -510,11 +516,6 @@ private:
 
     bool mGetHandleCalled = false;
 
-    // The inherited shadow radius after taking into account the layer hierarchy. This is the
-    // final shadow radius for this layer. If a shadow is specified for a layer, then effective
-    // shadow radius is the set shadow radius, otherwise its the parent's shadow radius.
-    float mEffectiveShadowRadius = 0.f;
-
     // Game mode for the layer. Set by WindowManagerShell and recorded by SurfaceFlingerStats.
     gui::GameMode mGameMode = gui::GameMode::Unsupported;
 
@@ -556,6 +557,9 @@ private:
 
     std::vector<std::pair<frontend::LayerHierarchy::TraversalPath, sp<LayerFE>>> mLayerFEs;
     bool mHandleAlive = false;
+    std::optional<std::reference_wrapper<frametimeline::FrameTimeline>> getTimeline() const {
+        return *mFlinger->mFrameTimeline;
+    }
 };
 
 std::ostream& operator<<(std::ostream& stream, const Layer::FrameRate& rate);
