@@ -24,7 +24,6 @@
 #include "FakePointerController.h"
 #include "InterfaceMocks.h"
 #include "NotifyArgsBuilders.h"
-#include "ScopedFlagOverride.h"
 #include "TestEventMatchers.h"
 #include "TestInputListener.h"
 
@@ -115,10 +114,6 @@ TestPointerChoreographer::TestPointerChoreographer(
                 }) {}
 
 class PointerChoreographerTest : public testing::Test {
-public:
-    static constexpr int DENSITY_MEDIUM = 160;
-    static constexpr int DENSITY_HIGH = 320;
-
 protected:
     TestInputListener mTestListener;
     sp<gui::WindowInfosListener> mRegisteredWindowInfoListener;
@@ -143,22 +138,6 @@ protected:
                 .WillByDefault([this](ui::LogicalDisplayId displayId, const vec2& position) {
                     mPointerDisplayIdNotified = displayId;
                 });
-    }
-
-    void setDefaultMouseDisplayId(ui::LogicalDisplayId displayId) {
-        if (input_flags::connected_displays_cursor()) {
-            // setDefaultMouseDisplayId is no-op if connected displays are enabled, mouse display is
-            // set based on primary display of the topology.
-            // Setting topology with the primary display should have same effect as calling
-            // setDefaultMouseDisplayId without topology.
-            // For this reason in tests we mock this behavior by creating topology with a single
-            // display.
-            mChoreographer.setDisplayTopology({.primaryDisplayId = displayId,
-                                               .graph{{displayId, {}}},
-                                               .displaysDensity = {{displayId, DENSITY_MEDIUM}}});
-        } else {
-            mChoreographer.setDefaultMouseDisplayId(displayId);
-        }
     }
 
     std::shared_ptr<FakePointerController> assertPointerControllerCreated(
@@ -313,7 +292,7 @@ TEST_F(PointerChoreographerTest, WhenViewportSetLaterSetsViewportForAssociatedMo
 
 TEST_F(PointerChoreographerTest, SetsDefaultMouseViewportForPointerController) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
 
     // For a mouse event without a target display, default viewport should be set for
     // the PointerController.
@@ -330,7 +309,7 @@ TEST_F(PointerChoreographerTest,
        WhenDefaultMouseDisplayChangesSetsDefaultMouseViewportForPointerController) {
     // Set one display as a default mouse display and emit mouse event to create PointerController.
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID, ANOTHER_DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
@@ -341,7 +320,7 @@ TEST_F(PointerChoreographerTest,
 
     // Change default mouse display. Existing PointerController should be removed and a new one
     // should be created.
-    setDefaultMouseDisplayId(ANOTHER_DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(ANOTHER_DISPLAY_ID);
     assertPointerControllerRemoved(firstDisplayPc);
 
     auto secondDisplayPc = assertPointerControllerCreated(ControllerType::MOUSE);
@@ -350,7 +329,7 @@ TEST_F(PointerChoreographerTest,
 }
 
 TEST_F(PointerChoreographerTest, CallsNotifyPointerDisplayIdChanged) {
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
@@ -362,7 +341,7 @@ TEST_F(PointerChoreographerTest, CallsNotifyPointerDisplayIdChanged) {
 }
 
 TEST_F(PointerChoreographerTest, WhenViewportIsSetLaterCallsNotifyPointerDisplayIdChanged) {
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
@@ -375,7 +354,7 @@ TEST_F(PointerChoreographerTest, WhenViewportIsSetLaterCallsNotifyPointerDisplay
 }
 
 TEST_F(PointerChoreographerTest, WhenMouseIsRemovedCallsNotifyPointerDisplayIdChanged) {
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
@@ -394,7 +373,7 @@ TEST_F(PointerChoreographerTest, WhenDefaultMouseDisplayChangesCallsNotifyPointe
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID, ANOTHER_DISPLAY_ID}));
 
     // Set one viewport as a default mouse display ID.
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
@@ -403,7 +382,7 @@ TEST_F(PointerChoreographerTest, WhenDefaultMouseDisplayChangesCallsNotifyPointe
     assertPointerDisplayIdNotified(DISPLAY_ID);
 
     // Set another viewport as a default mouse display ID. The mouse is moved to the other display.
-    setDefaultMouseDisplayId(ANOTHER_DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(ANOTHER_DISPLAY_ID);
     assertPointerControllerRemoved(firstDisplayPc);
 
     assertPointerControllerCreated(ControllerType::MOUSE);
@@ -412,7 +391,7 @@ TEST_F(PointerChoreographerTest, WhenDefaultMouseDisplayChangesCallsNotifyPointe
 
 TEST_F(PointerChoreographerTest, MouseMovesPointerAndReturnsNewArgs) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
@@ -442,7 +421,7 @@ TEST_F(PointerChoreographerTest, MouseMovesPointerAndReturnsNewArgs) {
 
 TEST_F(PointerChoreographerTest, AbsoluteMouseMovesPointerAndReturnsNewArgs) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
@@ -478,7 +457,7 @@ TEST_F(PointerChoreographerTest,
        AssociatedMouseMovesPointerOnAssociatedDisplayAndDoesNotMovePointerOnDefaultDisplay) {
     // Add two displays and set one to default.
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID, ANOTHER_DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
 
     // Add two devices, one unassociated and the other associated with non-default mouse display.
     mChoreographer.notifyInputDevicesChanged(
@@ -517,7 +496,7 @@ TEST_F(PointerChoreographerTest,
 
 TEST_F(PointerChoreographerTest, DoesNotMovePointerForMouseRelativeSource) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
@@ -564,7 +543,7 @@ TEST_F(PointerChoreographerTest, DoesNotMovePointerForMouseRelativeSource) {
 
 TEST_F(PointerChoreographerTest, WhenPointerCaptureEnabledHidesPointer) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
@@ -583,7 +562,7 @@ TEST_F(PointerChoreographerTest, WhenPointerCaptureEnabledHidesPointer) {
 
 TEST_F(PointerChoreographerTest, MultipleMiceConnectionAndRemoval) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
 
     // A mouse is connected, and the pointer is shown.
     mChoreographer.notifyInputDevicesChanged(
@@ -620,7 +599,7 @@ TEST_F(PointerChoreographerTest, MultipleMiceConnectionAndRemoval) {
 
 TEST_F(PointerChoreographerTest, UnrelatedChangeDoesNotUnfadePointer) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
@@ -649,7 +628,7 @@ TEST_F(PointerChoreographerTest, UnrelatedChangeDoesNotUnfadePointer) {
 
 TEST_F(PointerChoreographerTest, DisabledMouseConnected) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     InputDeviceInfo mouseDeviceInfo =
             generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, ui::LogicalDisplayId::INVALID);
     // Disable this mouse device.
@@ -662,7 +641,7 @@ TEST_F(PointerChoreographerTest, DisabledMouseConnected) {
 
 TEST_F(PointerChoreographerTest, MouseDeviceDisableLater) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     InputDeviceInfo mouseDeviceInfo =
             generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, ui::LogicalDisplayId::INVALID);
 
@@ -681,7 +660,7 @@ TEST_F(PointerChoreographerTest, MouseDeviceDisableLater) {
 
 TEST_F(PointerChoreographerTest, MultipleEnabledAndDisabledMiceConnectionAndRemoval) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     InputDeviceInfo disabledMouseDeviceInfo =
             generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, ui::LogicalDisplayId::INVALID);
     disabledMouseDeviceInfo.setEnabled(false);
@@ -1032,7 +1011,7 @@ TEST_F(PointerChoreographerTest, ShowTouchesOverridesUnspecifiedStylusIcon) {
 TEST_F(PointerChoreographerTest, StylusHoverEnterFadesMouseOnDisplay) {
     // Make sure there are PointerControllers for a mouse and a stylus.
     mChoreographer.setStylusPointerIconEnabled(true);
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, ui::LogicalDisplayId::INVALID),
@@ -1427,7 +1406,7 @@ TEST_F(PointerChoreographerTest, WhenViewportSetLaterSetsViewportForAssociatedTo
 
 TEST_F(PointerChoreographerTest, SetsDefaultTouchpadViewportForPointerController) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
 
     // For a touchpad event without a target display, default viewport should be set for
     // the PointerController.
@@ -1443,7 +1422,7 @@ TEST_F(PointerChoreographerTest,
        WhenDefaultTouchpadDisplayChangesSetsDefaultTouchpadViewportForPointerController) {
     // Set one display as a default touchpad display and create PointerController.
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID, ANOTHER_DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
@@ -1452,7 +1431,7 @@ TEST_F(PointerChoreographerTest,
     firstDisplayPc->assertViewportSet(DISPLAY_ID);
 
     // Change default mouse display. Existing PointerController should be removed.
-    setDefaultMouseDisplayId(ANOTHER_DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(ANOTHER_DISPLAY_ID);
     assertPointerControllerRemoved(firstDisplayPc);
 
     auto secondDisplayPc = assertPointerControllerCreated(ControllerType::MOUSE);
@@ -1460,7 +1439,7 @@ TEST_F(PointerChoreographerTest,
 }
 
 TEST_F(PointerChoreographerTest, TouchpadCallsNotifyPointerDisplayIdChanged) {
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
@@ -1472,7 +1451,7 @@ TEST_F(PointerChoreographerTest, TouchpadCallsNotifyPointerDisplayIdChanged) {
 }
 
 TEST_F(PointerChoreographerTest, WhenViewportIsSetLaterTouchpadCallsNotifyPointerDisplayIdChanged) {
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
@@ -1485,7 +1464,7 @@ TEST_F(PointerChoreographerTest, WhenViewportIsSetLaterTouchpadCallsNotifyPointe
 }
 
 TEST_F(PointerChoreographerTest, WhenTouchpadIsRemovedCallsNotifyPointerDisplayIdChanged) {
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
@@ -1505,7 +1484,7 @@ TEST_F(PointerChoreographerTest,
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID, ANOTHER_DISPLAY_ID}));
 
     // Set one viewport as a default mouse display ID.
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
@@ -1515,7 +1494,7 @@ TEST_F(PointerChoreographerTest,
 
     // Set another viewport as a default mouse display ID. ui::LogicalDisplayId::INVALID will be
     // notified before a touchpad event.
-    setDefaultMouseDisplayId(ANOTHER_DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(ANOTHER_DISPLAY_ID);
     assertPointerControllerRemoved(firstDisplayPc);
 
     assertPointerControllerCreated(ControllerType::MOUSE);
@@ -1524,7 +1503,7 @@ TEST_F(PointerChoreographerTest,
 
 TEST_F(PointerChoreographerTest, TouchpadMovesPointerAndReturnsNewArgs) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
@@ -1554,7 +1533,7 @@ TEST_F(PointerChoreographerTest, TouchpadMovesPointerAndReturnsNewArgs) {
 
 TEST_F(PointerChoreographerTest, TouchpadAddsPointerPositionToTheCoords) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
@@ -1631,7 +1610,7 @@ TEST_F(PointerChoreographerTest,
        AssociatedTouchpadMovesPointerOnAssociatedDisplayAndDoesNotMovePointerOnDefaultDisplay) {
     // Add two displays and set one to default.
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID, ANOTHER_DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
 
     // Add two devices, one unassociated and the other associated with non-default mouse display.
     mChoreographer.notifyInputDevicesChanged(
@@ -1672,7 +1651,7 @@ TEST_F(PointerChoreographerTest,
 
 TEST_F(PointerChoreographerTest, DoesNotMovePointerForTouchpadSource) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
@@ -1709,7 +1688,7 @@ TEST_F(PointerChoreographerTest, DoesNotMovePointerForTouchpadSource) {
 
 TEST_F(PointerChoreographerTest, WhenPointerCaptureEnabledTouchpadHidesPointer) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
@@ -1729,7 +1708,7 @@ TEST_F(PointerChoreographerTest, WhenPointerCaptureEnabledTouchpadHidesPointer) 
 TEST_F(PointerChoreographerTest, SetsPointerIconForMouse) {
     // Make sure there is a PointerController.
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
@@ -1745,7 +1724,7 @@ TEST_F(PointerChoreographerTest, SetsPointerIconForMouse) {
 TEST_F(PointerChoreographerTest, DoesNotSetMousePointerIconForWrongDisplayId) {
     // Make sure there is a PointerController.
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
@@ -1762,7 +1741,7 @@ TEST_F(PointerChoreographerTest, DoesNotSetMousePointerIconForWrongDisplayId) {
 TEST_F(PointerChoreographerTest, DoesNotSetPointerIconForWrongDeviceId) {
     // Make sure there is a PointerController.
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
@@ -1779,7 +1758,7 @@ TEST_F(PointerChoreographerTest, DoesNotSetPointerIconForWrongDeviceId) {
 TEST_F(PointerChoreographerTest, SetsCustomPointerIconForMouse) {
     // Make sure there is a PointerController.
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
@@ -1803,7 +1782,7 @@ TEST_F(PointerChoreographerTest, SetsCustomPointerIconForMouse) {
 TEST_F(PointerChoreographerTest, SetsPointerIconForMouseOnTwoDisplays) {
     // Make sure there are two PointerControllers on different displays.
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID, ANOTHER_DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, ui::LogicalDisplayId::INVALID),
@@ -1827,7 +1806,7 @@ TEST_F(PointerChoreographerTest, SetsPointerIconForMouseOnTwoDisplays) {
 
 TEST_F(PointerChoreographerTest, A11yPointerMotionFilterMouse) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
@@ -1861,7 +1840,7 @@ TEST_F(PointerChoreographerTest, A11yPointerMotionFilterMouse) {
 
 TEST_F(PointerChoreographerTest, A11yPointerMotionFilterTouchpad) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
@@ -2259,7 +2238,7 @@ TEST_P(StylusTestFixture, SetsPointerIconForMouseAndStylus) {
 
     // Make sure there are PointerControllers for a mouse and a stylus.
     mChoreographer.setStylusPointerIconEnabled(true);
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, ui::LogicalDisplayId::INVALID),
@@ -2294,7 +2273,7 @@ TEST_P(StylusTestFixture, SetsPointerIconForMouseAndStylus) {
 TEST_F(PointerChoreographerTest, SetPointerIconVisibilityHidesPointerOnDisplay) {
     // Make sure there are two PointerControllers on different displays.
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID, ANOTHER_DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, ui::LogicalDisplayId::INVALID),
@@ -2348,7 +2327,7 @@ TEST_F(PointerChoreographerTest, SetPointerIconVisibilityHidesPointerOnDisplay) 
 
 TEST_F(PointerChoreographerTest, SetPointerIconVisibilityHidesPointerWhenDeviceConnected) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
 
     // Hide the pointer on the display, and then connect the mouse.
     mChoreographer.setPointerIconVisibility(DISPLAY_ID, false);
@@ -2365,7 +2344,7 @@ TEST_F(PointerChoreographerTest, SetPointerIconVisibilityHidesPointerWhenDeviceC
 
 TEST_F(PointerChoreographerTest, SetPointerIconVisibilityHidesPointerForTouchpad) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
 
     // Hide the pointer on the display.
     mChoreographer.setPointerIconVisibility(DISPLAY_ID, false);
@@ -2414,7 +2393,7 @@ TEST_P(StylusTestFixture, SetPointerIconVisibilityHidesPointerForStylus) {
 
 TEST_F(PointerChoreographerTest, DrawingTabletCanReportMouseEvent) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
 
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
@@ -2441,7 +2420,7 @@ TEST_F(PointerChoreographerTest, DrawingTabletCanReportMouseEvent) {
 
 TEST_F(PointerChoreographerTest, MultipleDrawingTabletsReportMouseEvents) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
 
     // First drawing tablet is added
     mChoreographer.notifyInputDevicesChanged(
@@ -2489,7 +2468,7 @@ TEST_F(PointerChoreographerTest, MultipleDrawingTabletsReportMouseEvents) {
 
 TEST_F(PointerChoreographerTest, MouseAndDrawingTabletReportMouseEvents) {
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
-    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.setDefaultMouseDisplayId(DISPLAY_ID);
 
     // Mouse and drawing tablet connected
     mChoreographer.notifyInputDevicesChanged(
@@ -2733,29 +2712,15 @@ TEST_P(PointerVisibilityAndTouchpadTapStateOnKeyPressTestFixture, TestMetaKeyCom
     metaKeyCombinationDoesNotHidePointer(*pc, AKEYCODE_A, AKEYCODE_META_RIGHT);
 }
 
-class PointerChoreographerDisplayTopologyTests : public PointerChoreographerTest {
-protected:
-    DisplayViewport createViewport(ui::LogicalDisplayId displayId, int32_t width, int32_t height,
-                                   ui::Rotation orientation) {
-        DisplayViewport viewport;
-        viewport.displayId = displayId;
-        viewport.logicalRight = width;
-        viewport.logicalBottom = height;
-        viewport.orientation = orientation;
-        return viewport;
-    }
-};
-
-using PointerChoreographerDisplayTopologyCursorTestFixtureParam =
+using PointerChoreographerDisplayTopologyTestFixtureParam =
         std::tuple<std::string_view /*name*/, int32_t /*source device*/,
                    ControllerType /*PointerController*/, ToolType /*pointer tool type*/,
                    vec2 /*source position*/, vec2 /*hover move X/Y*/,
                    ui::LogicalDisplayId /*destination display*/, vec2 /*destination position*/>;
 
-class PointerChoreographerDisplayTopologyCursorTestFixture
-      : public PointerChoreographerDisplayTopologyTests,
-        public testing::WithParamInterface<
-                PointerChoreographerDisplayTopologyCursorTestFixtureParam> {
+class PointerChoreographerDisplayTopologyTestFixture
+      : public PointerChoreographerTest,
+        public testing::WithParamInterface<PointerChoreographerDisplayTopologyTestFixtureParam> {
 public:
     static constexpr ui::LogicalDisplayId DISPLAY_CENTER_ID = ui::LogicalDisplayId{10};
     static constexpr ui::LogicalDisplayId DISPLAY_TOP_ID = ui::LogicalDisplayId{20};
@@ -2764,6 +2729,13 @@ public:
     static constexpr ui::LogicalDisplayId DISPLAY_LEFT_ID = ui::LogicalDisplayId{50};
     static constexpr ui::LogicalDisplayId DISPLAY_TOP_RIGHT_CORNER_ID = ui::LogicalDisplayId{60};
     static constexpr ui::LogicalDisplayId DISPLAY_HIGH_DENSITY_ID = ui::LogicalDisplayId{70};
+
+    static constexpr int DENSITY_MEDIUM = 160;
+    static constexpr int DENSITY_HIGH = 320;
+
+    PointerChoreographerDisplayTopologyTestFixture() {
+        com::android::input::flags::connected_displays_cursor(true);
+    }
 
 protected:
     // Note: viewport size is in pixels and offsets in topology are in dp
@@ -2797,24 +2769,34 @@ protected:
                        {DISPLAY_LEFT_ID, DENSITY_MEDIUM},
                        {DISPLAY_TOP_RIGHT_CORNER_ID, DENSITY_MEDIUM},
                        {DISPLAY_HIGH_DENSITY_ID, DENSITY_HIGH}}};
+
+private:
+    DisplayViewport createViewport(ui::LogicalDisplayId displayId, int32_t width, int32_t height,
+                                   ui::Rotation orientation) {
+        DisplayViewport viewport;
+        viewport.displayId = displayId;
+        viewport.logicalRight = width;
+        viewport.logicalBottom = height;
+        viewport.orientation = orientation;
+        return viewport;
+    }
 };
 
-TEST_P(PointerChoreographerDisplayTopologyCursorTestFixture,
-       PointerChoreographerDisplayTopologyTest) {
-    SCOPED_FLAG_OVERRIDE(connected_displays_cursor, true);
-
+TEST_P(PointerChoreographerDisplayTopologyTestFixture, PointerChoreographerDisplayTopologyTest) {
     const auto& [_, device, pointerControllerType, pointerToolType, initialPosition, hoverMove,
                  destinationDisplay, destinationPosition] = GetParam();
 
     mChoreographer.setDisplayViewports(mViewports);
-    setDefaultMouseDisplayId(DISPLAY_CENTER_ID);
+    mChoreographer.setDefaultMouseDisplayId(
+            PointerChoreographerDisplayTopologyTestFixture::DISPLAY_CENTER_ID);
     mChoreographer.setDisplayTopology(mTopology);
 
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0, {generateTestDeviceInfo(DEVICE_ID, device, ui::LogicalDisplayId::INVALID)}});
 
     auto pc = assertPointerControllerCreated(pointerControllerType);
-    ASSERT_EQ(DISPLAY_CENTER_ID, pc->getDisplayId());
+    ASSERT_EQ(PointerChoreographerDisplayTopologyTestFixture::DISPLAY_CENTER_ID,
+              pc->getDisplayId());
 
     // Set initial position of the PointerController.
     pc->setPosition(initialPosition.x, initialPosition.y);
@@ -2846,315 +2828,84 @@ TEST_P(PointerChoreographerDisplayTopologyCursorTestFixture,
 }
 
 INSTANTIATE_TEST_SUITE_P(
-        PointerChoreographerTest, PointerChoreographerDisplayTopologyCursorTestFixture,
+        PointerChoreographerTest, PointerChoreographerDisplayTopologyTestFixture,
         testing::Values(
                 // Note: Upon viewport transition cursor will be positioned at the boundary of the
                 // destination, as we drop any unconsumed delta.
-                std::make_tuple(
-                        "PrimaryDisplayIsDefault", AINPUT_SOURCE_MOUSE, ControllerType::MOUSE,
-                        ToolType::MOUSE, vec2(50, 50) /* initial x/y */, vec2(0, 0) /* delta x/y */,
-                        PointerChoreographerDisplayTopologyCursorTestFixture::DISPLAY_CENTER_ID,
-                        vec2(50, 50) /* destination x/y */),
-                std::make_tuple(
-                        "UnchangedDisplay", AINPUT_SOURCE_MOUSE, ControllerType::MOUSE,
-                        ToolType::MOUSE, vec2(50, 50) /* initial x/y */,
-                        vec2(25, 25) /* delta x/y */,
-                        PointerChoreographerDisplayTopologyCursorTestFixture::DISPLAY_CENTER_ID,
-                        vec2(75, 75) /* destination x/y */),
-                std::make_tuple(
-                        "TransitionToRightDisplay", AINPUT_SOURCE_MOUSE, ControllerType::MOUSE,
-                        ToolType::MOUSE, vec2(50, 50) /* initial x/y */,
-                        vec2(100, 25) /* delta x/y */,
-                        PointerChoreographerDisplayTopologyCursorTestFixture::DISPLAY_RIGHT_ID,
-                        vec2(0, 50 + 25 - 10) /* Left edge: (0, source + delta - offset) */),
+                std::make_tuple("PrimaryDisplayIsDefault", AINPUT_SOURCE_MOUSE,
+                                ControllerType::MOUSE, ToolType::MOUSE,
+                                vec2(50, 50) /* initial x/y */, vec2(0, 0) /* delta x/y */,
+                                PointerChoreographerDisplayTopologyTestFixture::DISPLAY_CENTER_ID,
+                                vec2(50, 50) /* destination x/y */),
+                std::make_tuple("UnchangedDisplay", AINPUT_SOURCE_MOUSE, ControllerType::MOUSE,
+                                ToolType::MOUSE, vec2(50, 50) /* initial x/y */,
+                                vec2(25, 25) /* delta x/y */,
+                                PointerChoreographerDisplayTopologyTestFixture::DISPLAY_CENTER_ID,
+                                vec2(75, 75) /* destination x/y */),
+                std::make_tuple("TransitionToRightDisplay", AINPUT_SOURCE_MOUSE,
+                                ControllerType::MOUSE, ToolType::MOUSE,
+                                vec2(50, 50) /* initial x/y */, vec2(100, 25) /* delta x/y */,
+                                PointerChoreographerDisplayTopologyTestFixture::DISPLAY_RIGHT_ID,
+                                vec2(0,
+                                     50 + 25 - 10) /* Left edge: (0, source + delta - offset) */),
                 std::make_tuple(
                         "TransitionToLeftDisplay", AINPUT_SOURCE_MOUSE, ControllerType::MOUSE,
                         ToolType::MOUSE, vec2(50, 50) /* initial x/y */,
                         vec2(-100, 25) /* delta x/y */,
-                        PointerChoreographerDisplayTopologyCursorTestFixture::DISPLAY_LEFT_ID,
+                        PointerChoreographerDisplayTopologyTestFixture::DISPLAY_LEFT_ID,
                         vec2(90, 50 + 25 - 10) /* Right edge: (width, source + delta - offset*/),
-                std::make_tuple(
-                        "TransitionToTopDisplay", AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
-                        ControllerType::MOUSE, ToolType::FINGER, vec2(50, 50) /* initial x/y */,
-                        vec2(25, -100) /* delta x/y */,
-                        PointerChoreographerDisplayTopologyCursorTestFixture::DISPLAY_TOP_ID,
-                        vec2(50 + 25 - 50,
-                             90) /* Bottom edge: (source + delta - offset, height) */),
-                std::make_tuple(
-                        "TransitionToBottomDisplay", AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
-                        ControllerType::MOUSE, ToolType::FINGER, vec2(50, 50) /* initial x/y */,
-                        vec2(25, 100) /* delta x/y */,
-                        PointerChoreographerDisplayTopologyCursorTestFixture::DISPLAY_BOTTOM_ID,
-                        vec2(50 + 25 - 10, 0) /* Top edge: (source + delta - offset, 0) */),
+                std::make_tuple("TransitionToTopDisplay",
+                                AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD, ControllerType::MOUSE,
+                                ToolType::FINGER, vec2(50, 50) /* initial x/y */,
+                                vec2(25, -100) /* delta x/y */,
+                                PointerChoreographerDisplayTopologyTestFixture::DISPLAY_TOP_ID,
+                                vec2(50 + 25 - 50,
+                                     90) /* Bottom edge: (source + delta - offset, height) */),
+                std::make_tuple("TransitionToBottomDisplay",
+                                AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD, ControllerType::MOUSE,
+                                ToolType::FINGER, vec2(50, 50) /* initial x/y */,
+                                vec2(25, 100) /* delta x/y */,
+                                PointerChoreographerDisplayTopologyTestFixture::DISPLAY_BOTTOM_ID,
+                                vec2(50 + 25 - 10, 0) /* Top edge: (source + delta - offset, 0) */),
                 // move towards 25 dp gap between DISPLAY_HIGH_DENSITY_ID and DISPLAY_TOP_ID
-                std::make_tuple(
-                        "NoTransitionAtTopOffset", AINPUT_SOURCE_MOUSE, ControllerType::MOUSE,
-                        ToolType::MOUSE, vec2(35, 50) /* initial x/y */,
-                        vec2(0, -100) /* Move Up */,
-                        PointerChoreographerDisplayTopologyCursorTestFixture::DISPLAY_CENTER_ID,
-                        vec2(35, 0) /* Top edge */),
-                std::make_tuple(
-                        "NoTransitionAtRightOffset", AINPUT_SOURCE_MOUSE, ControllerType::MOUSE,
-                        ToolType::MOUSE, vec2(95, 5) /* initial x/y */,
-                        vec2(100, 0) /* Move Right */,
-                        PointerChoreographerDisplayTopologyCursorTestFixture::DISPLAY_CENTER_ID,
-                        vec2(99, 5) /* Top edge */),
-                std::make_tuple(
-                        "NoTransitionAtBottomOffset", AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
-                        ControllerType::MOUSE, ToolType::FINGER, vec2(5, 95) /* initial x/y */,
-                        vec2(0, 100) /* Move Down */,
-                        PointerChoreographerDisplayTopologyCursorTestFixture::DISPLAY_CENTER_ID,
-                        vec2(5, 99) /* Bottom edge */),
-                std::make_tuple(
-                        "NoTransitionAtLeftOffset", AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
-                        ControllerType::MOUSE, ToolType::FINGER, vec2(5, 5) /* initial x/y */,
-                        vec2(-100, 0) /* Move Left */,
-                        PointerChoreographerDisplayTopologyCursorTestFixture::DISPLAY_CENTER_ID,
-                        vec2(0, 5) /* Left edge */),
-                std::make_tuple("TransitionAtTopRightCorner",
+                std::make_tuple("NoTransitionAtTopOffset", AINPUT_SOURCE_MOUSE,
+                                ControllerType::MOUSE, ToolType::MOUSE,
+                                vec2(35, 50) /* initial x/y */, vec2(0, -100) /* Move Up */,
+                                PointerChoreographerDisplayTopologyTestFixture::DISPLAY_CENTER_ID,
+                                vec2(35, 0) /* Top edge */),
+                std::make_tuple("NoTransitionAtRightOffset", AINPUT_SOURCE_MOUSE,
+                                ControllerType::MOUSE, ToolType::MOUSE,
+                                vec2(95, 5) /* initial x/y */, vec2(100, 0) /* Move Right */,
+                                PointerChoreographerDisplayTopologyTestFixture::DISPLAY_CENTER_ID,
+                                vec2(99, 5) /* Top edge */),
+                std::make_tuple("NoTransitionAtBottomOffset",
                                 AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD, ControllerType::MOUSE,
-                                ToolType::FINGER, vec2(95, 5) /* initial x/y */,
-                                vec2(10, -10) /* Move diagonally to top right corner */,
-                                PointerChoreographerDisplayTopologyCursorTestFixture::
-                                        DISPLAY_TOP_RIGHT_CORNER_ID,
-                                vec2(0, 90) /* bottom left corner */),
-                std::make_tuple("TransitionToHighDpDisplay",
+                                ToolType::FINGER, vec2(5, 95) /* initial x/y */,
+                                vec2(0, 100) /* Move Down */,
+                                PointerChoreographerDisplayTopologyTestFixture::DISPLAY_CENTER_ID,
+                                vec2(5, 99) /* Bottom edge */),
+                std::make_tuple("NoTransitionAtLeftOffset",
                                 AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD, ControllerType::MOUSE,
-                                ToolType::MOUSE, vec2(20, 20) /* initial x/y */,
-                                vec2(0, -50) /* delta x/y */,
-                                PointerChoreographerDisplayTopologyCursorTestFixture::
-                                        DISPLAY_HIGH_DENSITY_ID,
-                                /* Bottom edge: ((source + delta - offset) * density, height) */
-                                vec2((20 + 0 + 75) * 2, 200))),
-        [](const testing::TestParamInfo<PointerChoreographerDisplayTopologyCursorTestFixtureParam>&
-                   p) { return std::string{std::get<0>(p.param)}; });
-
-class PointerChoreographerDisplayTopologyDefaultMouseDisplayTests
-      : public PointerChoreographerDisplayTopologyTests {
-protected:
-    static constexpr ui::LogicalDisplayId FIRST_DISPLAY_ID = ui::LogicalDisplayId{10};
-    static constexpr ui::LogicalDisplayId SECOND_DISPLAY_ID = ui::LogicalDisplayId{20};
-    static constexpr ui::LogicalDisplayId THIRD_DISPLAY_ID = ui::LogicalDisplayId{30};
-
-    DisplayViewport createViewport(ui::LogicalDisplayId displayId) {
-        return PointerChoreographerDisplayTopologyTests::createViewport(displayId, /*width=*/100,
-                                                                        /*height=*/100,
-                                                                        ui::ROTATION_0);
-    }
-
-    void setDisplayTopologyWithDisplays(
-            ui::LogicalDisplayId primaryDisplayId,
-            const std::vector<ui::LogicalDisplayId>& adjacentDisplays = {}) {
-        // Prepare a topology with all display connected from left to right.
-        ui::LogicalDisplayId previousDisplay = primaryDisplayId;
-
-        std::unordered_map<ui::LogicalDisplayId, std::vector<DisplayTopologyAdjacentDisplay>>
-                topologyGraph;
-        topologyGraph[primaryDisplayId] = {};
-
-        std::unordered_map<ui::LogicalDisplayId, int> displaysDensity;
-        displaysDensity[primaryDisplayId] = DENSITY_MEDIUM;
-
-        for (ui::LogicalDisplayId adjacentDisplayId : adjacentDisplays) {
-            topologyGraph[previousDisplay].push_back({.displayId = adjacentDisplayId,
-                                                      .position = DisplayTopologyPosition::RIGHT,
-                                                      .offsetDp = 0.0f});
-            topologyGraph[adjacentDisplayId].push_back({.displayId = previousDisplay,
-                                                        .position = DisplayTopologyPosition::LEFT,
-                                                        .offsetDp = 0.0f});
-
-            displaysDensity[adjacentDisplayId] = DENSITY_MEDIUM;
-        }
-
-        mChoreographer.setDisplayTopology({primaryDisplayId, topologyGraph, displaysDensity});
-    }
-};
-
-TEST_F(PointerChoreographerDisplayTopologyDefaultMouseDisplayTests,
-       UnrelatedTopologyUpdatesDoNotChangeCursorDisplay) {
-    SCOPED_FLAG_OVERRIDE(connected_displays_cursor, true);
-
-    // Set first display as primary display and emit mouse event to create PointerController.
-    mChoreographer.setDisplayViewports({createViewport(FIRST_DISPLAY_ID)});
-    setDisplayTopologyWithDisplays(/*primaryDisplayId=*/FIRST_DISPLAY_ID);
-
-    mChoreographer.notifyInputDevicesChanged(
-            {/*id=*/0,
-             {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
-                                     ui::LogicalDisplayId::INVALID)}});
-    auto pc = assertPointerControllerCreated(ControllerType::MOUSE);
-    pc->assertViewportSet(FIRST_DISPLAY_ID);
-    ASSERT_TRUE(pc->isPointerShown());
-
-    // Add another display keeping the primary display unchanged
-    mChoreographer.setDisplayViewports(
-            {createViewport(FIRST_DISPLAY_ID), createViewport(SECOND_DISPLAY_ID)});
-    setDisplayTopologyWithDisplays(/*primaryDisplayId=*/FIRST_DISPLAY_ID,
-                                   /*adjacentDisplays=*/{SECOND_DISPLAY_ID});
-
-    assertPointerControllerNotCreated();
-    pc->assertViewportSet(FIRST_DISPLAY_ID);
-    ASSERT_TRUE(pc->isPointerShown());
-
-    // Move cursor to second display and add a third display
-    auto pointerBuilder = PointerBuilder(/*id=*/0, ToolType::MOUSE)
-                                  .axis(AMOTION_EVENT_AXIS_RELATIVE_X, /*x=*/100)
-                                  .axis(AMOTION_EVENT_AXIS_RELATIVE_Y, /*y=*/0);
-    mChoreographer.notifyMotion(
-            MotionArgsBuilder(AMOTION_EVENT_ACTION_HOVER_MOVE, AINPUT_SOURCE_MOUSE)
-                    .pointer(pointerBuilder)
-                    .deviceId(DEVICE_ID)
-                    .displayId(ui::LogicalDisplayId::INVALID)
-                    .build());
-
-    assertPointerControllerNotCreated();
-    pc->assertViewportSet(SECOND_DISPLAY_ID);
-    ASSERT_TRUE(pc->isPointerShown());
-
-    mChoreographer.setDisplayViewports({createViewport(FIRST_DISPLAY_ID),
-                                        createViewport(SECOND_DISPLAY_ID),
-                                        createViewport(THIRD_DISPLAY_ID)});
-    setDisplayTopologyWithDisplays(/*primaryDisplayId=*/FIRST_DISPLAY_ID, /*adjacentDisplays=*/
-                                   {SECOND_DISPLAY_ID, THIRD_DISPLAY_ID});
-
-    assertPointerControllerNotCreated();
-    pc->assertViewportSet(SECOND_DISPLAY_ID);
-    ASSERT_TRUE(pc->isPointerShown());
-
-    // Change the primary display to the third display
-    setDisplayTopologyWithDisplays(/*primaryDisplayId=*/THIRD_DISPLAY_ID, /*adjacentDisplays=*/
-                                   {SECOND_DISPLAY_ID, THIRD_DISPLAY_ID});
-
-    assertPointerControllerNotCreated();
-    pc->assertViewportSet(SECOND_DISPLAY_ID);
-    ASSERT_TRUE(pc->isPointerShown());
-}
-
-TEST_F(PointerChoreographerDisplayTopologyDefaultMouseDisplayTests,
-       PrimaryDisplayIsFallbackOnPointerDisplayRemoved) {
-    SCOPED_FLAG_OVERRIDE(connected_displays_cursor, true);
-
-    // Add two displays and move cursor to the secondary display
-    mChoreographer.setDisplayViewports(
-            {createViewport(FIRST_DISPLAY_ID), createViewport(SECOND_DISPLAY_ID)});
-    setDisplayTopologyWithDisplays(/*primaryDisplayId=*/FIRST_DISPLAY_ID,
-                                   /*adjacentDisplays=*/{SECOND_DISPLAY_ID});
-
-    mChoreographer.notifyInputDevicesChanged(
-            {/*id=*/0,
-             {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
-                                     ui::LogicalDisplayId::INVALID)}});
-    auto pc = assertPointerControllerCreated(ControllerType::MOUSE);
-    pc->assertViewportSet(FIRST_DISPLAY_ID);
-    ASSERT_TRUE(pc->isPointerShown());
-
-    auto pointerBuilder = PointerBuilder(/*id=*/0, ToolType::MOUSE)
-                                  .axis(AMOTION_EVENT_AXIS_RELATIVE_X, /*x=*/100)
-                                  .axis(AMOTION_EVENT_AXIS_RELATIVE_Y, /*y=*/0);
-    mChoreographer.notifyMotion(
-            MotionArgsBuilder(AMOTION_EVENT_ACTION_HOVER_MOVE, AINPUT_SOURCE_MOUSE)
-                    .pointer(pointerBuilder)
-                    .deviceId(DEVICE_ID)
-                    .displayId(ui::LogicalDisplayId::INVALID)
-                    .build());
-
-    assertPointerControllerNotCreated();
-    pc->assertViewportSet(SECOND_DISPLAY_ID);
-    ASSERT_TRUE(pc->isPointerShown());
-
-    // Remove the secondary display
-    mChoreographer.setDisplayViewports({createViewport(FIRST_DISPLAY_ID)});
-    setDisplayTopologyWithDisplays(/*primaryDisplayId=*/FIRST_DISPLAY_ID);
-
-    assertPointerControllerRemoved(pc);
-    pc = assertPointerControllerCreated(ControllerType::MOUSE);
-    pc->assertViewportSet(FIRST_DISPLAY_ID);
-    ASSERT_TRUE(pc->isPointerShown());
-}
-
-TEST_F(PointerChoreographerDisplayTopologyDefaultMouseDisplayTests,
-       UsePrimaryDisplayIfAssociatedDisplayIsInTopology) {
-    SCOPED_FLAG_OVERRIDE(connected_displays_cursor, true);
-    SCOPED_FLAG_OVERRIDE(connected_displays_associated_display_cursor_bugfix, true);
-
-    // Add two displays
-    mChoreographer.setDisplayViewports(
-            {createViewport(FIRST_DISPLAY_ID), createViewport(SECOND_DISPLAY_ID)});
-    setDisplayTopologyWithDisplays(/*primaryDisplayId=*/SECOND_DISPLAY_ID,
-                                   /*adjacentDisplays=*/{FIRST_DISPLAY_ID});
-
-    mChoreographer.notifyInputDevicesChanged(
-            {/*id=*/0, {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, FIRST_DISPLAY_ID)}});
-
-    auto pc = assertPointerControllerCreated(ControllerType::MOUSE);
-    pc->assertViewportSet(SECOND_DISPLAY_ID);
-    ASSERT_TRUE(pc->isPointerShown());
-}
-
-TEST_F(PointerChoreographerDisplayTopologyDefaultMouseDisplayTests,
-       AllowCrossingDisplayEvenWithAssociatedDisplaySet) {
-    SCOPED_FLAG_OVERRIDE(connected_displays_cursor, true);
-    SCOPED_FLAG_OVERRIDE(connected_displays_associated_display_cursor_bugfix, true);
-
-    // Add two displays
-    mChoreographer.setDisplayViewports(
-            {createViewport(FIRST_DISPLAY_ID), createViewport(SECOND_DISPLAY_ID)});
-    setDisplayTopologyWithDisplays(/*primaryDisplayId=*/FIRST_DISPLAY_ID,
-                                   /*adjacentDisplays=*/{SECOND_DISPLAY_ID});
-
-    mChoreographer.notifyInputDevicesChanged(
-            {/*id=*/0,
-             {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, SECOND_DISPLAY_ID)}});
-
-    auto pc = assertPointerControllerCreated(ControllerType::MOUSE);
-    pc->assertViewportSet(FIRST_DISPLAY_ID);
-    ASSERT_TRUE(pc->isPointerShown());
-
-    // Move cursor to the secondary display
-    auto pointerBuilder = PointerBuilder(/*id=*/0, ToolType::MOUSE)
-                                  .axis(AMOTION_EVENT_AXIS_RELATIVE_X, /*x=*/100)
-                                  .axis(AMOTION_EVENT_AXIS_RELATIVE_Y, /*y=*/0);
-    mChoreographer.notifyMotion(
-            MotionArgsBuilder(AMOTION_EVENT_ACTION_HOVER_MOVE, AINPUT_SOURCE_MOUSE)
-                    .pointer(pointerBuilder)
-                    .deviceId(DEVICE_ID)
-                    .displayId(ui::LogicalDisplayId::INVALID)
-                    .build());
-
-    assertPointerControllerNotCreated();
-    pc->assertViewportSet(SECOND_DISPLAY_ID);
-    ASSERT_TRUE(pc->isPointerShown());
-}
-
-TEST_F(PointerChoreographerDisplayTopologyDefaultMouseDisplayTests,
-       AddAssociatedDisplayCursorOutsideOfDisplayTopology) {
-    SCOPED_FLAG_OVERRIDE(connected_displays_cursor, true);
-    SCOPED_FLAG_OVERRIDE(connected_displays_associated_display_cursor_bugfix, true);
-
-    // Add three displays, with only first and second display in DisplayTopolgoy
-    mChoreographer.setDisplayViewports({createViewport(FIRST_DISPLAY_ID),
-                                        createViewport(SECOND_DISPLAY_ID),
-                                        createViewport(THIRD_DISPLAY_ID)});
-    setDisplayTopologyWithDisplays(/*primaryDisplayId=*/FIRST_DISPLAY_ID,
-                                   /*adjacentDisplays=*/{SECOND_DISPLAY_ID});
-
-    mChoreographer.notifyInputDevicesChanged(
-            {/*id=*/0,
-             {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
-                                     ui::LogicalDisplayId::INVALID)}});
-
-    auto pc = assertPointerControllerCreated(ControllerType::MOUSE);
-    pc->assertViewportSet(FIRST_DISPLAY_ID);
-    ASSERT_TRUE(pc->isPointerShown());
-
-    // Adds a new mouse associated with third display
-    mChoreographer.notifyInputDevicesChanged(
-            {/*id=*/1, {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, THIRD_DISPLAY_ID)}});
-
-    pc = assertPointerControllerCreated(ControllerType::MOUSE);
-    pc->assertViewportSet(THIRD_DISPLAY_ID);
-    ASSERT_TRUE(pc->isPointerShown());
-}
+                                ToolType::FINGER, vec2(5, 5) /* initial x/y */,
+                                vec2(-100, 0) /* Move Left */,
+                                PointerChoreographerDisplayTopologyTestFixture::DISPLAY_CENTER_ID,
+                                vec2(0, 5) /* Left edge */),
+                std::make_tuple(
+                        "TransitionAtTopRightCorner", AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
+                        ControllerType::MOUSE, ToolType::FINGER, vec2(95, 5) /* initial x/y */,
+                        vec2(10, -10) /* Move diagonally to top right corner */,
+                        PointerChoreographerDisplayTopologyTestFixture::DISPLAY_TOP_RIGHT_CORNER_ID,
+                        vec2(0, 90) /* bottom left corner */),
+                std::make_tuple(
+                        "TransitionToHighDpDisplay", AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD,
+                        ControllerType::MOUSE, ToolType::MOUSE, vec2(20, 20) /* initial x/y */,
+                        vec2(0, -50) /* delta x/y */,
+                        PointerChoreographerDisplayTopologyTestFixture::DISPLAY_HIGH_DENSITY_ID,
+                        /* Bottom edge: ((source + delta - offset) * density, height) */
+                        vec2((20 + 0 + 75) * 2, 200))),
+        [](const testing::TestParamInfo<PointerChoreographerDisplayTopologyTestFixtureParam>& p) {
+            return std::string{std::get<0>(p.param)};
+        });
 
 class PointerChoreographerWindowInfoListenerTest : public testing::Test {};
 

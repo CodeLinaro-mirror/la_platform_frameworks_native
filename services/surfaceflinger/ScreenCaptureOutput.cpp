@@ -209,7 +209,6 @@ ScreenCaptureOutput::generateClientCompositionRequests(
     }
 
     compositionengine::LayerFE::LayerSettings fillLayer;
-    fillLayer.name = "ScreenCaptureFillLayer";
     fillLayer.source.buffer.buffer = nullptr;
     fillLayer.source.solidColor = half3(0.0f, 0.0f, 0.0f);
     fillLayer.geometry.boundaries =

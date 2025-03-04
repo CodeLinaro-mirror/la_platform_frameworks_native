@@ -15,7 +15,6 @@
  */
 
 #include <android/gui/ISurfaceComposer.h>
-#include <android/gui/IWindowInfosListener.h>
 #include <gui/AidlUtil.h>
 #include <gui/WindowInfosListenerReporter.h>
 #include "gui/WindowInfosUpdate.h"
@@ -28,7 +27,7 @@ using gui::WindowInfosListener;
 using gui::aidl_utils::statusTFromBinderStatus;
 
 sp<WindowInfosListenerReporter> WindowInfosListenerReporter::getInstance() {
-    static sp<WindowInfosListenerReporter> sInstance = sp<WindowInfosListenerReporter>::make();
+    static sp<WindowInfosListenerReporter> sInstance = new WindowInfosListenerReporter;
     return sInstance;
 }
 
@@ -117,8 +116,7 @@ void WindowInfosListenerReporter::reconnect(const sp<gui::ISurfaceComposer>& com
     std::scoped_lock lock(mListenersMutex);
     if (!mWindowInfosListeners.empty()) {
         gui::WindowInfosListenerInfo listenerInfo;
-        composerService->addWindowInfosListener(sp<gui::IWindowInfosListener>::fromExisting(this),
-                                                &listenerInfo);
+        composerService->addWindowInfosListener(this, &listenerInfo);
         mWindowInfosPublisher = std::move(listenerInfo.windowInfosPublisher);
         mListenerId = listenerInfo.listenerId;
     }

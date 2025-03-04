@@ -25,11 +25,6 @@ public:
      * override.
      */
     static bool connectedDisplaysCursorEnabled();
-
-    /**
-     * Check if both connectedDisplaysCursor and associatedDisplayCursorBugfix is enabled.
-     */
-    static bool connectedDisplaysCursorAndAssociatedDisplayCursorBugfixEnabled();
 };
 
 } // namespace android

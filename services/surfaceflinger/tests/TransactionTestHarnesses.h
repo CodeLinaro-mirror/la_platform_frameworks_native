@@ -48,11 +48,7 @@ public:
 
                 ui::DisplayMode displayMode;
                 SurfaceComposerClient::getActiveDisplayMode(displayToken, &displayMode);
-                ui::Size resolution = displayMode.resolution;
-                if (displayState.orientation == ui::Rotation::Rotation90 ||
-                    displayState.orientation == ui::Rotation::Rotation270) {
-                    std::swap(resolution.width, resolution.height);
-                }
+                const ui::Size& resolution = displayMode.resolution;
 
                 sp<IBinder> vDisplay;
 
@@ -97,8 +93,8 @@ public:
 #else
                 t.setDisplaySurface(vDisplay, producer);
 #endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
-                t.setDisplayProjection(vDisplay, ui::Rotation::Rotation0, Rect(resolution),
-                                       Rect(resolution));
+                t.setDisplayProjection(vDisplay, displayState.orientation,
+                                       Rect(displayState.layerStackSpaceRect), Rect(resolution));
                 t.setDisplayLayerStack(vDisplay, layerStack);
                 t.setLayerStack(mirrorSc, layerStack);
                 t.apply();

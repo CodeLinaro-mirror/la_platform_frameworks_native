@@ -294,7 +294,9 @@ TEST_F(SurfaceTest, LayerCountIsOne) {
 TEST_F(SurfaceTest, QueryConsumerUsage) {
     const int TEST_USAGE_FLAGS =
             GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_HW_RENDER;
-    auto [c, s] = BufferItemConsumer::create(TEST_USAGE_FLAGS);
+    sp<BufferItemConsumer> c = new BufferItemConsumer(TEST_USAGE_FLAGS);
+
+    sp<Surface> s = c->getSurface();
     sp<ANativeWindow> anw(s);
 
     int flags = -1;
@@ -307,8 +309,10 @@ TEST_F(SurfaceTest, QueryConsumerUsage) {
 TEST_F(SurfaceTest, QueryDefaultBuffersDataSpace) {
     const android_dataspace TEST_DATASPACE = HAL_DATASPACE_V0_SRGB;
 
-    auto [cpuConsumer, s] = CpuConsumer::create(1);
+    sp<CpuConsumer> cpuConsumer = new CpuConsumer(1);
     cpuConsumer->setDefaultBufferDataSpace(TEST_DATASPACE);
+
+    sp<Surface> s = cpuConsumer->getSurface();
     sp<ANativeWindow> anw(s);
 
     android_dataspace dataSpace;
@@ -321,7 +325,8 @@ TEST_F(SurfaceTest, QueryDefaultBuffersDataSpace) {
 }
 
 TEST_F(SurfaceTest, SettingGenerationNumber) {
-    auto [cpuConsumer, surface] = CpuConsumer::create(1);
+    sp<CpuConsumer> cpuConsumer = new CpuConsumer(1);
+    sp<Surface> surface = cpuConsumer->getSurface();
     sp<ANativeWindow> window(surface);
 
     // Allocate a buffer with a generation number of 0
@@ -2175,7 +2180,8 @@ TEST_F(SurfaceTest, BatchOperations) {
     const int BUFFER_COUNT = 16;
     const int BATCH_SIZE = 8;
 
-    auto [cpuConsumer, surface] = CpuConsumer::create(1);
+    sp<CpuConsumer> cpuConsumer = new CpuConsumer(1);
+    sp<Surface> surface = cpuConsumer->getSurface();
     sp<ANativeWindow> window(surface);
     sp<StubSurfaceListener> listener = new StubSurfaceListener();
 
@@ -2223,7 +2229,8 @@ TEST_F(SurfaceTest, BatchIllegalOperations) {
     const int BUFFER_COUNT = 16;
     const int BATCH_SIZE = 8;
 
-    auto [cpuConsumer, surface] = CpuConsumer::create(1);
+    sp<CpuConsumer> cpuConsumer = new CpuConsumer(1);
+    sp<Surface> surface = cpuConsumer->getSurface();
     sp<ANativeWindow> window(surface);
     sp<StubSurfaceListener> listener = new StubSurfaceListener();
 
@@ -2370,7 +2377,8 @@ TEST_F(SurfaceTest, QueueAcquireReleaseDequeue_CalledInStack_DoesNotDeadlock) {
     sp<IGraphicBufferConsumer> bqConsumer;
     BufferQueue::createBufferQueue(&bqProducer, &bqConsumer);
 
-    auto [consumer, surface] = BufferItemConsumer::create(3);
+    sp<BufferItemConsumer> consumer = sp<BufferItemConsumer>::make(bqConsumer, 3);
+    sp<Surface> surface = sp<Surface>::make(bqProducer);
     sp<ImmediateReleaseConsumerListener> consumerListener =
             sp<ImmediateReleaseConsumerListener>::make(consumer);
     consumer->setFrameAvailableListener(consumerListener);

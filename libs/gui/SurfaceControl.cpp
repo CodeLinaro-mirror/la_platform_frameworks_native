@@ -269,11 +269,10 @@ status_t SurfaceControl::readFromParcel(const Parcel& parcel,
     SAFE_PARCEL(parcel.readUint32, &format);
 
     // We aren't the original owner of the surface.
-    *outSurfaceControl =
-            sp<SurfaceControl>::make(sp<SurfaceComposerClient>::make(
-                                             interface_cast<ISurfaceComposerClient>(client)),
-                                     handle, layerId, layerName, width, height, format,
-                                     transformHint);
+    *outSurfaceControl = new SurfaceControl(new SurfaceComposerClient(
+                                                    interface_cast<ISurfaceComposerClient>(client)),
+                                            handle.get(), layerId, layerName, width, height, format,
+                                            transformHint);
 
     return NO_ERROR;
 }

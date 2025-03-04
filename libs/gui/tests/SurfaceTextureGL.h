@@ -38,7 +38,8 @@ protected:
 
     void SetUp() {
         GLTest::SetUp();
-        std::tie(mST, mSTC) = GLConsumer::create(TEX_ID, GLConsumer::TEXTURE_EXTERNAL, true, false);
+        mST = new GLConsumer(TEX_ID, GLConsumer::TEXTURE_EXTERNAL, true, false);
+        mSTC = mST->getSurface();
         mANW = mSTC;
         ASSERT_EQ(NO_ERROR, native_window_set_usage(mANW.get(), TEST_PRODUCER_USAGE_BITS));
         mTextureRenderer = new TextureRenderer(TEX_ID, mST);

@@ -238,17 +238,13 @@ int64_t AChoreographerFrameCallbackData_getFrameTimelineDeadlineNanos(
 }
 
 AChoreographer* AChoreographer_create() {
-    // Increments default strongRef count on construction, will be decremented on
-    // function exit.
-    auto choreographer = sp<Choreographer>::make(nullptr);
+    Choreographer* choreographer = new Choreographer(nullptr);
     status_t result = choreographer->initialize();
     if (result != OK) {
         ALOGW("Failed to initialize");
         return nullptr;
     }
-    // Will be decremented and destroyed by AChoreographer_destroy
-    choreographer->incStrong((void*)AChoreographer_create);
-    return Choreographer_to_AChoreographer(choreographer.get());
+    return Choreographer_to_AChoreographer(choreographer);
 }
 
 void AChoreographer_destroy(AChoreographer* choreographer) {
@@ -256,7 +252,7 @@ void AChoreographer_destroy(AChoreographer* choreographer) {
         return;
     }
 
-    AChoreographer_to_Choreographer(choreographer)->decStrong((void*)AChoreographer_create);
+    delete AChoreographer_to_Choreographer(choreographer);
 }
 
 int AChoreographer_getFd(const AChoreographer* choreographer) {

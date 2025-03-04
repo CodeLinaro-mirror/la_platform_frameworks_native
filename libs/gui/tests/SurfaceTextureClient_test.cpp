@@ -40,7 +40,8 @@ protected:
     }
 
     virtual void SetUp() {
-        std::tie(mST, mSTC) = GLConsumer::create(123, GLConsumer::TEXTURE_EXTERNAL, true, false);
+        mST = new GLConsumer(123, GLConsumer::TEXTURE_EXTERNAL, true, false);
+        mSTC = mST->getSurface();
         mANW = mSTC;
 
         // We need a valid GL context so we can test updateTexImage()
@@ -726,7 +727,8 @@ protected:
         ASSERT_NE(EGL_NO_CONTEXT, mEglContext);
 
         for (int i = 0; i < NUM_SURFACE_TEXTURES; i++) {
-            auto [st, stc] = GLConsumer::create(i, GLConsumer::TEXTURE_EXTERNAL, true, false);
+            sp<GLConsumer> st(new GLConsumer(i, GLConsumer::TEXTURE_EXTERNAL, true, false));
+            sp<Surface> stc = st->getSurface();
             mEglSurfaces[i] = eglCreateWindowSurface(mEglDisplay, myConfig,
                     static_cast<ANativeWindow*>(stc.get()), nullptr);
             ASSERT_EQ(EGL_SUCCESS, eglGetError());
