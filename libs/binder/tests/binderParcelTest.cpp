@@ -60,6 +60,17 @@ TEST(Parcel, NonNullTerminatedString16) {
     EXPECT_EQ(output.size(), 0);
 }
 
+TEST(Parcel, AppendWithBadDataPos) {
+    Parcel p1;
+    p1.writeInt32(1);
+    p1.writeInt32(1);
+    Parcel p2;
+    p2.setDataCapacity(8);
+    p2.setDataPosition(10000);
+
+    EXPECT_EQ(android::BAD_VALUE, p2.appendFrom(&p1, 0, 8));
+}
+
 // Tests a second operation results in a parcel at the same location as it
 // started.
 void parcelOpSameLength(const std::function<void(Parcel*)>& a, const std::function<void(Parcel*)>& b) {
