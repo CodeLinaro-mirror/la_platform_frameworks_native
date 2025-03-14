@@ -4075,6 +4075,10 @@ void SurfaceFlinger::processDisplayAdded(const wp<IBinder>& displayToken,
         incRefreshableDisplays();
     }
 
+    if (FlagManager::getInstance().correct_virtual_display_power_state()) {
+        applyOptimizationPolicy(__func__);
+    }
+
     mDisplays.try_emplace(displayToken, std::move(display));
 
     // For an external display, loadDisplayModes already attempted to select the same mode
@@ -4130,6 +4134,10 @@ void SurfaceFlinger::processDisplayRemoved(const wp<IBinder>& displayToken) {
             // The display will be disconnected and removed from the mDisplays list so it will
             // not be accessible.
         }));
+    }
+
+    if (FlagManager::getInstance().correct_virtual_display_power_state()) {
+        applyOptimizationPolicy(__func__);
     }
 }
 
@@ -5007,13 +5015,7 @@ bool SurfaceFlinger::shouldLatchUnsignaled(const layer_state_t& state, size_t nu
     return true;
 }
 
-status_t SurfaceFlinger::setTransactionState(
-        const FrameTimelineInfo& frameTimelineInfo, Vector<ComposerState>& states,
-        Vector<DisplayState>& displays, uint32_t flags, const sp<IBinder>& applyToken,
-        InputWindowCommands inputWindowCommands, int64_t desiredPresentTime, bool isAutoTimestamp,
-        const std::vector<client_cache_t>& uncacheBuffers, bool hasListenerCallbacks,
-        const std::vector<ListenerCallbacks>& listenerCallbacks, uint64_t transactionId,
-        const std::vector<uint64_t>& mergedTransactionIds) {
+status_t SurfaceFlinger::setTransactionState(TransactionState&& transactionState) {
     SFTRACE_CALL();
 
     IPCThreadState* ipc = IPCThreadState::self();
@@ -5021,7 +5023,7 @@ status_t SurfaceFlinger::setTransactionState(
     const int originUid = ipc->getCallingUid();
     uint32_t permissions = LayerStatePermissions::getTransactionPermissions(originPid, originUid);
     ftl::Flags<adpf::Workload> queuedWorkload;
-    for (auto& composerState : states) {
+    for (auto& composerState : transactionState.mComposerStates) {
         composerState.state.sanitize(permissions);
         if (composerState.state.what & layer_state_t::COMPOSITION_EFFECTS) {
             queuedWorkload |= adpf::Workload::EFFECTS;
@@ -5031,27 +5033,27 @@ status_t SurfaceFlinger::setTransactionState(
         }
     }
 
-    for (DisplayState& display : displays) {
+    for (DisplayState& display : transactionState.mDisplayStates) {
         display.sanitize(permissions);
     }
 
-    if (!inputWindowCommands.empty() &&
+    if (!transactionState.mInputWindowCommands.empty() &&
         (permissions & layer_state_t::Permission::ACCESS_SURFACE_FLINGER) == 0) {
         ALOGE("Only privileged callers are allowed to send input commands.");
-        inputWindowCommands.clear();
+        transactionState.mInputWindowCommands.clear();
     }
 
-    if (flags & (eEarlyWakeupStart | eEarlyWakeupEnd)) {
+    if (transactionState.mFlags & (eEarlyWakeupStart | eEarlyWakeupEnd)) {
         const bool hasPermission =
                 (permissions & layer_state_t::Permission::ACCESS_SURFACE_FLINGER) ||
                 callingThreadHasPermission(sWakeupSurfaceFlinger);
         if (!hasPermission) {
             ALOGE("Caller needs permission android.permission.WAKEUP_SURFACE_FLINGER to use "
                   "eEarlyWakeup[Start|End] flags");
-            flags &= ~(eEarlyWakeupStart | eEarlyWakeupEnd);
+            transactionState.mFlags &= ~(eEarlyWakeupStart | eEarlyWakeupEnd);
         }
     }
-    if (flags & eEarlyWakeupStart) {
+    if (transactionState.mFlags & eEarlyWakeupStart) {
         queuedWorkload |= adpf::Workload::WAKEUP;
     }
     mPowerAdvisor->setQueuedWorkload(queuedWorkload);
@@ -5059,8 +5061,8 @@ status_t SurfaceFlinger::setTransactionState(
     const int64_t postTime = systemTime();
 
     std::vector<uint64_t> uncacheBufferIds;
-    uncacheBufferIds.reserve(uncacheBuffers.size());
-    for (const auto& uncacheBuffer : uncacheBuffers) {
+    uncacheBufferIds.reserve(transactionState.mUncacheBuffers.size());
+    for (const auto& uncacheBuffer : transactionState.mUncacheBuffers) {
         sp<GraphicBuffer> buffer = ClientCache::getInstance().erase(uncacheBuffer);
         if (buffer != nullptr) {
             uncacheBufferIds.push_back(buffer->getId());
@@ -5068,8 +5070,8 @@ status_t SurfaceFlinger::setTransactionState(
     }
 
     std::vector<ResolvedComposerState> resolvedStates;
-    resolvedStates.reserve(states.size());
-    for (auto& state : states) {
+    resolvedStates.reserve(transactionState.mComposerStates.size());
+    for (auto& state : transactionState.mComposerStates) {
         resolvedStates.emplace_back(std::move(state));
         auto& resolvedState = resolvedStates.back();
         resolvedState.layerId = LayerHandle::getLayerId(resolvedState.state.surface);
@@ -5080,7 +5082,7 @@ status_t SurfaceFlinger::setTransactionState(
                     layer->getDebugName() : std::to_string(resolvedState.state.layerId);
             resolvedState.externalTexture =
                     getExternalTextureFromBufferData(*resolvedState.state.bufferData,
-                                                     layerName.c_str(), transactionId);
+                                                     layerName.c_str(), transactionState.getId());
             if (resolvedState.externalTexture) {
                 resolvedState.state.bufferData->buffer = resolvedState.externalTexture->getBuffer();
             }
@@ -5102,22 +5104,12 @@ status_t SurfaceFlinger::setTransactionState(
         }
     }
 
-    QueuedTransactionState state{frameTimelineInfo,
-                                 resolvedStates,
-                                 displays,
-                                 flags,
-                                 applyToken,
-                                 std::move(inputWindowCommands),
-                                 desiredPresentTime,
-                                 isAutoTimestamp,
+    QueuedTransactionState state{std::move(transactionState),
+                                 std::move(resolvedStates),
                                  std::move(uncacheBufferIds),
                                  postTime,
-                                 hasListenerCallbacks,
-                                 listenerCallbacks,
                                  originPid,
-                                 originUid,
-                                 transactionId,
-                                 mergedTransactionIds};
+                                 originUid};
     state.workloadHint = queuedWorkload;
 
     if (mTransactionTracing) {
@@ -5140,16 +5132,16 @@ status_t SurfaceFlinger::setTransactionState(
 
     for (const auto& [displayId, data] : mNotifyExpectedPresentMap) {
         if (data.hintStatus.load() == NotifyExpectedPresentHintStatus::ScheduleOnTx) {
-            scheduleNotifyExpectedPresentHint(displayId, VsyncId{frameTimelineInfo.vsyncId});
+            scheduleNotifyExpectedPresentHint(displayId, VsyncId{state.frameTimelineInfo.vsyncId});
         }
     }
-    setTransactionFlags(eTransactionFlushNeeded, schedule, applyToken, frameHint);
+    setTransactionFlags(eTransactionFlushNeeded, schedule, state.applyToken, frameHint);
     return NO_ERROR;
 }
 
 bool SurfaceFlinger::applyTransactionState(
         const FrameTimelineInfo& frameTimelineInfo, std::vector<ResolvedComposerState>& states,
-        Vector<DisplayState>& displays, uint32_t flags,
+        std::span<DisplayState> displays, uint32_t flags,
         const InputWindowCommands& inputWindowCommands, const int64_t desiredPresentTime,
         bool isAutoTimestamp, const std::vector<uint64_t>& uncacheBufferIds, const int64_t postTime,
         bool hasListenerCallbacks, const std::vector<ListenerCallbacks>& listenerCallbacks,
@@ -5639,7 +5631,8 @@ void SurfaceFlinger::initializeDisplays() {
 
     auto layerStack = ui::DEFAULT_LAYER_STACK.id;
     for (const auto& [id, display] : FTL_FAKE_GUARD(mStateLock, mPhysicalDisplays)) {
-        state.displays.push(DisplayState(display.token(), ui::LayerStack::fromValue(layerStack++)));
+        state.displays.emplace_back(
+                DisplayState(display.token(), ui::LayerStack::fromValue(layerStack++)));
     }
 
     std::vector<QueuedTransactionState> transactions;
@@ -5680,7 +5673,7 @@ void SurfaceFlinger::setPhysicalDisplayPowerMode(const sp<DisplayDevice>& displa
     }
 
     const auto displayId = display->getPhysicalId();
-    ALOGD("Setting power mode %d on display %s", mode, to_string(displayId).c_str());
+    ALOGD("Setting power mode %d on physical display %s", mode, to_string(displayId).c_str());
 
     const auto currentMode = display->getPowerMode();
     if (currentMode == mode) {
@@ -5723,11 +5716,11 @@ void SurfaceFlinger::setPhysicalDisplayPowerMode(const sp<DisplayDevice>& displa
         }
 
         if (displayId == mActiveDisplayId) {
-            // TODO: b/281692563 - Merge the syscalls. For now, keep uclamp in a separate syscall
-            // and set it before SCHED_FIFO due to b/190237315.
-            constexpr const char* kWhence = "setPowerMode(ON)";
-            setSchedAttr(true, kWhence);
-            setSchedFifo(true, kWhence);
+            if (FlagManager::getInstance().correct_virtual_display_power_state()) {
+                applyOptimizationPolicy("setPhysicalDisplayPowerMode(ON)");
+            } else {
+                disablePowerOptimizations("setPhysicalDisplayPowerMode(ON)");
+            }
         }
 
         getHwComposer().setPowerMode(displayId, mode);
@@ -5754,9 +5747,11 @@ void SurfaceFlinger::setPhysicalDisplayPowerMode(const sp<DisplayDevice>& displa
             if (const auto display = getActivatableDisplay()) {
                 onActiveDisplayChangedLocked(activeDisplay.get(), *display);
             } else {
-                constexpr const char* kWhence = "setPowerMode(OFF)";
-                setSchedFifo(false, kWhence);
-                setSchedAttr(false, kWhence);
+                if (FlagManager::getInstance().correct_virtual_display_power_state()) {
+                    applyOptimizationPolicy("setPhysicalDisplayPowerMode(OFF)");
+                } else {
+                    enablePowerOptimizations("setPhysicalDisplayPowerMode(OFF)");
+                }
 
                 if (currentModeNotDozeSuspend) {
                     if (!FlagManager::getInstance().multithreaded_present()) {
@@ -5817,7 +5812,67 @@ void SurfaceFlinger::setPhysicalDisplayPowerMode(const sp<DisplayDevice>& displa
 
     mScheduler->setDisplayPowerMode(displayId, mode);
 
-    ALOGD("Finished setting power mode %d on display %s", mode, to_string(displayId).c_str());
+    ALOGD("Finished setting power mode %d on physical display %s", mode,
+          to_string(displayId).c_str());
+}
+
+void SurfaceFlinger::setVirtualDisplayPowerMode(const sp<DisplayDevice>& display,
+                                                hal::PowerMode mode) {
+    if (!display->isVirtual()) {
+        ALOGE("%s: Invalid operation on physical display", __func__);
+        return;
+    }
+
+    const auto displayId = display->getVirtualId();
+    ALOGD("Setting power mode %d on virtual display %s %s", mode, to_string(displayId).c_str(),
+          display->getDisplayName().c_str());
+
+    display->setPowerMode(static_cast<hal::PowerMode>(mode));
+
+    applyOptimizationPolicy(__func__);
+
+    ALOGD("Finished setting power mode %d on virtual display %s", mode,
+          to_string(displayId).c_str());
+}
+
+bool SurfaceFlinger::shouldOptimizeForPerformance() {
+    for (const auto& [_, display] : mDisplays) {
+        // Displays that are optimized for power are always powered on and should not influence
+        // whether there is an active display for the purpose of power optimization, etc. If these
+        // displays are being shown somewhere, a different (physical or virtual) display that is
+        // optimized for performance will be powered on in addition. Displays optimized for
+        // performance will change power mode, so if they are off then they are not active.
+        if (display->isPoweredOn() &&
+            display->getOptimizationPolicy() ==
+                    gui::ISurfaceComposer::OptimizationPolicy::optimizeForPerformance) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void SurfaceFlinger::enablePowerOptimizations(const char* whence) {
+    ALOGD("%s: Enabling power optimizations", whence);
+
+    setSchedAttr(false, whence);
+    setSchedFifo(false, whence);
+}
+
+void SurfaceFlinger::disablePowerOptimizations(const char* whence) {
+    ALOGD("%s: Disabling power optimizations", whence);
+
+    // TODO: b/281692563 - Merge the syscalls. For now, keep uclamp in a separate syscall
+    // and set it before SCHED_FIFO due to b/190237315.
+    setSchedAttr(true, whence);
+    setSchedFifo(true, whence);
+}
+
+void SurfaceFlinger::applyOptimizationPolicy(const char* whence) {
+    if (shouldOptimizeForPerformance()) {
+        disablePowerOptimizations(whence);
+    } else {
+        enablePowerOptimizations(whence);
+    }
 }
 
 void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
@@ -5839,9 +5894,8 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
             ALOGE("Failed to set power mode %d for display token %p", mode, displayToken.get());
         } else if (display->isVirtual()) {
             if (FlagManager::getInstance().correct_virtual_display_power_state()) {
-                ALOGD("Setting power mode %d on virtual display %s", mode,
-                      display->getDisplayName().c_str());
-                display->setPowerMode(static_cast<hal::PowerMode>(mode));
+                ftl::FakeGuard guard(mStateLock);
+                setVirtualDisplayPowerMode(display, static_cast<hal::PowerMode>(mode));
             } else {
                 ALOGW("Attempt to set power mode %d for virtual display", mode);
             }
