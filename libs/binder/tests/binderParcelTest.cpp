@@ -24,6 +24,7 @@ using android::Parcel;
 using android::String16;
 using android::String8;
 using android::status_t;
+using android::PERMISSION_DENIED;
 
 TEST(Parcel, NonNullTerminatedString8) {
     String8 kTestString = String8("test-is-good");
@@ -146,3 +147,13 @@ TEST_READ_WRITE_INVERSE(char16_t, Char, {u'a', u'\0'});
 TEST_READ_WRITE_INVERSE(int8_t, Byte, {-1, 0, 1});
 TEST_READ_WRITE_INVERSE(String8, String8, {String8(), String8("a"), String8("asdf")});
 TEST_READ_WRITE_INVERSE(String16, String16, {String16(), String16("a"), String16("asdf")});
+
+TEST(Parcel, AppendOverObject) {
+    Parcel p1;
+    p1.writeDupFileDescriptor(0);
+    Parcel p2;
+    p2.writeInt32(2);
+
+    p1.setDataPosition(8);
+    ASSERT_EQ(PERMISSION_DENIED, p1.appendFrom(&p2, 0, p2.dataSize()));
+}
