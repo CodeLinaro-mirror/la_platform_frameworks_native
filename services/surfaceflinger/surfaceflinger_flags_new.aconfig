@@ -265,6 +265,13 @@ flag {
 } # stable_edid_ids
 
 flag {
+  name: "synced_resolution_switch"
+  namespace: "core_graphics"
+  description: "Synchronize resolution modeset with framebuffer resizing"
+  bug: "355427258"
+} # synced_resolution_switch
+
+flag {
   name: "true_hdr_screenshots"
   namespace: "core_graphics"
   description: "Enables screenshotting display content in HDR, sans tone mapping"
@@ -312,6 +319,16 @@ flag {
     purpose: PURPOSE_BUGFIX
   }
 } # vrr_bugfix_dropped_frame
+
+flag {
+  name: "vsync_predictor_recovery"
+  namespace: "core_graphics"
+  description: "Recover the vsync predictor from bad vsync model"
+  bug: "385059265"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+ } # vsync_predictor_recovery
 
 flag {
   name: "window_blur_kawase2"

@@ -98,6 +98,8 @@ public:
     status_t detachBuffer(const sp<GraphicBuffer>& buffer);
 #endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
+    status_t addReleaseFence(const sp<GraphicBuffer> buffer, const sp<Fence>& fence);
+
     // See IGraphicBufferConsumer::setDefaultBufferSize
     status_t setDefaultBufferSize(uint32_t width, uint32_t height);
 
@@ -121,9 +123,7 @@ public:
     // See IGraphicBufferConsumer::setMaxAcquiredBufferCount
     status_t setMaxAcquiredBufferCount(int maxAcquiredBuffers);
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     status_t setConsumerIsProtected(bool isProtected);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     // See IGraphicBufferConsumer::getSidebandStream
     sp<NativeHandle> getSidebandStream() const;

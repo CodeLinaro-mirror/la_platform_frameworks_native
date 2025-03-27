@@ -569,10 +569,6 @@ public:
         // radius is drawn by the client and not SurfaceFlinger.
         Transaction& setClientDrawnCornerRadius(const sp<SurfaceControl>& sc,
                                                 float clientDrawnCornerRadius);
-        // Sets the client drawn shadow radius for the layer. This indicates that the shadows
-        // are drawn by the client and not SurfaceFlinger.
-        Transaction& setClientDrawnShadowRadius(const sp<SurfaceControl>& sc,
-                                                float clientDrawnShadowRadius);
         Transaction& setBackgroundBlurRadius(const sp<SurfaceControl>& sc,
                                              int backgroundBlurRadius);
         Transaction& setBlurRegions(const sp<SurfaceControl>& sc,
@@ -624,7 +620,7 @@ public:
         Transaction& setExtendedRangeBrightness(const sp<SurfaceControl>& sc,
                                                 float currentBufferRatio, float desiredRatio);
         Transaction& setDesiredHdrHeadroom(const sp<SurfaceControl>& sc, float desiredRatio);
-        Transaction& setLuts(const sp<SurfaceControl>& sc, const base::unique_fd& lutFd,
+        Transaction& setLuts(const sp<SurfaceControl>& sc, base::unique_fd&& lutFd,
                              const std::vector<int32_t>& offsets,
                              const std::vector<int32_t>& dimensions,
                              const std::vector<int32_t>& sizes,

@@ -114,7 +114,11 @@ public:
     // Test instances
 
     TestableSurfaceFlinger mFlinger;
+
     sp<mock::NativeWindow> mNativeWindow = sp<mock::NativeWindow>::make();
+    sp<compositionengine::mock::DisplaySurface> mDisplaySurface =
+            sp<compositionengine::mock::DisplaySurface>::make();
+
     sp<GraphicBuffer> mBuffer =
             sp<GraphicBuffer>::make(1u, 1u, PIXEL_FORMAT_RGBA_8888,
                                     GRALLOC_USAGE_SW_WRITE_OFTEN | GRALLOC_USAGE_SW_READ_OFTEN);
@@ -193,7 +197,7 @@ struct DisplayIdGetter<PhysicalDisplayIdType<PhysicalDisplay>> {
     }
 };
 
-template <uint64_t displayId>
+template <VirtualDisplayId::BaseId displayId>
 struct DisplayIdGetter<HalVirtualDisplayIdType<displayId>> {
     static HalVirtualDisplayId get() { return HalVirtualDisplayId(displayId); }
 };
@@ -294,6 +298,7 @@ struct DisplayVariant {
 
         injector.setSecure(static_cast<bool>(SECURE));
         injector.setNativeWindow(test->mNativeWindow);
+        injector.setDisplaySurface(test->mDisplaySurface);
 
         // Creating a DisplayDevice requires getting default dimensions from the
         // native window along with some other initial setup.
@@ -533,13 +538,14 @@ struct PrimaryDisplay {
     static constexpr auto GET_IDENTIFICATION_DATA = getInternalEdid;
 };
 
-template <ui::DisplayConnectionType connectionType, bool hasIdentificationData, bool secure>
+template <ui::DisplayConnectionType connectionType, bool hasIdentificationData, bool secure,
+          HWDisplayId hwDisplayId = 1002>
 struct SecondaryDisplay {
     static constexpr auto CONNECTION_TYPE = connectionType;
     static constexpr Primary PRIMARY = Primary::FALSE;
     static constexpr bool SECURE = secure;
     static constexpr uint8_t PORT = 254;
-    static constexpr HWDisplayId HWC_DISPLAY_ID = 1002;
+    static constexpr HWDisplayId HWC_DISPLAY_ID = hwDisplayId;
     static constexpr bool HAS_IDENTIFICATION_DATA = hasIdentificationData;
     static constexpr auto GET_IDENTIFICATION_DATA =
             connectionType == ui::DisplayConnectionType::Internal ? getInternalEdid
@@ -571,10 +577,11 @@ using OuterDisplayNonSecureVariant =
                                                 /*hasIdentificationData=*/true, kNonSecure>,
                                1080, 2092>;
 
-using ExternalDisplayWithIdentificationVariant =
-        PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::External,
-                                                /*hasIdentificationData=*/true, kNonSecure>,
-                               1920, 1280>;
+template <HWDisplayId hwDisplayId = 1002>
+using ExternalDisplayWithIdentificationVariant = PhysicalDisplayVariant<
+        SecondaryDisplay<ui::DisplayConnectionType::External,
+                         /*hasIdentificationData=*/true, kNonSecure, hwDisplayId>,
+        1920, 1280>;
 using ExternalDisplayVariant =
         PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::External,
                                                 /*hasIdentificationData=*/false, kSecure>,

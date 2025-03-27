@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 The Android Open Source Project
+ * Copyright (C) 2025 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,18 +14,8 @@
  * limitations under the License.
  */
 
-#include "RenderArea.h"
+package com.android.internal.app;
 
-namespace android {
-
-float RenderArea::getCaptureFillValue(CaptureFill captureFill) {
-    switch(captureFill) {
-        case CaptureFill::CLEAR:
-            return 0.0f;
-        case CaptureFill::OPAQUE:
-        default:
-            return 1.0f;
-    }
+oneway interface IAppOpsCallback {
+    void opChanged(int op, int uid, String packageName, String persistentDeviceId);
 }
-
-} // namespace android

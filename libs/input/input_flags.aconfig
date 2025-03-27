@@ -16,6 +16,16 @@ flag {
 }
 
 flag {
+  name: "enable_button_state_verification"
+  namespace: "input"
+  description: "Set to true to enable crashing whenever bad inbound events are going into InputDispatcher"
+  bug: "392870542"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
   name: "remove_input_channel_from_windowstate"
   namespace: "input"
   description: "Do not store a copy of input channel inside WindowState."
@@ -48,13 +58,6 @@ flag {
   namespace: "accessibility"
   description: "Brings back fatal logging for inconsistent event streams originating from accessibility."
   bug: "299977100"
-}
-
-flag {
-  name: "report_palms_to_gestures_library"
-  namespace: "input"
-  description: "Report touches marked as palm by firmware to gestures library"
-  bug: "302505955"
 }
 
 flag {
@@ -229,6 +232,16 @@ flag {
 }
 
 flag {
+  name: "connected_displays_associated_display_cursor_bugfix"
+  namespace: "lse_desktop_experience"
+  description: "Apply some rules to define associated display cursor behavior in connected displays"
+  bug: "396568321"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
   name: "use_cloned_screen_coordinates_as_raw"
   namespace: "input"
   description: "Use the cloned window's layer stack (screen) space as the raw coordinate space for input going to clones"
@@ -245,3 +258,12 @@ flag {
   bug: "277261245"
 }
 
+flag {
+  name: "prevent_merging_input_pointer_devices"
+  namespace: "desktop_input"
+  description: "Prevent merging input sub-devices that provide pointer input streams"
+  bug: "389689566"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}

@@ -20,28 +20,35 @@
 #include <string>
 #include <vector>
 
+#include <binder/Parcelable.h>
+
 namespace android {
 
-class FeatureConfig {
+class FeatureConfig : public Parcelable {
 public:
     FeatureConfig() = default;
     FeatureConfig(const FeatureConfig&) = default;
     virtual ~FeatureConfig() = default;
+    virtual status_t writeToParcel(Parcel* parcel) const;
+    virtual status_t readFromParcel(const Parcel* parcel);
     std::string toString() const;
 
     std::string mFeatureName;
     bool mEnabled;
+    std::vector<uint32_t> mGpuVendorIDs;
 };
 
 /*
  * Class for transporting OpenGL ES Feature configurations from GpuService to authorized
  * recipients.
  */
-class FeatureOverrides {
+class FeatureOverrides : public Parcelable {
 public:
     FeatureOverrides() = default;
     FeatureOverrides(const FeatureOverrides&) = default;
     virtual ~FeatureOverrides() = default;
+    virtual status_t writeToParcel(Parcel* parcel) const;
+    virtual status_t readFromParcel(const Parcel* parcel);
     std::string toString() const;
 
     std::vector<FeatureConfig> mGlobalFeatures;

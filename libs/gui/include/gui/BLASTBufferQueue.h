@@ -20,6 +20,7 @@
 #include <optional>
 #include <queue>
 
+#include <ftl/small_map.h>
 #include <gui/BufferItem.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/IGraphicBufferConsumer.h>
@@ -36,26 +37,15 @@
 
 namespace android {
 
+// Sizes determined empirically to avoid allocations during common activity.
+constexpr size_t kSubmittedBuffersMapSizeHint = 8;
+constexpr size_t kDequeueTimestampsMapSizeHint = 32;
+
 class BLASTBufferQueue;
 class BufferItemConsumer;
 
 class BLASTBufferItemConsumer : public BufferItemConsumer {
 public:
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
-    BLASTBufferItemConsumer(const sp<IGraphicBufferProducer>& producer,
-                            const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
-                            int bufferCount, bool controlledByApp, wp<BLASTBufferQueue> bbq)
-          : BufferItemConsumer(producer, consumer, consumerUsage, bufferCount, controlledByApp),
-#else
-    BLASTBufferItemConsumer(const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
-                            int bufferCount, bool controlledByApp, wp<BLASTBufferQueue> bbq)
-          : BufferItemConsumer(consumer, consumerUsage, bufferCount, controlledByApp),
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
-            mBLASTBufferQueue(std::move(bbq)),
-            mCurrentlyConnected(false),
-            mPreviouslyConnected(false) {
-    }
-
     void onDisconnect() override EXCLUDES(mMutex);
     void addAndGetFrameTimestamps(const NewFrameEventsEntry* newTimestamps,
                                   FrameEventHistoryDelta* outDelta) override EXCLUDES(mMutex);
@@ -76,6 +66,23 @@ protected:
 #endif
 
 private:
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    BLASTBufferItemConsumer(const sp<IGraphicBufferProducer>& producer,
+                            const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
+                            int bufferCount, bool controlledByApp, wp<BLASTBufferQueue> bbq)
+          : BufferItemConsumer(producer, consumer, consumerUsage, bufferCount, controlledByApp),
+#else
+    BLASTBufferItemConsumer(const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
+                            int bufferCount, bool controlledByApp, wp<BLASTBufferQueue> bbq)
+          : BufferItemConsumer(consumer, consumerUsage, bufferCount, controlledByApp),
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+            mBLASTBufferQueue(std::move(bbq)),
+            mCurrentlyConnected(false),
+            mPreviouslyConnected(false) {
+    }
+
+    friend class sp<BLASTBufferItemConsumer>;
+
     const wp<BLASTBufferQueue> mBLASTBufferQueue;
 
     uint64_t mCurrentFrameNumber GUARDED_BY(mMutex) = 0;
@@ -89,8 +96,6 @@ private:
 
 class BLASTBufferQueue : public ConsumerBase::FrameAvailableListener {
 public:
-    BLASTBufferQueue(const std::string& name, bool updateDestinationFrame = true);
-
     sp<IGraphicBufferProducer> getIGraphicBufferProducer() const {
         return mProducer;
     }
@@ -153,8 +158,13 @@ public:
     void onFirstRef() override;
 
 private:
+    // Not public to ensure construction via sp<>::make().
+    BLASTBufferQueue(const std::string& name, bool updateDestinationFrame = true);
+
+    friend class sp<BLASTBufferQueue>;
     friend class BLASTBufferQueueHelper;
     friend class BBQBufferQueueProducer;
+    friend class TestBLASTBufferQueue;
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
     friend class BBQBufferQueueCore;
 #endif
@@ -206,7 +216,7 @@ private:
 
     // Keep a reference to the submitted buffers so we can release when surfaceflinger drops the
     // buffer or the buffer has been presented and a new buffer is ready to be presented.
-    std::unordered_map<ReleaseCallbackId, BufferItem, ReleaseBufferCallbackIdHash> mSubmitted
+    ftl::SmallMap<ReleaseCallbackId, BufferItem, kSubmittedBuffersMapSizeHint> mSubmitted
             GUARDED_BY(mMutex);
 
     // Keep a queue of the released buffers instead of immediately releasing
@@ -291,8 +301,8 @@ private:
     std::mutex mTimestampMutex;
     // Tracks buffer dequeue times by the client. This info is sent to SurfaceFlinger which uses
     // it for debugging purposes.
-    std::unordered_map<uint64_t /* bufferId */, nsecs_t> mDequeueTimestamps
-            GUARDED_BY(mTimestampMutex);
+    ftl::SmallMap<uint64_t /* bufferId */, nsecs_t, kDequeueTimestampsMapSizeHint>
+            mDequeueTimestamps GUARDED_BY(mTimestampMutex);
 
     // Keep track of SurfaceControls that have submitted a transaction and BBQ is waiting on a
     // callback for them.

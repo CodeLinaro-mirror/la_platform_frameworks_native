@@ -197,15 +197,15 @@ BLASTBufferQueue::BLASTBufferQueue(const std::string& name, bool updateDestinati
         mUpdateDestinationFrame(updateDestinationFrame) {
     createBufferQueue(&mProducer, &mConsumer);
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
-    mBufferItemConsumer = new BLASTBufferItemConsumer(mProducer, mConsumer,
-                                                      GraphicBuffer::USAGE_HW_COMPOSER |
-                                                              GraphicBuffer::USAGE_HW_TEXTURE,
-                                                      1, false, this);
+    mBufferItemConsumer = sp<BLASTBufferItemConsumer>::make(mProducer, mConsumer,
+                                                            GraphicBuffer::USAGE_HW_COMPOSER |
+                                                                    GraphicBuffer::USAGE_HW_TEXTURE,
+                                                            1, false, this);
 #else
-    mBufferItemConsumer = new BLASTBufferItemConsumer(mConsumer,
-                                                      GraphicBuffer::USAGE_HW_COMPOSER |
-                                                              GraphicBuffer::USAGE_HW_TEXTURE,
-                                                      1, false, this);
+    mBufferItemConsumer = sp<BLASTBufferItemConsumer>::make(mConsumer,
+                                                            GraphicBuffer::USAGE_HW_COMPOSER |
+                                                                    GraphicBuffer::USAGE_HW_TEXTURE,
+                                                            1, false, this);
 #endif //  COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     // since the adapter is in the client process, set dequeue timeout
     // explicitly so that dequeueBuffer will block
@@ -222,8 +222,6 @@ BLASTBufferQueue::BLASTBufferQueue(const std::string& name, bool updateDestinati
     ComposerServiceAIDL::getComposerService()->getMaxAcquiredBufferCount(&mMaxAcquiredBuffers);
     mBufferItemConsumer->setMaxAcquiredBufferCount(mMaxAcquiredBuffers);
     mCurrentMaxAcquiredBufferCount = mMaxAcquiredBuffers;
-    mNumAcquired = 0;
-    mNumFrameAvailable = 0;
 
     TransactionCompletedListener::getInstance()->addQueueStallListener(
             [&](const std::string& reason) {
@@ -415,14 +413,12 @@ void BLASTBufferQueue::transactionCallback(nsecs_t /*latchTime*/, const sp<Fence
                                                     stat.frameEventStats.dequeueReadyTime);
                 }
                 auto currFrameNumber = stat.frameEventStats.frameNumber;
-                std::vector<ReleaseCallbackId> staleReleases;
-                for (const auto& [key, value]: mSubmitted) {
-                    if (currFrameNumber > key.framenumber) {
-                        staleReleases.push_back(key);
+                // Release stale buffers.
+                for (const auto& [key, _] : mSubmitted) {
+                    if (currFrameNumber <= key.framenumber) {
+                        continue; // not stale.
                     }
-                }
-                for (const auto& staleRelease : staleReleases) {
-                    releaseBufferCallbackLocked(staleRelease,
+                    releaseBufferCallbackLocked(key,
                                                 stat.previousReleaseFence
                                                         ? stat.previousReleaseFence
                                                         : Fence::NO_FENCE,
@@ -441,7 +437,7 @@ void BLASTBufferQueue::transactionCallback(nsecs_t /*latchTime*/, const sp<Fence
 
 void BLASTBufferQueue::flushShadowQueue() {
     BQA_LOGV("flushShadowQueue");
-    int numFramesToFlush = mNumFrameAvailable;
+    int32_t numFramesToFlush = mNumFrameAvailable;
     while (numFramesToFlush > 0) {
         acquireNextBufferLocked(std::nullopt);
         numFramesToFlush--;
@@ -618,7 +614,7 @@ status_t BLASTBufferQueue::acquireNextBufferLocked(
     mNumAcquired++;
     mLastAcquiredFrameNumber = bufferItem.mFrameNumber;
     ReleaseCallbackId releaseCallbackId(buffer->getId(), mLastAcquiredFrameNumber);
-    mSubmitted[releaseCallbackId] = bufferItem;
+    mSubmitted.emplace_or_replace(releaseCallbackId, bufferItem);
 
     bool needsDisconnect = false;
     mBufferItemConsumer->getConnectionEvents(bufferItem.mFrameNumber, &needsDisconnect);
@@ -641,7 +637,8 @@ status_t BLASTBufferQueue::acquireNextBufferLocked(
                            bufferItem.mScalingMode, crop);
 
     auto releaseBufferCallback = makeReleaseBufferCallbackThunk();
-    sp<Fence> fence = bufferItem.mFence ? new Fence(bufferItem.mFence->dup()) : Fence::NO_FENCE;
+    sp<Fence> fence =
+            bufferItem.mFence ? sp<Fence>::make(bufferItem.mFence->dup()) : Fence::NO_FENCE;
 
     nsecs_t dequeueTime = -1;
     {
@@ -851,7 +848,7 @@ void BLASTBufferQueue::onFrameReplaced(const BufferItem& item) {
 
 void BLASTBufferQueue::onFrameDequeued(const uint64_t bufferId) {
     std::lock_guard _lock{mTimestampMutex};
-    mDequeueTimestamps[bufferId] = systemTime();
+    mDequeueTimestamps.emplace_or_replace(bufferId, systemTime());
 };
 
 void BLASTBufferQueue::onFrameCancelled(const uint64_t bufferId) {
@@ -1018,7 +1015,7 @@ sp<Surface> BLASTBufferQueue::getSurface(bool includeSurfaceControlHandle) {
     if (includeSurfaceControlHandle && mSurfaceControl) {
         scHandle = mSurfaceControl->getHandle();
     }
-    return new BBQSurface(mProducer, true, scHandle, this);
+    return sp<BBQSurface>::make(mProducer, true, scHandle, this);
 }
 
 void BLASTBufferQueue::mergeWithNextTransaction(SurfaceComposerClient::Transaction* t,
@@ -1124,10 +1121,10 @@ ANDROID_SINGLETON_STATIC_INSTANCE(AsyncWorker);
 class AsyncProducerListener : public BnProducerListener {
 private:
     const sp<IProducerListener> mListener;
+    AsyncProducerListener(const sp<IProducerListener>& listener) : mListener(listener) {}
+    friend class sp<AsyncProducerListener>;
 
 public:
-    AsyncProducerListener(const sp<IProducerListener>& listener) : mListener(listener) {}
-
     void onBufferReleased() override {
         AsyncWorker::getInstance().post([listener = mListener]() { listener->onBufferReleased(); });
     }
@@ -1181,7 +1178,7 @@ public:
             return BufferQueueProducer::connect(listener, api, producerControlledByApp, output);
         }
 
-        return BufferQueueProducer::connect(new AsyncProducerListener(listener), api,
+        return BufferQueueProducer::connect(sp<AsyncProducerListener>::make(listener), api,
                                             producerControlledByApp, output);
     }
 
