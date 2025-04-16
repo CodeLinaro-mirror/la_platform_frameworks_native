@@ -12,13 +12,14 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-// QTI_BEGIN: 2024-06-19: Performance: native: smart touch FR LOST markings modification.
- *
- * Changes from Qualcomm Innovation Center are provided under the following license:
- * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
- * SPDX-License-Identifier: BSD-3-Clause-Clear
-// QTI_END: 2024-06-19: Performance: native: smart touch FR LOST markings modification.
  */
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 #define LOG_TAG "SurfaceComposerClient"
 
@@ -1725,6 +1726,42 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::unsetBuf
     return *this;
 }
 
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setReferenceSpaceType(
+        const sp<SurfaceControl>& sc,
+        const gui::RenderLayerReferenceSpaceType& referenceSpaceType) {
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setCompositionLayerType(
+        const sp<SurfaceControl>& sc, const gui::CompositionLayerType& compositionLayerType) {
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setPose(
+        const sp<SurfaceControl>& sc, const gui::Pose& pose) {
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setQuadSize(
+        const sp<SurfaceControl>& sc, float width, float height) {
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setFrustum(
+        const sp<SurfaceControl>& sc, const gui::Frustum& frustum) {
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setPlaneEquation(
+        const sp<SurfaceControl>& sc, const gui::PlaneEquation& planeEquation) {
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setLayerVisibilityType(
+        const sp<SurfaceControl>& sc, const gui::LayerVisibilityType& layerVisibilityType) {
+    return *this;
+}
+
 void SurfaceComposerClient::Transaction::setReleaseBufferCallback(BufferData* bufferData,
                                                                   ReleaseBufferCallback callback) {
     if (!callback) {
@@ -3163,6 +3200,11 @@ std::optional<DisplayDecorationSupport> SurfaceComposerClient::getDisplayDecorat
         });
     }
     return support;
+}
+
+status_t SurfaceComposerClient::setDisplayConfig(const sp<IBinder>& display,
+                                                 gui::DisplayDeviceConfig& displayDeviceConfig) {
+    return NO_ERROR;
 }
 
 int SurfaceComposerClient::getGpuContextPriority() {

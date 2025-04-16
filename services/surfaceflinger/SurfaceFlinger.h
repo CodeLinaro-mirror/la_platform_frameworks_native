@@ -14,11 +14,11 @@
  */
 
 // QTI_BEGIN: 2023-01-17: Display: sf: Introduce QTI Extensions in AOSP
-/* Changes from Qualcomm Innovation Center are provided under the following license:
+/* Changes from Qualcomm Technologies, Inc. are provided under the following license:
  *
 // QTI_END: 2023-01-17: Display: sf: Introduce QTI Extensions in AOSP
 // QTI_BEGIN: 2024-02-29: Display: sf: consider smomo vote for content detection
- * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
 // QTI_END: 2024-02-29: Display: sf: consider smomo vote for content detection
 // QTI_BEGIN: 2023-01-17: Display: sf: Introduce QTI Extensions in AOSP
  * SPDX-License-Identifier: BSD-3-Clause-Clear
@@ -1750,6 +1750,10 @@ public:
                                       int64_t afterVsync) override;
     binder::Status addActivePictureListener(const sp<gui::IActivePictureListener>& listener);
     binder::Status removeActivePictureListener(const sp<gui::IActivePictureListener>& listener);
+    binder::Status setDisplayConfig(const sp<IBinder>& displayToken,
+                                    const gui::DisplayDeviceConfig& displayDeviceConfig) override {
+        return binder::Status::ok();
+    }
 
 private:
     static const constexpr bool kUsePermissionCache = true;
