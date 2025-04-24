@@ -108,3 +108,6 @@ EGL_ENTRY(EGLuint64NV, eglGetSystemTimeNV, void)
 
 EGL_ENTRY(EGLBoolean, eglSwapBuffersWithDamageKHR, EGLDisplay, EGLSurface, EGLint *, EGLint)
 EGL_ENTRY(EGLBoolean, eglSetDamageRegionKHR, EGLDisplay, EGLSurface, EGLint *, EGLint)
+
+EGL_ENTRY(EGLBoolean, eglExportDMABUFImageQueryMESA,EGLDisplay , EGLImageKHR , EGLint* , EGLint* , EGLuint64KHR*)
+EGL_ENTRY(EGLBoolean, eglExportDMABUFImageMESA,EGLDisplay , EGLImageKHR , EGLint* , EGLint* , EGLint* )
