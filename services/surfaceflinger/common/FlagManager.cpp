@@ -104,8 +104,18 @@ void FlagManager::dump(std::string& result) const {
     dumpFlag(result, (aconfig), #name, std::bind(&FlagManager::name, this))
 #define DUMP_LEGACY_SERVER_FLAG(name) DUMP_FLAG_INTERNAL(name, false)
 #define DUMP_ACONFIG_FLAG(name) DUMP_FLAG_INTERNAL(name, true)
+#define DUMP_SYSPROP_FLAG(name) \
+    dumpFlag(result, (true), "debug.sf." #name, std::bind(&FlagManager::name, this))
 
     base::StringAppendF(&result, "FlagManager values: \n");
+
+    /// Sysprop flags ///
+    DUMP_SYSPROP_FLAG(disable_sched_fifo_sf);
+    DUMP_SYSPROP_FLAG(disable_sched_fifo_sf_binder);
+    DUMP_SYSPROP_FLAG(disable_sched_fifo_sf_sched);
+    DUMP_SYSPROP_FLAG(disable_sched_fifo_re);
+    DUMP_SYSPROP_FLAG(disable_sched_fifo_composer);
+    DUMP_SYSPROP_FLAG(disable_sched_fifo_composer_callback);
 
     /// Legacy server flags ///
     DUMP_LEGACY_SERVER_FLAG(use_adpf_cpu_hint);
@@ -116,7 +126,9 @@ void FlagManager::dump(std::string& result) const {
     DUMP_ACONFIG_FLAG(adpf_native_session_manager);
     DUMP_ACONFIG_FLAG(adpf_use_fmq_channel);
     DUMP_ACONFIG_FLAG(graphite_renderengine_preview_rollout);
+    DUMP_ACONFIG_FLAG(increase_missed_frame_jank_threshold);
     DUMP_ACONFIG_FLAG(refresh_rate_overlay_on_external_display);
+    DUMP_ACONFIG_FLAG(vsync_predictor_recovery);
 
     /// Trunk stable readonly flags ///
     /// IMPORTANT - please keep alphabetize to reduce merge conflicts
@@ -160,6 +172,7 @@ void FlagManager::dump(std::string& result) const {
     DUMP_ACONFIG_FLAG(restore_blur_step);
     DUMP_ACONFIG_FLAG(skip_invisible_windows_in_input);
     DUMP_ACONFIG_FLAG(stable_edid_ids);
+    DUMP_ACONFIG_FLAG(synced_resolution_switch);
     DUMP_ACONFIG_FLAG(trace_frame_rate_override);
     DUMP_ACONFIG_FLAG(true_hdr_screenshots);
     DUMP_ACONFIG_FLAG(use_known_refresh_rate_for_fps_consistency);
@@ -185,6 +198,12 @@ bool FlagManager::getServerConfigurableFlag(const char* experimentFlagName) cons
     const auto res = parseBool(value.c_str());
     return res.has_value() && res.value();
 }
+#define FLAG_MANAGER_SYSPROP_FLAG(name, defaultVal)                                      \
+    bool FlagManager::name() const {                                                     \
+        static const bool kFlagValue =                                                   \
+                base::GetBoolProperty("debug.sf." #name, /* default value*/ defaultVal); \
+        return kFlagValue;                                                               \
+    }
 
 #define FLAG_MANAGER_LEGACY_SERVER_FLAG(name, syspropOverride, serverFlagName)              \
     bool FlagManager::name() const {                                                        \
@@ -214,6 +233,14 @@ bool FlagManager::getServerConfigurableFlag(const char* experimentFlagName) cons
 
 #define FLAG_MANAGER_ACONFIG_FLAG_IMPORTED(name, syspropOverride, owner) \
     FLAG_MANAGER_ACONFIG_INTERNAL(name, syspropOverride, owner)
+
+/// Debug sysprop flags - default value is always false ///
+FLAG_MANAGER_SYSPROP_FLAG(disable_sched_fifo_sf, /* default */ false)
+FLAG_MANAGER_SYSPROP_FLAG(disable_sched_fifo_sf_binder, /* default */ false)
+FLAG_MANAGER_SYSPROP_FLAG(disable_sched_fifo_sf_sched, /* default */ false)
+FLAG_MANAGER_SYSPROP_FLAG(disable_sched_fifo_re, /* default */ false)
+FLAG_MANAGER_SYSPROP_FLAG(disable_sched_fifo_composer, /* default */ false)
+FLAG_MANAGER_SYSPROP_FLAG(disable_sched_fifo_composer_callback, /* default */ false)
 
 /// Legacy server flags ///
 FLAG_MANAGER_LEGACY_SERVER_FLAG(test_flag, "", "")
@@ -270,12 +297,15 @@ FLAG_MANAGER_ACONFIG_FLAG(skip_invisible_windows_in_input, "");
 FLAG_MANAGER_ACONFIG_FLAG(begone_bright_hlg, "debug.sf.begone_bright_hlg");
 FLAG_MANAGER_ACONFIG_FLAG(window_blur_kawase2, "");
 FLAG_MANAGER_ACONFIG_FLAG(reject_dupe_layerstacks, "");
+FLAG_MANAGER_ACONFIG_FLAG(synced_resolution_switch, "");
 
 /// Trunk stable server (R/W) flags ///
 FLAG_MANAGER_ACONFIG_FLAG(refresh_rate_overlay_on_external_display, "")
 FLAG_MANAGER_ACONFIG_FLAG(adpf_gpu_sf, "")
 FLAG_MANAGER_ACONFIG_FLAG(adpf_native_session_manager, "");
 FLAG_MANAGER_ACONFIG_FLAG(graphite_renderengine_preview_rollout, "");
+FLAG_MANAGER_ACONFIG_FLAG(increase_missed_frame_jank_threshold, "");
+FLAG_MANAGER_ACONFIG_FLAG(vsync_predictor_recovery, "");
 
 /// Trunk stable server (R/W) flags from outside SurfaceFlinger ///
 FLAG_MANAGER_ACONFIG_FLAG_IMPORTED(adpf_use_fmq_channel, "", android::os)

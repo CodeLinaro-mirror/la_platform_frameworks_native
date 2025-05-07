@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "EventHub.h"
+#include "InputDevice.h"
 #include "InputListener.h"
 #include "InputReaderBase.h"
 #include "InputReaderContext.h"
@@ -127,7 +128,8 @@ public:
 protected:
     // These members are protected so they can be instrumented by test cases.
     virtual std::shared_ptr<InputDevice> createDeviceLocked(nsecs_t when, int32_t deviceId,
-                                                            const InputDeviceIdentifier& identifier)
+                                                            const InputDeviceIdentifier& identifier,
+                                                            ftl::Flags<InputDeviceClass> classes)
             REQUIRES(mLock);
 
     // With each iteration of the loop, InputReader reads and processes one incoming message from
@@ -154,7 +156,7 @@ protected:
                 REQUIRES(mReader->mLock) override;
         InputReaderPolicyInterface* getPolicy() REQUIRES(mReader->mLock) override;
         EventHubInterface* getEventHub() REQUIRES(mReader->mLock) override;
-        int32_t getNextId() NO_THREAD_SAFETY_ANALYSIS override;
+        int32_t getNextId() const NO_THREAD_SAFETY_ANALYSIS override;
         void updateLedMetaState(int32_t metaState) REQUIRES(mReader->mLock) override;
         int32_t getLedMetaState() REQUIRES(mReader->mLock) REQUIRES(mLock) override;
         void setPreventingTouchpadTaps(bool prevent) REQUIRES(mReader->mLock)

@@ -108,7 +108,6 @@ RequestedLayerState::RequestedLayerState(const LayerCreationArgs& args)
     surfaceDamageRegion = Region::INVALID_REGION;
     cornerRadius = 0.0f;
     clientDrawnCornerRadius = 0.0f;
-    clientDrawnShadowRadius = 0.0f;
     backgroundBlurRadius = 0;
     api = -1;
     hasColorTransform = false;
@@ -355,11 +354,6 @@ void RequestedLayerState::merge(const ResolvedComposerState& resolvedComposerSta
         clientDrawnCornerRadius = clientState.clientDrawnCornerRadius;
         changes |= RequestedLayerState::Changes::Geometry;
     }
-
-    if (clientState.what & layer_state_t::eClientDrawnShadowsChanged) {
-        clientDrawnShadowRadius = clientState.clientDrawnShadowRadius;
-        changes |= RequestedLayerState::Changes::Geometry;
-    }
 }
 
 ui::Size RequestedLayerState::getUnrotatedBufferSize(uint32_t displayRotationFlags) const {
@@ -573,7 +567,7 @@ bool RequestedLayerState::needsInputInfo() const {
         return false;
     }
 
-    if ((sidebandStream != nullptr) || (externalTexture != nullptr)) {
+    if (hasBufferOrSidebandStream() || fillsColor()) {
         return true;
     }
 
@@ -584,6 +578,15 @@ bool RequestedLayerState::needsInputInfo() const {
     const auto windowInfo = windowInfoHandle->getInfo();
     return windowInfo->token != nullptr ||
             windowInfo->inputConfig.test(gui::WindowInfo::InputConfig::NO_INPUT_CHANNEL);
+}
+
+bool RequestedLayerState::hasBufferOrSidebandStream() const {
+    return ((sidebandStream != nullptr) || (externalTexture != nullptr));
+}
+
+bool RequestedLayerState::fillsColor() const {
+    return !hasBufferOrSidebandStream() && color.r >= 0.0_hf && color.g >= 0.0_hf &&
+            color.b >= 0.0_hf;
 }
 
 bool RequestedLayerState::hasBlur() const {
@@ -637,7 +640,6 @@ bool RequestedLayerState::isSimpleBufferUpdate(const layer_state_t& s) const {
             layer_state_t::eColorTransformChanged | layer_state_t::eBackgroundColorChanged |
             layer_state_t::eMatrixChanged | layer_state_t::eCornerRadiusChanged |
             layer_state_t::eClientDrawnCornerRadiusChanged |
-            layer_state_t::eClientDrawnShadowsChanged |
             layer_state_t::eBackgroundBlurRadiusChanged | layer_state_t::eBufferTransformChanged |
             layer_state_t::eTransformToDisplayInverseChanged | layer_state_t::eCropChanged |
             layer_state_t::eDataspaceChanged | layer_state_t::eHdrMetadataChanged |

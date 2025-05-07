@@ -232,7 +232,6 @@ struct layer_state_t {
         ePictureProfileHandleChanged = 0x80000'00000000,
         eAppContentPriorityChanged = 0x100000'00000000,
         eClientDrawnCornerRadiusChanged = 0x200000'00000000,
-        eClientDrawnShadowsChanged = 0x400000'00000000,
     };
 
     layer_state_t();
@@ -276,7 +275,7 @@ struct layer_state_t {
             layer_state_t::eColorSpaceAgnosticChanged | layer_state_t::eColorTransformChanged |
             layer_state_t::eCornerRadiusChanged | layer_state_t::eDimmingEnabledChanged |
             layer_state_t::eHdrMetadataChanged | layer_state_t::eShadowRadiusChanged |
-            layer_state_t::eClientDrawnShadowsChanged | layer_state_t::eStretchChanged |
+            layer_state_t::eStretchChanged |
             layer_state_t::ePictureProfileHandleChanged | layer_state_t::eAppContentPriorityChanged;
 
     // Changes which invalidates the layer's visible region in CE.
@@ -336,7 +335,6 @@ struct layer_state_t {
     matrix22_t matrix;
     float cornerRadius;
     float clientDrawnCornerRadius;
-    float clientDrawnShadowRadius;
     uint32_t backgroundBlurRadius;
 
     sp<SurfaceControl> relativeLayerSurfaceControl;
@@ -504,11 +502,17 @@ struct DisplayState {
     Rect layerStackSpaceRect = Rect::EMPTY_RECT;
     Rect orientedDisplaySpaceRect = Rect::EMPTY_RECT;
 
-    // Exclusive to virtual displays: The sink surface into which the virtual display is rendered,
-    // and an optional resolution that overrides its default dimensions.
-    sp<IGraphicBufferProducer> surface;
+    // For physical displays, this is the resolution, which must match the active display mode. To
+    // change the resolution, the client must first call SurfaceControl.setDesiredDisplayModeSpecs
+    // with the new DesiredDisplayModeSpecs#defaultMode, then commit the matching width and height.
+    //
+    // For virtual displays, this is an optional resolution that overrides its default dimensions.
+    //
     uint32_t width = 0;
     uint32_t height = 0;
+
+    // For virtual displays, this is the sink surface into which the virtual display is rendered.
+    sp<IGraphicBufferProducer> surface;
 
     status_t write(Parcel& output) const;
     status_t read(const Parcel& input);

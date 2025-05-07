@@ -455,8 +455,8 @@ public:
         bool mLogCallPoints = false;
 
     protected:
-        std::unordered_map<sp<IBinder>, ComposerState, IBinderHash> mComposerStates;
-        SortedVector<DisplayState> mDisplayStates;
+        Vector<ComposerState> mComposerStates;
+        Vector<DisplayState> mDisplayStates;
         std::unordered_map<sp<ITransactionCompletedListener>, CallbackInfo, TCLHash>
                 mListenerCallbacks;
         std::vector<client_cache_t> mUncacheBuffers;
@@ -467,10 +467,7 @@ public:
         std::vector<uint64_t> mMergedTransactionIds;
 
         uint64_t mId;
-
-        bool mAnimation = false;
-        bool mEarlyWakeupStart = false;
-        bool mEarlyWakeupEnd = false;
+        uint32_t mFlags = 0;
 
         // Indicates that the Transaction may contain buffers that should be cached. The reason this
         // is only a guess is that buffers can be removed before cache is called. This is only a
@@ -572,10 +569,6 @@ public:
         // radius is drawn by the client and not SurfaceFlinger.
         Transaction& setClientDrawnCornerRadius(const sp<SurfaceControl>& sc,
                                                 float clientDrawnCornerRadius);
-        // Sets the client drawn shadow radius for the layer. This indicates that the shadows
-        // are drawn by the client and not SurfaceFlinger.
-        Transaction& setClientDrawnShadowRadius(const sp<SurfaceControl>& sc,
-                                                float clientDrawnShadowRadius);
         Transaction& setBackgroundBlurRadius(const sp<SurfaceControl>& sc,
                                              int backgroundBlurRadius);
         Transaction& setBlurRegions(const sp<SurfaceControl>& sc,
@@ -627,7 +620,7 @@ public:
         Transaction& setExtendedRangeBrightness(const sp<SurfaceControl>& sc,
                                                 float currentBufferRatio, float desiredRatio);
         Transaction& setDesiredHdrHeadroom(const sp<SurfaceControl>& sc, float desiredRatio);
-        Transaction& setLuts(const sp<SurfaceControl>& sc, const base::unique_fd& lutFd,
+        Transaction& setLuts(const sp<SurfaceControl>& sc, base::unique_fd&& lutFd,
                              const std::vector<int32_t>& offsets,
                              const std::vector<int32_t>& dimensions,
                              const std::vector<int32_t>& sizes,

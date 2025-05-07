@@ -70,12 +70,12 @@
 
 #include <common/FlagManager.h>
 #include "ActivePictureTracker.h"
-#include "BackgroundExecutor.h"
 #include "Display/DisplayModeController.h"
 #include "Display/PhysicalDisplay.h"
 #include "Display/VirtualDisplaySnapshot.h"
 #include "DisplayDevice.h"
 #include "DisplayHardware/HWC2.h"
+#include "DisplayHardware/HWComposer.h"
 #include "DisplayIdGenerator.h"
 #include "Effects/Daltonizer.h"
 #include "FrontEnd/DisplayInfo.h"
@@ -102,12 +102,9 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <queue>
-#include <set>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -130,13 +127,11 @@ class FlagManager;
 class FpsReporter;
 class TunnelModeEnabledReporter;
 class HdrLayerInfoReporter;
-class HWComposer;
 class IGraphicBufferProducer;
 class Layer;
 class MessageBase;
 class RefreshRateOverlay;
 class RegionSamplingThread;
-class RenderArea;
 class TimeStats;
 class FrameTracer;
 class ScreenCapturer;
@@ -200,9 +195,6 @@ enum class LatchUnsignaledConfig {
     // This is equivalent to ignoring the acquire fence when applying transactions.
     Always,
 };
-
-struct DisplayRenderAreaBuilder;
-struct LayerRenderAreaBuilder;
 
 using DisplayColorSetting = compositionengine::OutputColorSetting;
 
@@ -354,9 +346,6 @@ protected:
     // We're reference counted, never destroy SurfaceFlinger directly
     virtual ~SurfaceFlinger();
 
-    virtual void processDisplayAdded(const wp<IBinder>& displayToken, const DisplayDeviceState&)
-            REQUIRES(mStateLock);
-
     virtual std::shared_ptr<renderengine::ExternalTexture> getExternalTextureFromBufferData(
             BufferData& bufferData, const char* layerName, uint64_t transactionId);
 
@@ -378,9 +367,7 @@ private:
     friend class Layer;
     friend class RefreshRateOverlay;
     friend class RegionSamplingThread;
-    friend class LayerRenderArea;
     friend class SurfaceComposerAIDL;
-    friend class DisplayRenderArea;
 
     // For unit tests
     friend class TestableSurfaceFlinger;
@@ -389,7 +376,6 @@ private:
 
     using TransactionSchedule = scheduler::TransactionSchedule;
     using GetLayerSnapshotsFunction = std::function<std::vector<std::pair<Layer*, sp<LayerFE>>>()>;
-    using RenderAreaBuilderVariant = std::variant<DisplayRenderAreaBuilder, LayerRenderAreaBuilder>;
     using DumpArgs = Vector<String16>;
     using Dumper = std::function<void(const DumpArgs&, bool asProto, std::string&)>;
 
@@ -852,6 +838,9 @@ private:
     status_t createEffectLayer(const LayerCreationArgs& args, sp<IBinder>* outHandle,
                                sp<Layer>* outLayer);
 
+    // Checks if there are layer leaks before creating layer
+    status_t checkLayerLeaks();
+
     status_t mirrorLayer(const LayerCreationArgs& args, const sp<IBinder>& mirrorFromHandle,
                          gui::CreateSurfaceResult& outResult);
 
@@ -872,32 +861,76 @@ private:
 
     using OutputCompositionState = compositionengine::impl::OutputCompositionState;
 
-    std::optional<OutputCompositionState> getSnapshotsFromMainThread(
-            RenderAreaBuilderVariant& renderAreaBuilder,
-            GetLayerSnapshotsFunction getLayerSnapshotsFn,
-            std::vector<std::pair<Layer*, sp<LayerFE>>>& layers);
+    /*
+     * Parameters used across screenshot methods.
+     */
+    struct ScreenshotArgs {
+        // Contains the sequence ID of the parent layer if the screenshot is
+        // initiated though captureLayers(), or the display that the render
+        // result will be on if initiated through captureDisplay()
+        std::variant<int32_t, wp<const DisplayDevice>> captureTypeVariant;
 
-    void captureScreenCommon(RenderAreaBuilderVariant, GetLayerSnapshotsFunction,
-                             ui::Size bufferSize, ui::PixelFormat, bool allowProtected,
-                             bool grayscale, const sp<IScreenCaptureListener>&);
+        // Display ID of the display the result will be on
+        std::optional<DisplayId> displayId{std::nullopt};
 
-    std::optional<OutputCompositionState> getDisplayStateFromRenderAreaBuilder(
-            RenderAreaBuilderVariant& renderAreaBuilder) REQUIRES(kMainThreadContext);
+        // If true, transform is inverted from the parent layer snapshot
+        bool childrenOnly{false};
+
+        // Source crop of the render area
+        Rect sourceCrop;
+
+        // Transform to be applied on the layers to transform them
+        // into the logical render area
+        ui::Transform transform;
+
+        // Size of the physical render area
+        ui::Size reqSize;
+
+        // Composition dataspace of the render area
+        ui::Dataspace dataspace;
+
+        // If false, the secure layer is blacked out or skipped
+        // when rendered to an insecure render area
+        bool isSecure{false};
+
+        // If true, the render result may be used for system animations
+        // that must preserve the exact colors of the display
+        bool seamlessTransition{false};
+
+        // Current display brightness of the output composition state
+        float displayBrightnessNits{-1.f};
+
+        // SDR white point of the output composition state
+        float sdrWhitePointNits{-1.f};
+
+        // Current active color mode of the output composition state
+        ui::ColorMode colorMode{ui::ColorMode::NATIVE};
+
+        // Current active render intent of the output composition state
+        ui::RenderIntent renderIntent{ui::RenderIntent::COLORIMETRIC};
+    };
+
+    bool getSnapshotsFromMainThread(ScreenshotArgs& args,
+                                    GetLayerSnapshotsFunction getLayerSnapshotsFn,
+                                    std::vector<std::pair<Layer*, sp<LayerFE>>>& layers);
+
+    void captureScreenCommon(ScreenshotArgs& args, GetLayerSnapshotsFunction, ui::Size bufferSize,
+                             ui::PixelFormat, bool allowProtected, bool grayscale,
+                             const sp<IScreenCaptureListener>&);
+
+    bool getDisplayStateOnMainThread(ScreenshotArgs& args) REQUIRES(kMainThreadContext);
 
     ftl::SharedFuture<FenceResult> captureScreenshot(
-            const RenderAreaBuilderVariant& renderAreaBuilder,
-            const std::shared_ptr<renderengine::ExternalTexture>& buffer, bool regionSampling,
-            bool grayscale, bool isProtected, const sp<IScreenCaptureListener>& captureListener,
-            const std::optional<OutputCompositionState>& displayState,
+            ScreenshotArgs& args, const std::shared_ptr<renderengine::ExternalTexture>& buffer,
+            bool regionSampling, bool grayscale, bool isProtected,
+            const sp<IScreenCaptureListener>& captureListener,
             const std::vector<std::pair<Layer*, sp<LayerFE>>>& layers,
             const std::shared_ptr<renderengine::ExternalTexture>& hdrBuffer = nullptr,
             const std::shared_ptr<renderengine::ExternalTexture>& gainmapBuffer = nullptr);
 
     ftl::SharedFuture<FenceResult> renderScreenImpl(
-            std::unique_ptr<const RenderArea> renderArea,
-            const std::shared_ptr<renderengine::ExternalTexture>&,
+            ScreenshotArgs& args, const std::shared_ptr<renderengine::ExternalTexture>&,
             bool regionSampling, bool grayscale, bool isProtected, ScreenCaptureResults&,
-            const std::optional<OutputCompositionState>& displayState,
             const std::vector<std::pair<Layer*, sp<LayerFE>>>& layers);
 
     void readPersistentProperties();
@@ -1046,6 +1079,8 @@ private:
             const sp<compositionengine::DisplaySurface>& displaySurface,
             const sp<IGraphicBufferProducer>& producer) REQUIRES(mStateLock);
     void processDisplayChangesLocked() REQUIRES(mStateLock, kMainThreadContext);
+    void processDisplayAdded(const wp<IBinder>& displayToken, const DisplayDeviceState&)
+            REQUIRES(mStateLock, kMainThreadContext);
     void processDisplayRemoved(const wp<IBinder>& displayToken)
             REQUIRES(mStateLock, kMainThreadContext);
     void processDisplayChanged(const wp<IBinder>& displayToken,
@@ -1283,7 +1318,7 @@ private:
 
     struct HotplugEvent {
         hal::HWDisplayId hwcDisplayId;
-        hal::Connection connection = hal::Connection::INVALID;
+        HWComposer::HotplugEvent event;
     };
 
     bool mIsHdcpViaNegVsync = false;

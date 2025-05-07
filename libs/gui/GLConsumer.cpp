@@ -333,7 +333,7 @@ status_t GLConsumer::releaseTexImage() {
         }
 
         if (mReleasedTexImage == nullptr) {
-            mReleasedTexImage = new EglImage(getDebugTexImageBuffer());
+            mReleasedTexImage = sp<EglImage>::make(getDebugTexImageBuffer());
         }
 
         mCurrentTexture = BufferQueue::INVALID_BUFFER_SLOT;
@@ -365,10 +365,10 @@ sp<GraphicBuffer> GLConsumer::getDebugTexImageBuffer() {
     if (CC_UNLIKELY(sReleasedTexImageBuffer == nullptr)) {
         // The first time, create the debug texture in case the application
         // continues to use it.
-        sp<GraphicBuffer> buffer = new GraphicBuffer(
-                kDebugData.width, kDebugData.height, PIXEL_FORMAT_RGBA_8888,
-                DEFAULT_USAGE_FLAGS | GraphicBuffer::USAGE_SW_WRITE_RARELY,
-                "[GLConsumer debug texture]");
+        sp<GraphicBuffer> buffer =
+                sp<GraphicBuffer>::make(kDebugData.width, kDebugData.height, PIXEL_FORMAT_RGBA_8888,
+                                        DEFAULT_USAGE_FLAGS | GraphicBuffer::USAGE_SW_WRITE_RARELY,
+                                        "[GLConsumer debug texture]");
         uint32_t* bits;
         buffer->lock(GraphicBuffer::USAGE_SW_WRITE_RARELY, reinterpret_cast<void**>(&bits));
         uint32_t stride = buffer->getStride();
@@ -400,7 +400,7 @@ status_t GLConsumer::acquireBufferLocked(BufferItem *item,
     // replaces any old EglImage with a new one (using the new buffer).
     if (item->mGraphicBuffer != nullptr) {
         int slot = item->mSlot;
-        mEglSlots[slot].mEglImage = new EglImage(item->mGraphicBuffer);
+        mEglSlots[slot].mEglImage = sp<EglImage>::make(item->mGraphicBuffer);
     }
 
     return NO_ERROR;
@@ -417,18 +417,18 @@ void GLConsumer::onSlotCountChanged(int slotCount) {
 }
 #endif
 
-status_t GLConsumer::releaseBufferLocked(int buf,
-        sp<GraphicBuffer> graphicBuffer,
-        EGLDisplay display, EGLSyncKHR eglFence) {
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+status_t GLConsumer::releaseBufferLocked(int buf, sp<GraphicBuffer> graphicBuffer,
+                                         EGLDisplay display, EGLSyncKHR eglFence) {
     // release the buffer if it hasn't already been discarded by the
     // BufferQueue. This can happen, for example, when the producer of this
     // buffer has reallocated the original buffer slot after this buffer
     // was acquired.
-    status_t err = ConsumerBase::releaseBufferLocked(
-            buf, graphicBuffer, display, eglFence);
+    status_t err = ConsumerBase::releaseBufferLocked(buf, graphicBuffer, display, eglFence);
     mEglSlots[buf].mEglFence = EGL_NO_SYNC_KHR;
     return err;
 }
+#endif
 
 status_t GLConsumer::updateAndReleaseLocked(const BufferItem& item,
         PendingRelease* pendingRelease)
@@ -490,9 +490,14 @@ status_t GLConsumer::updateAndReleaseLocked(const BufferItem& item,
     // release old buffer
     if (mCurrentTexture != BufferQueue::INVALID_BUFFER_SLOT) {
         if (pendingRelease == nullptr) {
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+            status_t status =
+                    releaseBufferLocked(mCurrentTexture, mCurrentTextureImage->graphicBuffer());
+#else
             status_t status = releaseBufferLocked(
                     mCurrentTexture, mCurrentTextureImage->graphicBuffer(),
                     mEglDisplay, mEglSlots[mCurrentTexture].mEglFence);
+#endif
             if (status < NO_ERROR) {
                 GLC_LOGE("updateAndRelease: failed to release buffer: %s (%d)",
                         strerror(-status), status);
@@ -501,10 +506,7 @@ status_t GLConsumer::updateAndReleaseLocked(const BufferItem& item,
             }
         } else {
             pendingRelease->currentTexture = mCurrentTexture;
-            pendingRelease->graphicBuffer =
-                    mCurrentTextureImage->graphicBuffer();
-            pendingRelease->display = mEglDisplay;
-            pendingRelease->fence = mEglSlots[mCurrentTexture].mEglFence;
+            pendingRelease->graphicBuffer = mCurrentTextureImage->graphicBuffer();
             pendingRelease->isPending = true;
         }
     }
@@ -735,7 +737,7 @@ status_t GLConsumer::syncForReleaseLocked(EGLDisplay dpy) {
                         "fd: %#x", eglGetError());
                 return UNKNOWN_ERROR;
             }
-            sp<Fence> fence(new Fence(fenceFd));
+            sp<Fence> fence = sp<Fence>::make(fenceFd);
             status_t err = addReleaseFenceLocked(mCurrentTexture,
                     mCurrentTextureImage->graphicBuffer(), fence);
             if (err != OK) {
@@ -744,6 +746,11 @@ status_t GLConsumer::syncForReleaseLocked(EGLDisplay dpy) {
                 return err;
             }
         } else if (mUseFenceSync && SyncFeatures::getInstance().useFenceSync()) {
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+            // Basically all clients are using native fence syncs. If they aren't, we lose nothing
+            // by waiting here, because the alternative can cause deadlocks (b/339705065).
+            glFinish();
+#else
             EGLSyncKHR fence = mEglSlots[mCurrentTexture].mEglFence;
             if (fence != EGL_NO_SYNC_KHR) {
                 // There is already a fence for the current slot.  We need to
@@ -773,6 +780,7 @@ status_t GLConsumer::syncForReleaseLocked(EGLDisplay dpy) {
             }
             glFlush();
             mEglSlots[mCurrentTexture].mEglFence = fence;
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
         }
     }
 

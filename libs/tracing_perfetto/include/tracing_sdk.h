@@ -27,6 +27,10 @@
 #include "perfetto/public/te_macros.h"
 #include "perfetto/public/track_event.h"
 
+#include "perfetto/public/abi/pb_decoder_abi.h"
+#include "perfetto/public/pb_utils.h"
+#include "perfetto/public/tracing_session.h"
+
 /**
  * The objects declared here are intended to be managed by Java.
  * This means the Java Garbage Collector is responsible for freeing the
@@ -288,13 +292,8 @@ class DebugArg {
     arg_ = std::move(arg);
   }
 
-  ~DebugArg() {
-    free_string_value();
-  }
-
   void set_value(T value) {
     if constexpr (std::is_same_v<T, const char*>) {
-      free_string_value();
       arg_.value = value;
     } else if constexpr (std::is_same_v<T, int64_t>) {
       arg_.value = value;
@@ -317,16 +316,6 @@ class DebugArg {
   DISALLOW_COPY_AND_ASSIGN(DebugArg);
   TypeMap::type arg_;
   const std::string name_;
-
-  constexpr void free_string_value() {
-    if constexpr (std::is_same_v<typename TypeMap::type,
-                                 PerfettoTeHlExtraDebugArgString>) {
-      if (arg_.value) {
-        free((void*)arg_.value);
-        arg_.value = nullptr;
-      }
-    }
-  }
 };
 
 template <typename T>
@@ -371,10 +360,6 @@ class ProtoField {
     arg_ = std::move(arg);
   }
 
-  ~ProtoField() {
-    free_string_value();
-  }
-
   void set_value(uint32_t id, T value) {
     if constexpr (std::is_same_v<T, int64_t>) {
       arg_.header.id = id;
@@ -383,7 +368,6 @@ class ProtoField {
       arg_.header.id = id;
       arg_.value = value;
     } else if constexpr (std::is_same_v<T, const char*>) {
-      free_string_value();
       arg_.header.id = id;
       arg_.str = value;
     }
@@ -400,16 +384,6 @@ class ProtoField {
  private:
   DISALLOW_COPY_AND_ASSIGN(ProtoField);
   TypeMap::type arg_;
-
-  constexpr void free_string_value() {
-    if constexpr (std::is_same_v<typename TypeMap::type,
-                                 PerfettoTeHlProtoFieldCstr>) {
-      if (arg_.str) {
-        free((void*)arg_.str);
-        arg_.str = nullptr;
-      }
-    }
-  }
 };
 
 class ProtoFieldNested {
@@ -450,6 +424,22 @@ class Proto {
   // PerfettoTeHlProtoFieldVarInt, PerfettoTeHlProtoFieldNested. Those objects are
   // individually managed by Java.
   std::vector<PerfettoTeHlProtoField*> fields_;
+};
+
+class Session {
+ public:
+  Session(bool is_backend_in_process, void* buf, size_t len);
+  ~Session();
+  Session(const Session&) = delete;
+  Session& operator=(const Session&) = delete;
+
+  bool FlushBlocking(uint32_t timeout_ms);
+  void StopBlocking();
+  std::vector<uint8_t> ReadBlocking();
+
+  static void delete_session(Session* session);
+
+  struct PerfettoTracingSessionImpl* session_ = nullptr;
 };
 
 /**

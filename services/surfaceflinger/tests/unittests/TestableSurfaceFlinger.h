@@ -42,7 +42,6 @@
 #include "FrontEnd/RequestedLayerState.h"
 #include "Layer.h"
 #include "NativeWindowSurface.h"
-#include "RenderArea.h"
 #include "Scheduler/RefreshRateSelector.h"
 #include "Scheduler/VSyncTracker.h"
 #include "Scheduler/VsyncController.h"
@@ -338,9 +337,9 @@ public:
         mFlinger->configure();
     }
 
-    void configureAndCommit() {
+    void configureAndCommit(bool modeset = false) {
         configure();
-        commitTransactionsLocked(eDisplayTransactionNeeded);
+        commitTransactionsLocked(eDisplayTransactionNeeded, modeset);
     }
 
     void commit(TimePoint frameTime, VsyncId vsyncId, TimePoint expectedVsyncTime,
@@ -430,11 +429,14 @@ public:
                                                        dispSurface, producer);
     }
 
-    void commitTransactionsLocked(uint32_t transactionFlags) {
+    void commitTransactionsLocked(uint32_t transactionFlags, bool modeset = false) {
         Mutex::Autolock lock(mFlinger->mStateLock);
         ftl::FakeGuard guard(kMainThreadContext);
         mFlinger->processDisplayChangesLocked();
         mFlinger->commitTransactionsLocked(transactionFlags);
+        if (modeset) {
+            mFlinger->initiateDisplayModeChanges();
+        }
     }
 
     void onComposerHalHotplugEvent(hal::HWDisplayId hwcDisplayId, DisplayHotplugEvent event) {
@@ -461,21 +463,34 @@ public:
         return mFlinger->setPowerModeInternal(display, mode);
     }
 
-    auto renderScreenImpl(const sp<DisplayDevice> display,
-                          std::unique_ptr<const RenderArea> renderArea,
+    auto renderScreenImpl(const sp<DisplayDevice> display, const Rect sourceCrop,
+                          ui::Dataspace dataspace,
                           SurfaceFlinger::GetLayerSnapshotsFunction getLayerSnapshotsFn,
                           const std::shared_ptr<renderengine::ExternalTexture>& buffer,
-                          bool regionSampling) {
+                          bool regionSampling, bool isSecure, bool seamlessTransition) {
         Mutex::Autolock lock(mFlinger->mStateLock);
         ftl::FakeGuard guard(kMainThreadContext);
 
         ScreenCaptureResults captureResults;
-        auto displayState = std::optional{display->getCompositionDisplay()->getState()};
+        const auto& state = display->getCompositionDisplay()->getState();
         auto layers = getLayerSnapshotsFn();
 
-        return mFlinger->renderScreenImpl(std::move(renderArea), buffer, regionSampling,
+        SurfaceFlinger::ScreenshotArgs screenshotArgs;
+        screenshotArgs.captureTypeVariant = display;
+        screenshotArgs.displayId = std::nullopt;
+        screenshotArgs.sourceCrop = sourceCrop;
+        screenshotArgs.reqSize = sourceCrop.getSize();
+        screenshotArgs.dataspace = dataspace;
+        screenshotArgs.isSecure = isSecure;
+        screenshotArgs.seamlessTransition = seamlessTransition;
+        screenshotArgs.displayBrightnessNits = state.displayBrightnessNits;
+        screenshotArgs.sdrWhitePointNits = state.sdrWhitePointNits;
+        screenshotArgs.renderIntent = state.renderIntent;
+        screenshotArgs.colorMode = state.colorMode;
+
+        return mFlinger->renderScreenImpl(screenshotArgs, buffer, regionSampling,
                                           false /* grayscale */, false /* isProtected */,
-                                          captureResults, displayState, layers);
+                                          captureResults, layers);
     }
 
     auto getLayerSnapshotsForScreenshotsFn(ui::LayerStack layerStack, uint32_t uid) {
