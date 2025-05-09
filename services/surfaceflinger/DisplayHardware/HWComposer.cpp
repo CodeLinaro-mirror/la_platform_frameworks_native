@@ -145,7 +145,7 @@ std::optional<DisplayIdentificationInfo> HWComposer::onHotplug(hal::HWDisplayId 
         case HotplugEvent::Disconnected:
             return onHotplugDisconnect(hwcDisplayId);
         case HotplugEvent::LinkUnstable:
-            return {};
+            return onHotplugLinkTrainingFailure(hwcDisplayId);
     }
 }
 
@@ -560,7 +560,7 @@ status_t HWComposer::getDeviceCompositionChanges(
         if (!hasChangesError(error)) {
             RETURN_IF_HWC_ERROR_FOR("presentOrValidate", error, displayId, UNKNOWN_ERROR);
         }
-        if (state == 1) { //Present Succeeded.
+        if (state == 1) { // Present Succeeded.
             std::unordered_map<HWC2::Layer*, sp<Fence>> releaseFences;
             error = hwcDisplay->getReleaseFences(&releaseFences);
             displayData.releaseFences = std::move(releaseFences);
@@ -824,8 +824,8 @@ mat4 HWComposer::getDataspaceSaturationMatrix(HalDisplayId displayId, ui::Datasp
     RETURN_IF_INVALID_DISPLAY(displayId, {});
 
     mat4 matrix;
-    auto error = mDisplayData[displayId].hwcDisplay->getDataspaceSaturationMatrix(dataspace,
-            &matrix);
+    auto error =
+            mDisplayData[displayId].hwcDisplay->getDataspaceSaturationMatrix(dataspace, &matrix);
     RETURN_IF_HWC_ERROR(error, displayId, {});
     return matrix;
 }
@@ -1054,6 +1054,15 @@ status_t HWComposer::setDisplayPictureProfileHandle(PhysicalDisplayId displayId,
     return NO_ERROR;
 }
 
+status_t HWComposer::startHdcpNegotiation(PhysicalDisplayId displayId,
+                                          const aidl::android::hardware::drm::HdcpLevels& levels) {
+    RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
+    auto& hwcDisplay = mDisplayData[displayId].hwcDisplay;
+    auto error = hwcDisplay->startHdcpNegotiation(levels);
+    RETURN_IF_HWC_ERROR(error, displayId, UNKNOWN_ERROR);
+    return NO_ERROR;
+}
+
 status_t HWComposer::getLuts(
         PhysicalDisplayId displayId, const std::vector<sp<GraphicBuffer>>& buffers,
         std::vector<aidl::android::hardware::graphics::composer3::Luts>* luts) {
@@ -1242,6 +1251,16 @@ std::optional<DisplayIdentificationInfo> HWComposer::onHotplugDisconnect(
     // it as disconnected.
     mDisplayData.at(*displayId).hwcDisplay->setConnected(false);
     mComposer->onHotplugDisconnect(hwcDisplayId);
+    return DisplayIdentificationInfo{.id = *displayId};
+}
+
+std::optional<DisplayIdentificationInfo> HWComposer::onHotplugLinkTrainingFailure(
+        hal::HWDisplayId hwcDisplayId) {
+    const auto displayId = toPhysicalDisplayId(hwcDisplayId);
+    if (!displayId) {
+        LOG_HWC_DISPLAY_ERROR(hwcDisplayId, "Invalid HWC display");
+        return {};
+    }
     return DisplayIdentificationInfo{.id = *displayId};
 }
 

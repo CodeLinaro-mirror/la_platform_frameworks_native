@@ -237,6 +237,16 @@ Rect OutputLayer::calculateOutputDisplayFrame() const {
         geomLayerBounds.bottom += outset;
     }
 
+    // Similar to above
+    if (layerState.forceClientComposition && layerState.borderSettings.strokeWidth > 0.0f) {
+        // Antialiasing should never add more than 2 pixels.
+        const auto outset = layerState.borderSettings.strokeWidth + 2;
+        geomLayerBounds.left -= outset;
+        geomLayerBounds.top -= outset;
+        geomLayerBounds.right += outset;
+        geomLayerBounds.bottom += outset;
+    }
+
     geomLayerBounds = layerTransform.transform(geomLayerBounds);
     FloatRect frame = reduce(geomLayerBounds, activeTransparentRegion);
     frame = frame.intersect(outputState.layerStackSpace.getContent().toFloatRect());
@@ -876,8 +886,7 @@ void OutputLayer::writeCompositionTypeToHWC(HWC2::Layer* hwcLayer,
                                             bool isPeekingThrough, bool skipLayer) {
     auto& outputDependentState = editState();
 
-    bool isCached = !skipLayer && outputDependentState.overrideInfo.buffer;
-    if (isClientCompositionForced(isPeekingThrough, isCached)) {
+    if (isClientCompositionForced(isPeekingThrough)) {
         // If we are forcing client composition, we need to tell the HWC
         requestedCompositionType = Composition::CLIENT;
     }
@@ -967,12 +976,9 @@ void OutputLayer::detectDisallowedCompositionTypeChange(Composition from, Compos
     }
 }
 
-bool OutputLayer::isClientCompositionForced(bool isPeekingThrough, bool isCached) const {
-    // If this layer was flattened into a CachedSet then it is not necessary for
-    // the GPU to compose it.
-    bool requiresClientDrawnRoundedCorners = !isCached && getLayerFE().hasRoundedCorners();
+bool OutputLayer::isClientCompositionForced(bool isPeekingThrough) const {
     return getState().forceClientComposition ||
-            (!isPeekingThrough && requiresClientDrawnRoundedCorners);
+            (!isPeekingThrough && getLayerFE().hasRoundedCorners());
 }
 
 void OutputLayer::applyDeviceCompositionTypeChange(Composition compositionType) {
