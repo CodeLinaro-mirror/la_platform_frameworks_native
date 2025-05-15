@@ -128,6 +128,7 @@ protected:
 private:
     void dirtyEntireOutput();
     compositionengine::OutputLayer* findLayerRequestingBackgroundComposition() const;
+    void sanitizeOutputLayers() const;
     ui::Dataspace getBestDataspace(ui::Dataspace*, bool*) const;
     compositionengine::Output::ColorProfile pickColorProfile(
             const compositionengine::CompositionRefreshArgs&) const;

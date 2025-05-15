@@ -69,6 +69,7 @@ enum class LayerStateField : uint32_t {
     SolidColor            = 1u << 16,
     BackgroundBlurRadius  = 1u << 17,
     BlurRegions           = 1u << 18,
+    BlursDisabled         = 1u << 19,
 };
 // clang-format on
 
@@ -229,7 +230,8 @@ public:
     Rect getDisplayFrame() const { return mDisplayFrame.get(); }
     const Region& getVisibleRegion() const { return mVisibleRegion.get(); }
     bool hasBlurBehind() const {
-        return mBackgroundBlurRadius.get() > 0 || !mBlurRegions.get().empty();
+        return (mBackgroundBlurRadius.get() > 0 || !mBlurRegions.get().empty()) &&
+                !mIsBlursDisabled.get();
     }
     int32_t getBackgroundBlurRadius() const { return mBackgroundBlurRadius.get(); }
     hardware::graphics::composer::hal::Composition getCompositionType() const {
@@ -455,7 +457,10 @@ private:
                                       return hash;
                                   }};
 
-    static const constexpr size_t kNumNonUniqueFields = 17;
+    OutputLayerState<bool, LayerStateField::BlursDisabled> mIsBlursDisabled{
+            [](auto layer) { return layer->getState().ignoreBlur; }};
+
+    static const constexpr size_t kNumNonUniqueFields = 18;
 
     std::array<StateInterface*, kNumNonUniqueFields> getNonUniqueFields() {
         std::array<const StateInterface*, kNumNonUniqueFields> constFields =
@@ -474,7 +479,7 @@ private:
                 &mAlpha,        &mLayerMetadata,  &mVisibleRegion,        &mOutputDataspace,
                 &mPixelFormat,  &mColorTransform, &mCompositionType,      &mSidebandStream,
                 &mBuffer,       &mSolidColor,     &mBackgroundBlurRadius, &mBlurRegions,
-                &mFrameNumber,
+                &mFrameNumber,  &mIsBlursDisabled
         };
     }
 };
