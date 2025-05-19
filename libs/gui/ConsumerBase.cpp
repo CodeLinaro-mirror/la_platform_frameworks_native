@@ -260,7 +260,10 @@ void ConsumerBase::onFrameReplaced(const BufferItem &item) {
 
 void ConsumerBase::onBuffersReleased() {
     Mutex::Autolock lock(mMutex);
+    onBuffersReleasedLocked();
+}
 
+void ConsumerBase::onBuffersReleasedLocked() {
     CB_LOGV("onBuffersReleased");
 
     if (mAbandoned) {
@@ -477,7 +480,8 @@ status_t ConsumerBase::setMaxAcquiredBufferCount(int maxAcquiredBuffers) {
         CB_LOGE("setMaxAcquiredBufferCount: ConsumerBase is abandoned!");
         return NO_INIT;
     }
-    return mConsumer->setMaxAcquiredBufferCount(maxAcquiredBuffers);
+    return mConsumer->setMaxAcquiredBufferCount(maxAcquiredBuffers,
+                                                {[this]() { onBuffersReleasedLocked(); }});
 }
 
 status_t ConsumerBase::setConsumerIsProtected(bool isProtected) {
