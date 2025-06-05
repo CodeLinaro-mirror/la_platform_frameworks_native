@@ -237,6 +237,16 @@ Rect OutputLayer::calculateOutputDisplayFrame() const {
         geomLayerBounds.bottom += outset;
     }
 
+    // Similar to above
+    if (layerState.forceClientComposition && layerState.borderSettings.strokeWidth > 0.0f) {
+        // Antialiasing should never add more than 2 pixels.
+        const auto outset = layerState.borderSettings.strokeWidth + 2;
+        geomLayerBounds.left -= outset;
+        geomLayerBounds.top -= outset;
+        geomLayerBounds.right += outset;
+        geomLayerBounds.bottom += outset;
+    }
+
     geomLayerBounds = layerTransform.transform(geomLayerBounds);
     FloatRect frame = reduce(geomLayerBounds, activeTransparentRegion);
     frame = frame.intersect(outputState.layerStackSpace.getContent().toFloatRect());
@@ -369,8 +379,11 @@ void OutputLayer::updateCompositionState(
                                                       layerFEState->buffer->getPixelFormat()))
                                             : std::nullopt;
 
-    auto hdrRenderType =
-            getHdrRenderType(outputState.dataspace, pixelFormat, layerFEState->desiredHdrSdrRatio);
+    // prefer querying this from gralloc instead to catch 2094-10 metadata
+    const bool hasHdrMetadata = layerFEState->hdrMetadata.validTypes != 0;
+
+    auto hdrRenderType = getHdrRenderType(outputState.dataspace, pixelFormat,
+                                          layerFEState->desiredHdrSdrRatio, hasHdrMetadata);
 
     // Determine the output dependent dataspace for this layer. If it is
     // colorspace agnostic, it just uses the dataspace chosen for the output to
@@ -393,8 +406,8 @@ void OutputLayer::updateCompositionState(
     }
 
     // re-get HdrRenderType after the dataspace gets changed.
-    hdrRenderType =
-            getHdrRenderType(state.dataspace, pixelFormat, layerFEState->desiredHdrSdrRatio);
+    hdrRenderType = getHdrRenderType(state.dataspace, pixelFormat, layerFEState->desiredHdrSdrRatio,
+                                     hasHdrMetadata);
 
     // For hdr content, treat the white point as the display brightness - HDR content should not be
     // boosted or dimmed.
@@ -416,12 +429,20 @@ void OutputLayer::updateCompositionState(
         state.dimmingRatio = std::min(idealizedMaxHeadroom / deviceHeadroom, 1.0f);
         state.whitePointNits = getOutput().getState().displayBrightnessNits * state.dimmingRatio;
     } else {
+        const bool isLayerFp16 = pixelFormat && *pixelFormat == ui::PixelFormat::RGBA_FP16;
         float layerBrightnessNits = getOutput().getState().sdrWhitePointNits;
         // RANGE_EXTENDED can "self-promote" to HDR, but is still rendered for a particular
         // range that we may need to re-adjust to the current display conditions
+        // Do NOT do this when we may render fp16 to an fp16 client target, to avoid applying
+        // and additional gain to the layer. This is because the fp16 client target should
+        // already be adapted to remap 1.0 to the SDR white point in the panel's luminance
+        // space.
         if (hdrRenderType == HdrRenderType::DISPLAY_HDR) {
-            layerBrightnessNits *= layerFEState->currentHdrSdrRatio;
+            if (!FlagManager::getInstance().fp16_client_target() || !isLayerFp16) {
+                layerBrightnessNits *= layerFEState->currentHdrSdrRatio;
+            }
         }
+
         state.dimmingRatio =
                 std::clamp(layerBrightnessNits / getOutput().getState().displayBrightnessNits, 0.f,
                            1.f);
@@ -865,8 +886,7 @@ void OutputLayer::writeCompositionTypeToHWC(HWC2::Layer* hwcLayer,
                                             bool isPeekingThrough, bool skipLayer) {
     auto& outputDependentState = editState();
 
-    bool isCached = !skipLayer && outputDependentState.overrideInfo.buffer;
-    if (isClientCompositionForced(isPeekingThrough, isCached)) {
+    if (isClientCompositionForced(isPeekingThrough)) {
         // If we are forcing client composition, we need to tell the HWC
         requestedCompositionType = Composition::CLIENT;
     }
@@ -956,12 +976,9 @@ void OutputLayer::detectDisallowedCompositionTypeChange(Composition from, Compos
     }
 }
 
-bool OutputLayer::isClientCompositionForced(bool isPeekingThrough, bool isCached) const {
-    // If this layer was flattened into a CachedSet then it is not necessary for
-    // the GPU to compose it.
-    bool requiresClientDrawnRoundedCorners = !isCached && getLayerFE().hasRoundedCorners();
+bool OutputLayer::isClientCompositionForced(bool isPeekingThrough) const {
     return getState().forceClientComposition ||
-            (!isPeekingThrough && requiresClientDrawnRoundedCorners);
+            (!isPeekingThrough && getLayerFE().hasRoundedCorners());
 }
 
 void OutputLayer::applyDeviceCompositionTypeChange(Composition compositionType) {

@@ -194,7 +194,7 @@ const std::string& SurfaceControl::getName() const {
     return mName;
 }
 
-std::shared_ptr<Choreographer> SurfaceControl::getChoreographer() {
+sp<Choreographer> SurfaceControl::getChoreographer() {
     if (mChoreographer) {
         return mChoreographer;
     }
@@ -203,7 +203,7 @@ std::shared_ptr<Choreographer> SurfaceControl::getChoreographer() {
         ALOGE("%s: No looper prepared for thread", __func__);
         return nullptr;
     }
-    mChoreographer = std::make_shared<Choreographer>(looper, getHandle());
+    mChoreographer = sp<Choreographer>::make(looper, getHandle());
     status_t result = mChoreographer->initialize();
     if (result != OK) {
         ALOGE("Failed to initialize choreographer");
@@ -269,10 +269,11 @@ status_t SurfaceControl::readFromParcel(const Parcel& parcel,
     SAFE_PARCEL(parcel.readUint32, &format);
 
     // We aren't the original owner of the surface.
-    *outSurfaceControl = new SurfaceControl(new SurfaceComposerClient(
-                                                    interface_cast<ISurfaceComposerClient>(client)),
-                                            handle.get(), layerId, layerName, width, height, format,
-                                            transformHint);
+    *outSurfaceControl =
+            sp<SurfaceControl>::make(sp<SurfaceComposerClient>::make(
+                                             interface_cast<ISurfaceComposerClient>(client)),
+                                     handle, layerId, layerName, width, height, format,
+                                     transformHint);
 
     return NO_ERROR;
 }
