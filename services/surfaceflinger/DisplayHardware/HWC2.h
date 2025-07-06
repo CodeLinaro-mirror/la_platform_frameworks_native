@@ -13,6 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 #pragma once
 
@@ -51,6 +58,10 @@
 #include <aidl/android/hardware/graphics/composer3/OverlayProperties.h>
 #include <aidl/android/hardware/graphics/composer3/RefreshRateChangedDebugData.h>
 
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#include "../QtiExtension/QtiLayerExtension.h"
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
+
 namespace android {
 
 class Fence;
@@ -62,6 +73,13 @@ struct DisplayedFrameStats;
 namespace Hwc2 {
 class Composer;
 } // namespace Hwc2
+
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+namespace layerextension {
+class QtiLayerExtension;
+}
+using layerextension::QtiLayerExtension;
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 namespace HWC2 {
 
@@ -417,7 +435,10 @@ public:
         if (mDisplay) return mDisplay->getId();
         return 0;
     }
-// QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
+    // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
+    // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+    QtiLayerExtension& GetLayerExt() { return mQtiLayerExtn; }
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
     hal::Error setCursorPosition(int32_t x, int32_t y) override;
     hal::Error setBuffer(uint32_t slot, const android::sp<android::GraphicBuffer>& buffer,
@@ -475,6 +496,10 @@ private:
     android::mat4 mColorMatrix;
     uint32_t mBufferSlot;
     android::PictureProfileHandle profile;
+    // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+    friend class QtiLayerExtension;
+    QtiLayerExtension mQtiLayerExtn;
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 };
 
 } // namespace impl

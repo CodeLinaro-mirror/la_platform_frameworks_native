@@ -63,6 +63,8 @@
 #include <math/vec3.h>
 
 #include <aidl/android/hardware/graphics/common/DisplayDecorationSupport.h>
+
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
 #include <android/gui/CompositionLayerType.h>
 #include <android/gui/DisplayDeviceConfig.h>
 #include <android/gui/Frustum.h>
@@ -72,6 +74,7 @@
 #include <android/gui/Pose.h>
 #include <android/gui/Position.h>
 #include <android/gui/RenderLayerReferenceSpaceType.h>
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 namespace android {
 
@@ -369,10 +372,11 @@ public:
      */
     static status_t getMaxLayerPictureProfiles(const sp<IBinder>& displayToken,
                                                int32_t* outMaxProfiles);
-
+    // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
     // Sets display config on the connected display.
     static status_t setDisplayConfig(const sp<IBinder>& display,
                                      gui::DisplayDeviceConfig& displayDeviceConfig);
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
     // ------------------------------------------------------------------------
     // surface creation / destruction
@@ -576,6 +580,7 @@ public:
         Transaction& unsetBuffer(const sp<SurfaceControl>& sc);
         std::shared_ptr<BufferData> getAndClearBuffer(const sp<SurfaceControl>& sc);
 
+        // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
         // Sets the reference space type of a layer with the specified type
         Transaction& setReferenceSpaceType(
                 const sp<SurfaceControl>& sc,
@@ -606,6 +611,7 @@ public:
         // Sets the visibility type of a layer with specified type
         Transaction& setLayerVisibilityType(const sp<SurfaceControl>& sc,
                                             const gui::LayerVisibilityType& layerVisibilityType);
+        // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
         /**
          * If this transaction, has a a buffer set for the given SurfaceControl

@@ -1,4 +1,5 @@
-/* Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+/*
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 #pragma once
@@ -81,6 +82,8 @@ public:
     void qtiSetPowerMode(const sp<IBinder>& displayToken, int mode) override;
     void qtiSetPowerModeOverrideConfig(sp<DisplayDevice> display) override;
     void qtiSetLayerAsMask(uint32_t hwcDisplayId __unused, uint64_t layerId __unused) override{};
+    void qtiSetDisplayConfig(const sp<IBinder>& displayToken,
+                             const gui::DisplayDeviceConfig& displayDeviceConfig) override {};
 
     /*
      * Methods for Virtual, WiFi, and Secure Displays

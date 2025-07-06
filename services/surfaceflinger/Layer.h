@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-// QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
-/* Changes from Qualcomm Innovation Center are provided under the following license:
- *
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
-// QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 #pragma once
 
 #include <android/gui/DropInputMode.h>
@@ -51,6 +51,17 @@
 #include <compositionengine/LayerFECompositionState.h>
 #include <scheduler/Fps.h>
 #include <scheduler/Seamlessness.h>
+
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#include <android/gui/CompositionLayerType.h>
+#include <android/gui/Frustum.h>
+#include <android/gui/LayerVisibilityType.h>
+#include <android/gui/Orientation.h>
+#include <android/gui/PlaneEquation.h>
+#include <android/gui/Pose.h>
+#include <android/gui/Position.h>
+#include <android/gui/RenderLayerReferenceSpaceType.h>
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 #include <cstdint>
 #include <functional>
@@ -168,6 +179,16 @@ public:
         float desiredHdrSdrRatio = -1.f;
         int64_t latchedVsyncId = 0;
         bool useVsyncIdForRefreshRateSelection = false;
+        // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+        gui::CompositionLayerType compositionLayerType;
+        gui::LayerVisibilityType layerVisibilityType;
+        gui::RenderLayerReferenceSpaceType referenceSpaceType;
+        gui::Frustum frustum;
+        gui::Pose pose;
+        gui::PlaneEquation planeEquation;
+        float quadWidth;
+        float quadHeight;
+        // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
     };
 
     explicit Layer(const surfaceflinger::LayerCreationArgs& args);
@@ -184,6 +205,16 @@ public:
 
     // Buffer space
     bool setCrop(const FloatRect& crop);
+
+    // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+    virtual bool setPlaneEquation(gui::PlaneEquation planeEquation);
+    virtual bool setReferenceSpaceType(gui::RenderLayerReferenceSpaceType referenceSpaceType);
+    virtual bool setCompositionLayerType(gui::CompositionLayerType compositionLayerType);
+    virtual bool setLayerVisibilityType(gui::LayerVisibilityType layerVisibilityType);
+    virtual bool setPose(gui::Pose pose);
+    virtual bool setQuadSize(float quadWidth, float quadHeight);
+    virtual bool setFrustum(gui::Frustum frustum);
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
     bool setTransform(uint32_t /*transform*/);
     bool setTransformToDisplayInverse(bool /*transformToDisplayInverse*/);

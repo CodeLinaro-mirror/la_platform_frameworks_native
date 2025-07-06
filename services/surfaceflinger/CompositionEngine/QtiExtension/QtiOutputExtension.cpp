@@ -1,4 +1,4 @@
-/* Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 // #define LOG_NDEBUG 0
@@ -124,6 +124,65 @@ void QtiOutputExtension::qtiSetLayerType(HWC2::Layer* layer, uint32_t type,
     auto hwcextn = QtiExtensionContext::instance().getQtiHWComposerExtension();
     if (hwcextn) {
         hwcextn->qtiSetLayerType(layer, type);
+    }
+}
+
+void QtiOutputExtension::qtiSetCompositionLayerType(HWC2::Layer* layer,
+                                                    gui::CompositionLayerType compositionLayerType,
+                                                    const char* debugName __unused) {
+    auto hwcextn = QtiExtensionContext::instance().getQtiHWComposerExtension();
+    if (hwcextn) {
+        hwcextn->qtiSetCompositionLayerType(layer, compositionLayerType);
+    }
+}
+
+void QtiOutputExtension::qtiSetLayerVisibilityType(HWC2::Layer* layer,
+                                                   gui::LayerVisibilityType layerVisibilityType,
+                                                   const char* debugName) {
+    auto hwcextn = QtiExtensionContext::instance().getQtiHWComposerExtension();
+    if (hwcextn) {
+        hwcextn->qtiSetLayerVisibilityType(layer, layerVisibilityType);
+    }
+}
+
+void QtiOutputExtension::qtiSetReferenceSpaceType(
+        HWC2::Layer* layer, gui::RenderLayerReferenceSpaceType referenceSpaceType,
+        const char* debugName __unused) {
+    auto hwcextn = QtiExtensionContext::instance().getQtiHWComposerExtension();
+    if (hwcextn) {
+        hwcextn->qtiSetReferenceSpaceType(layer, referenceSpaceType);
+    }
+}
+
+void QtiOutputExtension::qtiSetFrustum(HWC2::Layer* layer, gui::Frustum frustum,
+                                       const char* debugName __unused) {
+    auto hwcextn = QtiExtensionContext::instance().getQtiHWComposerExtension();
+    if (hwcextn) {
+        hwcextn->qtiSetFrustum(layer, frustum);
+    }
+}
+
+void QtiOutputExtension::qtiSetPose(HWC2::Layer* layer, gui::Pose pose,
+                                    const char* debugName __unused) {
+    auto hwcextn = QtiExtensionContext::instance().getQtiHWComposerExtension();
+    if (hwcextn) {
+        hwcextn->qtiSetPose(layer, pose);
+    }
+}
+
+void QtiOutputExtension::qtiSetPlaneEquation(HWC2::Layer* layer, gui::PlaneEquation planeEquation,
+                                             const char* debugName __unused) {
+    auto hwcextn = QtiExtensionContext::instance().getQtiHWComposerExtension();
+    if (hwcextn) {
+        hwcextn->qtiSetPlaneEquation(layer, planeEquation);
+    }
+}
+
+void QtiOutputExtension::qtiSetQuadSize(HWC2::Layer* layer, float quadWidth, float quadHeight,
+                                        const char* debugName __unused) {
+    auto hwcextn = QtiExtensionContext::instance().getQtiHWComposerExtension();
+    if (hwcextn) {
+        hwcextn->qtiSetQuadSize(layer, quadWidth, quadHeight);
     }
 }
 

@@ -1750,10 +1750,10 @@ public:
                                       int64_t afterVsync) override;
     binder::Status addActivePictureListener(const sp<gui::IActivePictureListener>& listener);
     binder::Status removeActivePictureListener(const sp<gui::IActivePictureListener>& listener);
+    // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
     binder::Status setDisplayConfig(const sp<IBinder>& displayToken,
-                                    const gui::DisplayDeviceConfig& displayDeviceConfig) override {
-        return binder::Status::ok();
-    }
+                                    const gui::DisplayDeviceConfig& displayDeviceConfig) override;
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 private:
     static const constexpr bool kUsePermissionCache = true;

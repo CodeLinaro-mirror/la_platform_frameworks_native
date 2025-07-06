@@ -14,6 +14,14 @@
  * limitations under the License.
  */
 
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
+
 #ifndef ANDROID_SF_LAYER_STATE_H
 #define ANDROID_SF_LAYER_STATE_H
 
@@ -25,6 +33,16 @@
 #include <android/gui/DisplayCaptureArgs.h>
 #include <android/gui/IWindowInfosReportedListener.h>
 #include <android/gui/LayerCaptureArgs.h>
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#include <android/gui/CompositionLayerType.h>
+#include <android/gui/Frustum.h>
+#include <android/gui/LayerVisibilityType.h>
+#include <android/gui/Orientation.h>
+#include <android/gui/PlaneEquation.h>
+#include <android/gui/Pose.h>
+#include <android/gui/Position.h>
+#include <android/gui/RenderLayerReferenceSpaceType.h>
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 #include <android/gui/TrustedPresentationThresholds.h>
 #include <android/native_window.h>
 #include <gui/DisplayLuts.h>
@@ -255,6 +273,15 @@ struct layer_state_t {
         eAppContentPriorityChanged = 0x100000'00000000,
         eClientDrawnCornerRadiusChanged = 0x200000'00000000,
         eBorderSettingsChanged = 0x400000'00000000,
+        // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+        ePlaneEquationChanged = 0x800000'00000000,
+        eReferenceSpaceTypeChanged = 0x1000000'00000000,
+        eCompositionLayerTypeChanged = 0x2000000'00000000,
+        ePoseChanged = 0x4000000'00000000,
+        eQuadSizeChanged = 0x8000000'00000000,
+        eFrustumChanged = 0x10000000'00000000,
+        eLayerVisibilityChanged = 0x20000000'00000000,
+        // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
     };
 
     layer_state_t();
@@ -278,7 +305,13 @@ struct layer_state_t {
             layer_state_t::eClientDrawnCornerRadiusChanged | layer_state_t::eCropChanged |
             layer_state_t::eDestinationFrameChanged | layer_state_t::eMatrixChanged |
             layer_state_t::ePositionChanged | layer_state_t::eTransformToDisplayInverseChanged |
-            layer_state_t::eTransparentRegionChanged | layer_state_t::eEdgeExtensionChanged;
+            layer_state_t::eTransparentRegionChanged | layer_state_t::eEdgeExtensionChanged |
+            // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+            layer_state_t::ePlaneEquationChanged | layer_state_t::eReferenceSpaceTypeChanged |
+            layer_state_t::eCompositionLayerTypeChanged | layer_state_t::ePoseChanged |
+            layer_state_t::eQuadSizeChanged | layer_state_t::eFrustumChanged |
+            layer_state_t::eLayerVisibilityChanged;
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
     // Buffer and related updates.
     static constexpr uint64_t BUFFER_CHANGES = layer_state_t::eApiChanged |
@@ -386,6 +419,16 @@ struct layer_state_t {
     float cornerRadius;
     float clientDrawnCornerRadius;
     uint32_t backgroundBlurRadius;
+    // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+    gui::CompositionLayerType compositionLayerType;
+    gui::RenderLayerReferenceSpaceType referenceSpaceType;
+    gui::Frustum frustum;
+    gui::Pose pose;
+    gui::PlaneEquation planeEquation;
+    gui::LayerVisibilityType layerVisibilityType;
+    float quadWidth;
+    float quadHeight;
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
     half4 color;
 

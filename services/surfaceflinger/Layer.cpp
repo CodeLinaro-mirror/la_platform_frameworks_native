@@ -14,18 +14,14 @@
  * limitations under the License.
  */
 
-// QTI_BEGIN: 2023-01-24: Display: sf: Add support for multiple displays
-/* Changes from Qualcomm Innovation Center are provided under the following license:
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+/* Changes from Qualcomm Technologies, Inc. are provided under the following license:
  *
-// QTI_END: 2023-01-24: Display: sf: Add support for multiple displays
-// QTI_BEGIN: 2024-02-28: Display: sf: Add check for unknown dataspace
- * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
-// QTI_END: 2024-02-28: Display: sf: Add check for unknown dataspace
-// QTI_BEGIN: 2023-01-24: Display: sf: Add support for multiple displays
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
-// QTI_END: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
 
 #pragma clang diagnostic push
@@ -183,7 +179,19 @@ Layer::Layer(const surfaceflinger::LayerCreationArgs& args)
     mOwnerAppId = mOwnerUid % PER_USER_RANGE;
 
     mPotentialCursor = args.flags & ISurfaceComposerClient::eCursorWindow;
-// QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
+
+    // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+    mDrawingState.compositionLayerType = gui::CompositionLayerType::COMPOSITION_LAYER_NONE;
+    mDrawingState.layerVisibilityType = gui::LayerVisibilityType::LAYER_VISIBILITY_NONE;
+    mDrawingState.referenceSpaceType =
+            gui::RenderLayerReferenceSpaceType::RENDER_LAYER_REFERENCE_SPACE_NONE;
+    mDrawingState.frustum = gui::Frustum();
+    mDrawingState.pose = gui::Pose();
+    mDrawingState.planeEquation = gui::PlaneEquation();
+    mDrawingState.quadWidth = 0.0;
+    mDrawingState.quadHeight = 0.0;
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
+    // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
     mQtiLayerClass = mFlinger->mQtiSFExtnIntf->qtiGetLayerClass(mName);
 // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
 }
@@ -410,6 +418,67 @@ bool Layer::setCrop(const FloatRect& crop) {
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
+
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+bool Layer::setPlaneEquation(gui::PlaneEquation planeEquation) {
+    if (mDrawingState.planeEquation == planeEquation) return false;
+    mDrawingState.sequence++;
+    mDrawingState.planeEquation = planeEquation;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setReferenceSpaceType(gui::RenderLayerReferenceSpaceType referenceSpaceType) {
+    if (mDrawingState.referenceSpaceType == referenceSpaceType) return false;
+    mDrawingState.sequence++;
+    mDrawingState.referenceSpaceType = referenceSpaceType;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setCompositionLayerType(gui::CompositionLayerType compositionLayerType) {
+    if (mDrawingState.compositionLayerType == compositionLayerType) return false;
+    mDrawingState.sequence++;
+    mDrawingState.compositionLayerType = compositionLayerType;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setLayerVisibilityType(gui::LayerVisibilityType layerVisibilityType) {
+    if (mDrawingState.layerVisibilityType == layerVisibilityType) return false;
+    mDrawingState.sequence++;
+    mDrawingState.layerVisibilityType = layerVisibilityType;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setPose(gui::Pose pose) {
+    if (mDrawingState.pose == pose) return false;
+    mDrawingState.sequence++;
+    mDrawingState.pose = pose;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setQuadSize(float quadWidth, float quadHeight) {
+    if ((mDrawingState.quadWidth == quadWidth) && (mDrawingState.quadHeight == quadHeight)) {
+        return false;
+    }
+    mDrawingState.sequence++;
+    mDrawingState.quadWidth = quadWidth;
+    mDrawingState.quadHeight = quadHeight;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setFrustum(gui::Frustum frustum) {
+    if (mDrawingState.frustum == frustum) return false;
+    mDrawingState.sequence++;
+    mDrawingState.frustum = frustum;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 bool Layer::isLayerFocusedBasedOnPriority(int32_t priority) {
     return priority == PRIORITY_FOCUSED_WITH_MODE || priority == PRIORITY_FOCUSED_WITHOUT_MODE;

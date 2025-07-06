@@ -1,4 +1,5 @@
-/* Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+/*
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 #pragma once
@@ -34,6 +35,21 @@ public:
                                  uint32_t dataspace) override;
     Error qtiSetLayerFlag(Display display, V2_1_Layer layer,
                           uint32_t layerFlag) override;
+    Error qtiSetCompositionLayerType(Display display, V2_1_Layer layer,
+                                     gui::CompositionLayerType compositionLayerType) override;
+    Error qtiSetLayerVisibilityType(Display display, V2_1_Layer layer,
+                                    gui::LayerVisibilityType layerVisibilityType) override;
+    Error qtiSetReferenceSpaceType(Display display, V2_1_Layer layer,
+                                   gui::RenderLayerReferenceSpaceType referenceSpaceType) override;
+    Error qtiSetFrustum(Display display, V2_1_Layer layer, gui::Frustum frustum) override;
+    Error qtiSetPose(Display display, V2_1_Layer layer, gui::Pose pose) override;
+    Error qtiSetPlaneEquation(Display display, V2_1_Layer layer,
+                              gui::PlaneEquation planeEquation) override;
+    Error qtiSetQuadSize(Display display, V2_1_Layer layer, float quadWidth,
+                         float quadHeight) override;
+    Error qtiSetDisplayConfig(Display display,
+                              const gui::DisplayDeviceConfig& displayDeviceConfig) override;
+
 private:
     Hwc2::AidlComposer* mQtiAidlComposer = nullptr;
 };

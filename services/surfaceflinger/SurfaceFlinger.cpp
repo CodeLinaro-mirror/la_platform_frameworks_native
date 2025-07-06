@@ -14,18 +14,14 @@
  * limitations under the License.
  */
 
-// QTI_BEGIN: 2023-01-17: Display: sf: Introduce QTI Extensions in AOSP
-/* Changes from Qualcomm Innovation Center are provided under the following license:
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+/* Changes from Qualcomm Technologies, Inc. are provided under the following license:
  *
-// QTI_END: 2023-01-17: Display: sf: Introduce QTI Extensions in AOSP
-// QTI_BEGIN: 2025-06-02: Display: sf: update layer class setting with LayerFE objects
- * Copyright (c) 2023-2025 Qualcomm Innovation Center, Inc. All rights reserved.
-// QTI_END: 2025-06-02: Display: sf: update layer class setting with LayerFE objects
-// QTI_BEGIN: 2023-01-17: Display: sf: Introduce QTI Extensions in AOSP
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
-// QTI_END: 2023-01-17: Display: sf: Introduce QTI Extensions in AOSP
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wconversion"
@@ -5754,6 +5750,44 @@ uint32_t SurfaceFlinger::updateLayerCallbacksAndStats(const FrameTimelineInfo& f
             flags |= eTraversalNeeded;
         }
     }
+
+    // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+    if (what & layer_state_t::ePlaneEquationChanged) {
+        if (layer->setPlaneEquation(s.planeEquation)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    if (what & layer_state_t::eReferenceSpaceTypeChanged) {
+        if (layer->setReferenceSpaceType(s.referenceSpaceType)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    if (what & layer_state_t::eLayerVisibilityChanged) {
+        if (layer->setLayerVisibilityType(s.layerVisibilityType)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    if (what & layer_state_t::eCompositionLayerTypeChanged) {
+        if (layer->setCompositionLayerType(s.compositionLayerType)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    if (what & layer_state_t::ePoseChanged) {
+        if (layer->setPose(s.pose)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    if (what & layer_state_t::eQuadSizeChanged) {
+        if (layer->setQuadSize(s.quadWidth, s.quadHeight)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    if (what & layer_state_t::eFrustumChanged) {
+        if (layer->setFrustum(s.frustum)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
     if (what & layer_state_t::eBufferChanged) {
         std::optional<ui::Transform::RotationFlags> transformHint = std::nullopt;
         if (snapshot) {
@@ -9966,6 +10000,14 @@ binder::Status SurfaceComposerAIDL::setDisplayBrightness(const sp<IBinder>& disp
     }
     return binderStatusFromStatusT(status);
 }
+
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+binder::Status SurfaceComposerAIDL::setDisplayConfig(
+        const sp<IBinder>& displayToken, const gui::DisplayDeviceConfig& displayDeviceConfig) {
+    mFlinger->mQtiSFExtnIntf->qtiSetDisplayConfig(displayToken, displayDeviceConfig);
+    return binder::Status::ok();
+}
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 binder::Status SurfaceComposerAIDL::addHdrLayerInfoListener(
         const sp<IBinder>& displayToken, const sp<gui::IHdrLayerInfoListener>& listener) {

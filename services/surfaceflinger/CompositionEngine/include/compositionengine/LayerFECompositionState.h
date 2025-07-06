@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-// QTI_BEGIN: 2023-01-24: Display: sf: Add support for multiple displays
-/* Changes from Qualcomm Innovation Center are provided under the following license:
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+/* Changes from Qualcomm Technologies, Inc. are provided under the following license:
  *
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
-// QTI_END: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 #pragma once
 
 #include <cstdint>
@@ -45,6 +45,16 @@
 #pragma clang diagnostic ignored "-Wconversion"
 #pragma clang diagnostic ignored "-Wextra"
 
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#include <android/gui/CompositionLayerType.h>
+#include <android/gui/Frustum.h>
+#include <android/gui/LayerVisibilityType.h>
+#include <android/gui/Orientation.h>
+#include <android/gui/PlaneEquation.h>
+#include <android/gui/Pose.h>
+#include <android/gui/Position.h>
+#include <android/gui/RenderLayerReferenceSpaceType.h>
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 #include <gui/BufferQueue.h>
 #include <ui/EdgeExtensionEffect.h>
 #include <ui/GraphicBuffer.h>
@@ -255,8 +265,17 @@ struct LayerFECompositionState {
 // QTI_END: 2023-01-24: Display: sf: Add support for multiple displays
 // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
     uint32_t qtiLayerClass; // Layer Classification
-// QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
-
+                            // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
+                            // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API
+    gui::CompositionLayerType qtiCompositionLayerType;
+    gui::RenderLayerReferenceSpaceType qtiReferenceSpaceType;
+    gui::LayerVisibilityType qtiLayerVisibilityType;
+    gui::Frustum qtiFrustum;
+    gui::Pose qtiPose;
+    gui::PlaneEquation qtiPlaneEquation;
+    float qtiQuadWidth;
+    float qtiQuadHeight;
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API
 };
 
 } // namespace android::compositionengine
