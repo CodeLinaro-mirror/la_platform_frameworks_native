@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-/* Changes from Qualcomm Innovation Center are provided under the following license:
- *
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
@@ -47,6 +47,17 @@
 #include <compositionengine/LayerFECompositionState.h>
 #include <scheduler/Fps.h>
 #include <scheduler/Seamlessness.h>
+
+/* QTI_BEGIN */
+#include <android/gui/CompositionLayerType.h>
+#include <android/gui/Frustum.h>
+#include <android/gui/LayerVisibilityType.h>
+#include <android/gui/Orientation.h>
+#include <android/gui/PlaneEquation.h>
+#include <android/gui/Pose.h>
+#include <android/gui/Position.h>
+#include <android/gui/RenderLayerReferenceSpaceType.h>
+/* QTI_END */
 
 #include <chrono>
 #include <cstdint>
@@ -241,6 +252,16 @@ public:
         gui::CachingHint cachingHint = gui::CachingHint::Enabled;
         int64_t latchedVsyncId = 0;
         bool useVsyncIdForRefreshRateSelection = false;
+        /* QTI_BEGIN */
+        gui::CompositionLayerType compositionLayerType;
+        gui::LayerVisibilityType layerVisibilityType;
+        gui::RenderLayerReferenceSpaceType referenceSpaceType;
+        gui::Frustum frustum;
+        gui::Pose pose;
+        gui::PlaneEquation planeEquation;
+        float quadWidth;
+        float quadHeight;
+        /* QTI_END */
     };
 
     explicit Layer(const LayerCreationArgs& args);
@@ -281,6 +302,16 @@ public:
     virtual bool setRelativeLayer(const sp<IBinder>& relativeToHandle, int32_t relativeZ);
 
     virtual bool setAlpha(float alpha);
+    /* QTI_BEGIN */
+    virtual bool setPlaneEquation(gui::PlaneEquation planeEquation);
+    virtual bool setReferenceSpaceType(gui::RenderLayerReferenceSpaceType referenceSpaceType);
+    virtual bool setCompositionLayerType(gui::CompositionLayerType compositionLayerType);
+    virtual bool setLayerVisibilityType(gui::LayerVisibilityType layerVisibilityType);
+    virtual bool setPose(gui::Pose pose);
+    virtual bool setQuadSize(float quadWidth, float quadHeight);
+    virtual bool setFrustum(gui::Frustum frustum);
+    /* QTI_END */
+
     bool setColor(const half3& /*color*/);
 
     // Set rounded corner radius for this layer and its children.
