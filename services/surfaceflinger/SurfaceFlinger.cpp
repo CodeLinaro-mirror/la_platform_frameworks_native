@@ -2957,7 +2957,8 @@ CompositeResultsPerDisplay SurfaceFlinger::composite(
     if (!FlagManager::getInstance().ce_fence_promise()) {
         refreshArgs.layersWithQueuedFrames.reserve(mLayersWithQueuedFrames.size());
         for (auto& layer : mLayersWithQueuedFrames) {
-            if (const auto& layerFE = layer->getCompositionEngineLayerFE())
+            if (const auto& layerFE = layer->getCompositionEngineLayerFE(
+                        {static_cast<uint32_t>(layer->sequence)}))
                 refreshArgs.layersWithQueuedFrames.push_back(layerFE);
         }
     }
@@ -3037,7 +3038,8 @@ CompositeResultsPerDisplay SurfaceFlinger::composite(
 
         refreshArgs.layersWithQueuedFrames.reserve(mLayersWithQueuedFrames.size());
         for (auto& layer : mLayersWithQueuedFrames) {
-            if (const auto& layerFE = layer->getCompositionEngineLayerFE()) {
+            if (const auto& layerFE = layer->getCompositionEngineLayerFE(
+                        {static_cast<uint32_t>(layer->sequence)})) {
                 refreshArgs.layersWithQueuedFrames.push_back(layerFE);
                 // Some layers are not displayed and do not yet have a future release fence
                 if (layerFE->getReleaseFencePromiseStatus() ==
@@ -4347,7 +4349,6 @@ void SurfaceFlinger::commitTransactionsLocked(uint32_t transactionFlags) {
             mFrontEndDisplayInfos.try_emplace(display->getLayerStack(), display->getFrontEndInfo());
         }
     }
-    mForceTransactionDisplayChange = displayTransactionNeeded;
 
     if (mSomeChildrenChanged) {
         mVisibleRegionsDirty = true;
