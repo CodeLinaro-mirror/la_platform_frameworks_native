@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+/* Changes from Qualcomm Innovation Center are provided under the following license:
+ *
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 #define LOG_TAG "Surface"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 //#define LOG_NDEBUG 0
@@ -58,6 +64,10 @@
 #include <gui/BufferItem.h>
 
 #include <com_android_graphics_libgui_flags.h>
+
+#ifdef QTI_VIDEO_EXTENSION
+#include <cutils/properties.h>
+#endif
 
 namespace android {
 
@@ -175,9 +185,24 @@ Surface::Surface(const sp<IGraphicBufferProducer>& bufferProducer, bool controll
     mSwapIntervalZero = false;
     mMaxBufferCount = NUM_BUFFER_SLOTS;
     mSurfaceControlHandle = surfaceControlHandle;
+
+#ifdef QTI_VIDEO_EXTENSION
+    char value[PROPERTY_VALUE_MAX];
+    int intValue = 0;
+    property_get("vendor.gpp.create_frc_extension", value, "0");
+    intValue = atoi(value);
+    if (!mQtiSurfaceGPPExtn && intValue == 1) {
+        mQtiSurfaceGPPExtn = std::make_shared<libguiextension::QtiSurfaceExtensionGPP>(IGraphicBufferProducer::asBinder(bufferProducer), &mGraphicBufferProducer);
+    }
+#endif
 }
 
 Surface::~Surface() {
+
+#ifdef QTI_VIDEO_EXTENSION
+    mQtiSurfaceGPPExtn = nullptr;
+#endif
+
     if (mConnectedToCpu) {
         Surface::disconnect(NATIVE_WINDOW_API_CPU);
     }
@@ -213,6 +238,12 @@ sp<IGraphicBufferProducer> Surface::getIGraphicBufferProducer() const {
 
 void Surface::setSidebandStream(const sp<NativeHandle>& stream) {
     mGraphicBufferProducer->setSidebandStream(stream);
+
+#ifdef QTI_VIDEO_EXTENSION
+    if (mQtiSurfaceGPPExtn) {
+        mQtiSurfaceGPPExtn->setSidebandStream(stream);
+    }
+#endif
 }
 
 void Surface::allocateBuffers() {
@@ -670,6 +701,12 @@ int Surface::dequeueBuffer(sp<GraphicBuffer>* buffer, int* fenceFd) {
     }
     SURF_LOGV("Surface::dequeueBuffer");
 
+#ifdef QTI_VIDEO_EXTENSION
+    if (mQtiSurfaceGPPExtn) {
+        mQtiSurfaceGPPExtn->DynamicEnable(&mGraphicBufferProducer);
+    }
+#endif
+
     IGraphicBufferProducer::DequeueBufferInput dqInput;
     {
         Mutex::Autolock lock(mMutex);
@@ -848,6 +885,12 @@ int Surface::dequeueBuffers(std::vector<BatchBuffer>* buffers) {
 
     ATRACE_CALL();
     SURF_LOGV("Surface::dequeueBuffers");
+
+#ifdef QTI_VIDEO_EXTENSION
+    if (mQtiSurfaceGPPExtn) {
+        mQtiSurfaceGPPExtn->DynamicEnable(&mGraphicBufferProducer);
+    }
+#endif
 
     if (buffers->size() == 0) {
         SURF_LOGE("%s: must dequeue at least 1 buffer!", __FUNCTION__);
@@ -2156,6 +2199,12 @@ int Surface::connect(int api, const sp<SurfaceListener>& listener, bool reportBu
     IGraphicBufferProducer::QueueBufferOutput output;
     mReportRemovedBuffers = reportBufferRemoval;
 
+#ifdef QTI_VIDEO_EXTENSION
+    if (mQtiSurfaceGPPExtn) {
+        mQtiSurfaceGPPExtn->Connect(api, &mGraphicBufferProducer);
+    }
+#endif
+
     if (listener != nullptr) {
         mListenerProxy = sp<ProducerListenerProxy>::make(wp<Surface>::fromExisting(this), listener);
     }
@@ -2179,6 +2228,12 @@ int Surface::connect(int api, const sp<SurfaceListener>& listener, bool reportBu
         }
 
         mConsumerRunningBehind = (output.numPendingBuffers >= 2);
+
+#ifdef QTI_VIDEO_EXTENSION
+        if (mQtiSurfaceGPPExtn) {
+            mQtiSurfaceGPPExtn->StoreConnect(api, mListenerProxy, reportBufferRemoval);
+        }
+#endif
 
 #if !defined(NO_BINDER)
         if (listener && listener->needsDeathNotify()) {
@@ -2251,6 +2306,12 @@ int Surface::disconnect(int api, IGraphicBufferProducer::DisconnectMode mode) {
     mDebugName = mDebugName + "-DISCONNECTED";
     mId = 0;
     mIsConnected = false;
+
+#ifdef QTI_VIDEO_EXTENSION
+    if (mQtiSurfaceGPPExtn) {
+        mQtiSurfaceGPPExtn->Disconnect(api, &mGraphicBufferProducer);
+    }
+#endif
 
 #if !defined(NO_BINDER)
     if (mSurfaceDeathListener != nullptr) {
