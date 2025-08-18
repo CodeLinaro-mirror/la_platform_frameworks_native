@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+/* Changes from Qualcomm Innovation Center are provided under the following license:
+ *
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 #ifndef ANDROID_GUI_SURFACE_H
 #define ANDROID_GUI_SURFACE_H
 
@@ -34,7 +40,17 @@
 #include <shared_mutex>
 #include <unordered_set>
 
+#ifdef QTI_VIDEO_EXTENSION
+#include "../../QtiExtension/QtiSurfaceExtensionGPP.h"
+#endif
+
 namespace android {
+
+#ifdef QTI_VIDEO_EXTENSION
+namespace libguiextension {
+class QtiSurfaceExtensionGPP;
+}
+#endif
 
 class GraphicBuffer;
 
@@ -753,6 +769,10 @@ protected:
 
     // Buffers that are successfully dequeued/attached and handed to clients
     std::unordered_set<int> mDequeuedSlots;
+
+#ifdef QTI_VIDEO_EXTENSION
+    std::shared_ptr<libguiextension::QtiSurfaceExtensionGPP> mQtiSurfaceGPPExtn = nullptr;
+#endif
 };
 
 } // namespace android
