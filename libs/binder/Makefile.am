@@ -60,12 +60,16 @@ libbinderstreaming_la_CPPFLAGS += -DDEBUG_REFS_CALLSTACK_ENABLED=0
 
 if USE_GLIB
 libbinderstreaming_la_CFLAGS := $(AM_CFLAGS) -DUSE_GLIB @GLIB_CFLAGS@
-libbinderstreaming_la_CPPFLAGS += -std=c++11 -DHAVE_PTHREADS -DHAVE_ANDROID_OS -DUSE_GLIB -Dstrlcat=g_strlcat @GLIB_CFLAGS@ -include glib.h
+libbinderstreaming_la_CPPFLAGS += -std=c++11 -DHAVE_PTHREADS -DHAVE_ANDROID_OS -DUSE_GLIB @GLIB_CFLAGS@ -include glib.h
 libbinderstreaming_la_LDFLAGS := -llog -lcutils -lpthread -lutils -lbase $(GLIB_LIBS)
 else
 libbinderstreaming_la_CFLAGS := $(AM_CFLAGS)
 libbinderstreaming_la_CPPFLAGS += -std=c++11 -DHAVE_PTHREADS -DHAVE_ANDROID_OS
 libbinderstreaming_la_LDFLAGS := -llog -lcutils -lpthread -lutils -lbase
+endif
+
+if USE_G_STRLCAT
+libbinderstreaming_la_CPPFLAGS += -Dstrlcat=g_strlcat
 endif
 
 # Export headers

@@ -287,7 +287,9 @@ void BpMemoryHeap::assertMapped() const
                 mBase   = heap->mBase;
                 mSize   = heap->mSize;
                 mOffset = heap->mOffset;
-                android_atomic_write( dup( heap->mHeapId ), &mHeapId );
+                int32_t arg1 = dup( heap->mHeapId );
+                volatile int32_t* arg2 = &mHeapId;
+                android_atomic_write( arg1, arg2);
             }
         } else {
             // something went wrong
