@@ -76,6 +76,7 @@ namespace android::compositionengine::impl {
 std::shared_ptr<Display> createDisplay(
         const compositionengine::CompositionEngine& compositionEngine,
         const compositionengine::DisplayCreationArgs& args) {
+    QtiOutputExtension::qtiInit();
     return createDisplayTemplated<Display>(compositionEngine, args);
 }
 

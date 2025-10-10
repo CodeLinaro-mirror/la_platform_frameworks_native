@@ -1,4 +1,4 @@
-/* Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 #pragma once
@@ -15,6 +15,7 @@ public:
     QtiOutputExtension() = default;
     ~QtiOutputExtension() = default;
 
+    static void qtiInit();
     static bool qtiIsProtectedContent(const Output* output);
     static bool qtiHasSecureDisplay(const Output* output);
     static bool qtiHasSecureOrProtectedContent(const Output* output);
@@ -23,6 +24,9 @@ public:
     static void qtiSetLayerType(HWC2::Layer* layerId, uint32_t type, const char* debugName);
     static bool qtiUseSpecFence(void);
     static void qtiGetVisibleLayerInfo(const Output* output);
+
+private:
+    static bool secure_gpu_comp_;
 };
 
 } // namespace android::compositionengineextension

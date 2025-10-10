@@ -1,4 +1,4 @@
-/* Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 // #define LOG_NDEBUG 0
@@ -7,7 +7,6 @@
 #include "../../QtiExtension/QtiExtensionContext.h"
 #include "aidl/android/hardware/graphics/common/DisplayDecorationSupport.h"
 #include "aidl/android/hardware/graphics/composer3/DisplayCapability.h"
-
 #define LOG_TAG "QtiCompositionEngineExtension"
 #include <log/log.h>
 
@@ -15,11 +14,20 @@ using android::surfaceflingerextension::QtiExtensionContext;
 
 namespace android::compositionengineextension {
 
+bool QtiOutputExtension::secure_gpu_comp_ = false;
+
+void QtiOutputExtension::qtiInit() {
+    auto sfext = QtiExtensionContext::instance().getQtiSurfaceFlingerExtn();
+    if (sfext) {
+        secure_gpu_comp_ = sfext->qtiIsExtensionFeatureEnabled(
+                surfaceflingerextension::QtiFeature::kAllowSecureCamGpuComp);
+    }
+}
+
 bool QtiOutputExtension::qtiIsProtectedContent(const compositionengine::impl::Output* output) {
     if (!output) {
         return false;
     }
-
     bool qtiHasSecureCamera = false;
     bool qtiHasSecureDisplay = false;
     bool qtiNeedsProtected = false;
@@ -35,7 +43,9 @@ bool QtiOutputExtension::qtiIsProtectedContent(const compositionengine::impl::Ou
             qtiNeedsProtected = true;
         }
     }
-
+    if (secure_gpu_comp_) {
+        return !qtiHasSecureDisplay && qtiNeedsProtected;
+    }
     return !qtiHasSecureCamera && !qtiHasSecureDisplay && qtiNeedsProtected;
 }
 
