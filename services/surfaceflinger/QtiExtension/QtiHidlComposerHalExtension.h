@@ -1,4 +1,5 @@
-/* Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+/*
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 #pragma once
@@ -34,6 +35,36 @@ public:
 
     Error qtiSetDisplayElapseTime(Display display, uint64_t timeStamp) override;
     Error qtiSetLayerType(Display display, V2_1_Layer layer, uint32_t type) override;
+    Error qtiSetCompositionLayerType(Display display, V2_1_Layer layer,
+                                     gui::CompositionLayerType compositionLayerType) override {
+        return Error::NONE;
+    }
+    Error qtiSetLayerVisibilityType(Display display, V2_1_Layer layer,
+                                    gui::LayerVisibilityType layerVisibilityType) override {
+        return Error::NONE;
+    }
+    Error qtiSetReferenceSpaceType(Display display, V2_1_Layer layer,
+                                   gui::RenderLayerReferenceSpaceType referenceSpaceType) override {
+        return Error::NONE;
+    }
+    Error qtiSetFrustum(Display display, V2_1_Layer layer, gui::Frustum frustum) override {
+        return Error::NONE;
+    }
+    Error qtiSetPose(Display display, V2_1_Layer layer, gui::Pose pose) override {
+        return Error::NONE;
+    }
+    Error qtiSetPlaneEquation(Display display, V2_1_Layer layer,
+                              gui::PlaneEquation planeEquation) override {
+        return Error::NONE;
+    }
+    Error qtiSetQuadSize(Display display, V2_1_Layer layer, float quadWidth,
+                         float quadHeight) override {
+        return Error::NONE;
+    }
+    Error qtiSetDisplayConfig(Display display,
+                              const gui::DisplayDeviceConfig& displayDeviceConfig) {
+        return Error::NONE;
+    }
     Error qtiSetLayerFlag(Display display, V2_1_Layer layer,
                           uint32_t layerFlag) override;
     Error qtiSetClientTarget_3_1(Display display, int32_t slot, int acquireFence,

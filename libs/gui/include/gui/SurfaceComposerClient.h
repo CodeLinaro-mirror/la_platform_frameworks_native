@@ -57,6 +57,8 @@
 #include <math/vec3.h>
 
 #include <aidl/android/hardware/graphics/common/DisplayDecorationSupport.h>
+
+/* QTI_BEGIN */
 #include <android/gui/CompositionLayerType.h>
 #include <android/gui/DisplayDeviceConfig.h>
 #include <android/gui/Frustum.h>
@@ -66,6 +68,7 @@
 #include <android/gui/Pose.h>
 #include <android/gui/Position.h>
 #include <android/gui/RenderLayerReferenceSpaceType.h>
+/* QTI_END */
 
 namespace android {
 
@@ -335,9 +338,11 @@ public:
     static std::optional<aidl::android::hardware::graphics::common::DisplayDecorationSupport>
     getDisplayDecorationSupport(const sp<IBinder>& displayToken);
 
+    /* QTI_BEGIN */
     // Sets display config on the connected display.
     static status_t setDisplayConfig(const sp<IBinder>& display,
                                      gui::DisplayDeviceConfig& displayDeviceConfig);
+    /* QTI_END */
 
     // ------------------------------------------------------------------------
     // surface creation / destruction
@@ -570,6 +575,7 @@ public:
         Transaction& unsetBuffer(const sp<SurfaceControl>& sc);
         std::shared_ptr<BufferData> getAndClearBuffer(const sp<SurfaceControl>& sc);
 
+        /* QTI_BEGIN */
         // Sets the reference space type of a layer with the specified type
         Transaction& setReferenceSpaceType(
                 const sp<SurfaceControl>& sc,
@@ -600,6 +606,7 @@ public:
         // Sets the visibility type of a layer with specified type
         Transaction& setLayerVisibilityType(const sp<SurfaceControl>& sc,
                                             const gui::LayerVisibilityType& layerVisibilityType);
+        /* QTI_END */
 
         /**
          * If this transaction, has a a buffer set for the given SurfaceControl
