@@ -1099,13 +1099,15 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::merge(Tr
 
     for (const auto& [listener, callbackInfo] : other.mListenerCallbacks) {
         auto& [callbackIds, surfaceControls] = callbackInfo;
-        mListenerCallbacks[listener].callbackIds.insert(std::make_move_iterator(
+        if (!callbackIds.empty() && listener != nullptr) {
+            mListenerCallbacks[listener].callbackIds.insert(std::make_move_iterator(
                                                                 callbackIds.begin()),
                                                         std::make_move_iterator(callbackIds.end()));
-
-        mListenerCallbacks[listener].surfaceControls.insert(surfaceControls.begin(),
+        }
+        if(!surfaceControls.empty() && listener != nullptr){
+            mListenerCallbacks[listener].surfaceControls.insert(surfaceControls.begin(),
                                                             surfaceControls.end());
-
+        }
         auto& currentProcessCallbackInfo =
                 mListenerCallbacks[TransactionCompletedListener::getIInstance()];
         currentProcessCallbackInfo.surfaceControls
@@ -1113,10 +1115,12 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::merge(Tr
                         std::make_move_iterator(surfaceControls.end()));
 
         // register all surface controls for all callbackIds for this listener that is merging
-        for (const auto& surfaceControl : currentProcessCallbackInfo.surfaceControls) {
-            mTransactionCompletedListener
+        if (mTransactionCompletedListener) {
+            for (const auto& surfaceControl : currentProcessCallbackInfo.surfaceControls) {
+                mTransactionCompletedListener
                     ->addSurfaceControlToCallbacks(surfaceControl,
                                                    currentProcessCallbackInfo.callbackIds);
+            }
         }
     }
 
