@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-/* Changes from Qualcomm Innovation Center are provided under the following license:
- *
- * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
@@ -5405,6 +5405,44 @@ uint32_t SurfaceFlinger::setClientStateLocked(const FrameTimelineInfo& frameTime
         layer->setDesiredPresentTime(desiredPresentTime, isAutoTimestamp);
     }
 
+    /* QTI_BEGIN */
+    if (what & layer_state_t::ePlaneEquationChanged) {
+        if (layer->setPlaneEquation(s.planeEquation)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    if (what & layer_state_t::eReferenceSpaceTypeChanged) {
+        if (layer->setReferenceSpaceType(s.referenceSpaceType)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    if (what & layer_state_t::eLayerVisibilityChanged) {
+        if (layer->setLayerVisibilityType(s.layerVisibilityType)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    if (what & layer_state_t::eCompositionLayerTypeChanged) {
+        if (layer->setCompositionLayerType(s.compositionLayerType)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    if (what & layer_state_t::ePoseChanged) {
+        if (layer->setPose(s.pose)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    if (what & layer_state_t::eQuadSizeChanged) {
+        if (layer->setQuadSize(s.quadWidth, s.quadHeight)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    if (what & layer_state_t::eFrustumChanged) {
+        if (layer->setFrustum(s.frustum)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    /* QTI_END */
+
     if (what & layer_state_t::eTrustedPresentationInfoChanged) {
         if (layer->setTrustedPresentationInfo(s.trustedPresentationThresholds,
                                               s.trustedPresentationListener)) {
@@ -9484,6 +9522,14 @@ binder::Status SurfaceComposerAIDL::setDisplayBrightness(const sp<IBinder>& disp
     }
     return binderStatusFromStatusT(status);
 }
+
+/* QTI_BEGIN */
+binder::Status SurfaceComposerAIDL::setDisplayConfig(
+        const sp<IBinder>& displayToken, const gui::DisplayDeviceConfig& displayDeviceConfig) {
+    mFlinger->mQtiSFExtnIntf->qtiSetDisplayConfig(displayToken, displayDeviceConfig);
+    return binder::Status::ok();
+}
+/* QTI_END */
 
 binder::Status SurfaceComposerAIDL::addHdrLayerInfoListener(
         const sp<IBinder>& displayToken, const sp<gui::IHdrLayerInfoListener>& listener) {

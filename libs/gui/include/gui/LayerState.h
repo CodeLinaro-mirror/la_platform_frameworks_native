@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 #ifndef ANDROID_SF_LAYER_STATE_H
 #define ANDROID_SF_LAYER_STATE_H
 
@@ -22,6 +28,16 @@
 #include <sys/types.h>
 
 #include <android/gui/IWindowInfosReportedListener.h>
+/* QTI_BEGIN */
+#include <android/gui/CompositionLayerType.h>
+#include <android/gui/Frustum.h>
+#include <android/gui/LayerVisibilityType.h>
+#include <android/gui/Orientation.h>
+#include <android/gui/PlaneEquation.h>
+#include <android/gui/Pose.h>
+#include <android/gui/Position.h>
+#include <android/gui/RenderLayerReferenceSpaceType.h>
+/* QTI_END */
 #include <android/gui/TrustedPresentationThresholds.h>
 #include <android/native_window.h>
 #include <gui/IGraphicBufferProducer.h>
@@ -217,6 +233,15 @@ struct layer_state_t {
         eTrustedOverlayChanged = 0x4000'00000000,
         eDropInputModeChanged = 0x8000'00000000,
         eExtendedRangeBrightnessChanged = 0x10000'00000000,
+        /* QTI_BEGIN */
+        ePlaneEquationChanged = 0x20000'00000000,
+        eReferenceSpaceTypeChanged = 0x40000'00000000,
+        eCompositionLayerTypeChanged = 0x80000'00000000,
+        ePoseChanged = 0x100000'00000000,
+        eQuadSizeChanged = 0x200000'00000000,
+        eFrustumChanged = 0x400000'00000000,
+        eLayerVisibilityChanged = 0x800000'00000000,
+        /* QTI_END */
 
     };
 
@@ -241,7 +266,13 @@ struct layer_state_t {
             layer_state_t::eCropChanged | layer_state_t::eDestinationFrameChanged |
             layer_state_t::eMatrixChanged | layer_state_t::ePositionChanged |
             layer_state_t::eTransformToDisplayInverseChanged |
-            layer_state_t::eTransparentRegionChanged;
+            layer_state_t::eTransparentRegionChanged |
+            /* QTI_BEGIN */
+            layer_state_t::ePlaneEquationChanged | layer_state_t::eReferenceSpaceTypeChanged |
+            layer_state_t::eCompositionLayerTypeChanged | layer_state_t::ePoseChanged |
+            layer_state_t::eQuadSizeChanged | layer_state_t::eFrustumChanged |
+            layer_state_t::eLayerVisibilityChanged;
+    /* QTI_END */
 
     // Buffer and related updates.
     static constexpr uint64_t BUFFER_CHANGES = layer_state_t::eApiChanged |
@@ -311,6 +342,16 @@ struct layer_state_t {
     matrix22_t matrix;
     float cornerRadius;
     uint32_t backgroundBlurRadius;
+    /* QTI_BEGIN */
+    gui::CompositionLayerType compositionLayerType;
+    gui::RenderLayerReferenceSpaceType referenceSpaceType;
+    gui::Frustum frustum;
+    gui::Pose pose;
+    gui::PlaneEquation planeEquation;
+    gui::LayerVisibilityType layerVisibilityType;
+    float quadWidth;
+    float quadHeight;
+    /* QTI_END */
 
     sp<SurfaceControl> relativeLayerSurfaceControl;
 

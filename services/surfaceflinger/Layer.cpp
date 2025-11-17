@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-/* Changes from Qualcomm Innovation Center are provided under the following license:
- *
- * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
@@ -233,6 +233,15 @@ Layer::Layer(const LayerCreationArgs& args)
     mProtectedByApp = args.flags & ISurfaceComposerClient::eProtectedByApp;
 
     /* QTI_BEGIN */
+    mDrawingState.compositionLayerType = gui::CompositionLayerType::COMPOSITION_LAYER_NONE;
+    mDrawingState.layerVisibilityType = gui::LayerVisibilityType::LAYER_VISIBILITY_NONE;
+    mDrawingState.referenceSpaceType =
+            gui::RenderLayerReferenceSpaceType::RENDER_LAYER_REFERENCE_SPACE_NONE;
+    mDrawingState.frustum = gui::Frustum();
+    mDrawingState.pose = gui::Pose();
+    mDrawingState.planeEquation = gui::PlaneEquation();
+    mDrawingState.quadWidth = 0.0;
+    mDrawingState.quadHeight = 0.0;
     mQtiLayerClass = mFlinger->mQtiSFExtnIntf->qtiGetLayerClass(mName);
     /* QTI_END */
 
@@ -642,6 +651,14 @@ void Layer::prepareGeometryCompositionState() {
     snapshot->qtiIsSecureCamera = mFlinger->mQtiSFExtnIntf->qtiIsSecureCamera(
             static_cast<sp<const GraphicBuffer>>(getBuffer()));
     snapshot->qtiLayerClass = mQtiLayerClass;
+    snapshot->qtiCompositionLayerType = drawingState.compositionLayerType;
+    snapshot->qtiLayerVisibilityType = drawingState.layerVisibilityType;
+    snapshot->qtiReferenceSpaceType = drawingState.referenceSpaceType;
+    snapshot->qtiFrustum = drawingState.frustum;
+    snapshot->qtiPose = drawingState.pose;
+    snapshot->qtiPlaneEquation = drawingState.planeEquation;
+    snapshot->qtiQuadWidth = drawingState.quadWidth;
+    snapshot->qtiQuadHeight = drawingState.quadHeight;
     /* QTI_END */
 
     snapshot->metadata.clear();
@@ -1024,6 +1041,74 @@ bool Layer::setAlpha(float alpha) {
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
+
+/* QTI_BEGIN */
+bool Layer::setPlaneEquation(gui::PlaneEquation planeEquation) {
+    if (mDrawingState.planeEquation == planeEquation) return false;
+    mDrawingState.sequence++;
+    mDrawingState.planeEquation = planeEquation;
+    mDrawingState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setReferenceSpaceType(gui::RenderLayerReferenceSpaceType referenceSpaceType) {
+    if (mDrawingState.referenceSpaceType == referenceSpaceType) return false;
+    mDrawingState.sequence++;
+    mDrawingState.referenceSpaceType = referenceSpaceType;
+    mDrawingState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setCompositionLayerType(gui::CompositionLayerType compositionLayerType) {
+    if (mDrawingState.compositionLayerType == compositionLayerType) return false;
+    mDrawingState.sequence++;
+    mDrawingState.compositionLayerType = compositionLayerType;
+    mDrawingState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setLayerVisibilityType(gui::LayerVisibilityType layerVisibilityType) {
+    if (mDrawingState.layerVisibilityType == layerVisibilityType) return false;
+    mDrawingState.sequence++;
+    mDrawingState.layerVisibilityType = layerVisibilityType;
+    mDrawingState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setPose(gui::Pose pose) {
+    if (mDrawingState.pose == pose) return false;
+    mDrawingState.sequence++;
+    mDrawingState.pose = pose;
+    mDrawingState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setQuadSize(float quadWidth, float quadHeight) {
+    if ((mDrawingState.quadWidth == quadWidth) && (mDrawingState.quadHeight == quadHeight)) {
+        return false;
+    }
+    mDrawingState.sequence++;
+    mDrawingState.quadWidth = quadWidth;
+    mDrawingState.quadHeight = quadHeight;
+    mDrawingState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setFrustum(gui::Frustum frustum) {
+    if (mDrawingState.frustum == frustum) return false;
+    mDrawingState.sequence++;
+    mDrawingState.frustum = frustum;
+    mDrawingState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+/* QTI_END */
 
 bool Layer::setBackgroundColor(const half3& color, float alpha, ui::Dataspace dataspace) {
     if (!mDrawingState.bgColorLayer && alpha == 0) {

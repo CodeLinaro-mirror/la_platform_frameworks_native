@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 #pragma once
 
 #include <android-base/expected.h>
@@ -46,6 +52,10 @@
 #include <aidl/android/hardware/graphics/composer3/OverlayProperties.h>
 #include <aidl/android/hardware/graphics/composer3/RefreshRateChangedDebugData.h>
 
+/* QTI_BEGIN */
+#include "../QtiExtension/QtiLayerExtension.h"
+/* QTI_END */
+
 namespace android {
 
 class Fence;
@@ -57,6 +67,13 @@ struct DisplayedFrameStats;
 namespace Hwc2 {
 class Composer;
 } // namespace Hwc2
+
+/* QTI_BEGIN */
+namespace layerextension {
+class QtiLayerExtension;
+}
+using layerextension::QtiLayerExtension;
+/* QTI_END */
 
 namespace HWC2 {
 
@@ -367,6 +384,7 @@ public:
         if (mDisplay) return mDisplay->getId();
         return 0;
     }
+    QtiLayerExtension& GetLayerExt() { return mQtiLayerExtn; }
     /* QTI_END */
 
     hal::Error setCursorPosition(int32_t x, int32_t y) override;
@@ -422,6 +440,10 @@ private:
     android::HdrMetadata mHdrMetadata;
     android::mat4 mColorMatrix;
     uint32_t mBufferSlot;
+    /* QTI_BEGIN */
+    friend class QtiLayerExtension;
+    QtiLayerExtension mQtiLayerExtn;
+    /* QTI_END */
 };
 
 } // namespace impl
