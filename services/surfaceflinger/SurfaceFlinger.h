@@ -1592,10 +1592,10 @@ public:
                                           gui::WindowInfosListenerInfo* outInfo) override;
     binder::Status removeWindowInfosListener(
             const sp<gui::IWindowInfosListener>& windowInfosListener) override;
+    /* QTI_BEGIN */
     binder::Status setDisplayConfig(const sp<IBinder>& displayToken,
-                                    const gui::DisplayDeviceConfig& displayDeviceConfig) override {
-        return binder::Status::ok();
-    }
+                                    const gui::DisplayDeviceConfig& displayDeviceConfig) override;
+    /* QTI_END */
 
 private:
     static const constexpr bool kUsePermissionCache = true;

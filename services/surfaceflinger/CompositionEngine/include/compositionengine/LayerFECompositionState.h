@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-/* Changes from Qualcomm Innovation Center are provided under the following license:
- *
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
@@ -39,6 +39,16 @@
 #pragma clang diagnostic ignored "-Wconversion"
 #pragma clang diagnostic ignored "-Wextra"
 
+/* QTI_BEGIN */
+#include <android/gui/CompositionLayerType.h>
+#include <android/gui/Frustum.h>
+#include <android/gui/LayerVisibilityType.h>
+#include <android/gui/Orientation.h>
+#include <android/gui/PlaneEquation.h>
+#include <android/gui/Pose.h>
+#include <android/gui/Position.h>
+#include <android/gui/RenderLayerReferenceSpaceType.h>
+/* QTI_END */
 #include <gui/BufferQueue.h>
 #include <ui/GraphicBuffer.h>
 #include <ui/GraphicTypes.h>
@@ -229,6 +239,15 @@ struct LayerFECompositionState {
     bool qtiIsSecureDisplay{false};
     bool qtiIsSecureCamera{false};
     uint32_t qtiLayerClass; // Layer Classification
+
+    gui::CompositionLayerType qtiCompositionLayerType;
+    gui::RenderLayerReferenceSpaceType qtiReferenceSpaceType;
+    gui::LayerVisibilityType qtiLayerVisibilityType;
+    gui::Frustum qtiFrustum;
+    gui::Pose qtiPose;
+    gui::PlaneEquation qtiPlaneEquation;
+    float qtiQuadWidth;
+    float qtiQuadHeight;
     /* QTI_END */
 };
 
