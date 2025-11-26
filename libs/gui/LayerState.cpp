@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 #define LOG_TAG "LayerState"
 
 #include <cinttypes>
@@ -89,7 +95,16 @@ layer_state_t::layer_state_t()
         borderEnabled(false),
         bufferCrop(Rect::INVALID_RECT),
         destinationFrame(Rect::INVALID_RECT),
-        dropInputMode(gui::DropInputMode::NONE) {
+        dropInputMode(gui::DropInputMode::NONE),
+        /* QTI_BEGIN */
+        compositionLayerType(gui::CompositionLayerType::COMPOSITION_LAYER_NONE),
+        referenceSpaceType(gui::RenderLayerReferenceSpaceType::RENDER_LAYER_REFERENCE_SPACE_NONE),
+        pose(gui::Pose()),
+        planeEquation(gui::PlaneEquation()),
+        frustum(gui::Frustum()),
+        layerVisibilityType(gui::LayerVisibilityType::LAYER_VISIBILITY_NONE),
+        quadWidth(0.0),
+        quadHeight(0.0) /* QTI_END */ {
     matrix.dsdx = matrix.dtdy = 1.0f;
     matrix.dsdy = matrix.dtdx = 0.0f;
     hdrMetadata.validTypes = 0;
@@ -139,6 +154,37 @@ status_t layer_state_t::write(Parcel& output) const
     SAFE_PARCEL(output.write, colorTransform.asArray(), 16 * sizeof(float));
     SAFE_PARCEL(output.writeFloat, cornerRadius);
     SAFE_PARCEL(output.writeUint32, backgroundBlurRadius);
+
+    /* QTI_BEGIN */
+    int tmpInt = static_cast<int>(compositionLayerType);
+    SAFE_PARCEL(output.writeInt32, tmpInt);
+    tmpInt = static_cast<int>(referenceSpaceType);
+    SAFE_PARCEL(output.writeInt32, tmpInt);
+    tmpInt = static_cast<int>(layerVisibilityType);
+    SAFE_PARCEL(output.writeInt32, tmpInt);
+
+    SAFE_PARCEL(output.writeFloat, frustum.angleLeft);
+    SAFE_PARCEL(output.writeFloat, frustum.angleRight);
+    SAFE_PARCEL(output.writeFloat, frustum.angleUp);
+    SAFE_PARCEL(output.writeFloat, frustum.angleDown);
+
+    SAFE_PARCEL(output.writeFloat, pose.pos.x);
+    SAFE_PARCEL(output.writeFloat, pose.pos.y);
+    SAFE_PARCEL(output.writeFloat, pose.pos.z);
+    SAFE_PARCEL(output.writeFloat, pose.orientation.x);
+    SAFE_PARCEL(output.writeFloat, pose.orientation.y);
+    SAFE_PARCEL(output.writeFloat, pose.orientation.z);
+    SAFE_PARCEL(output.writeFloat, pose.orientation.w);
+
+    SAFE_PARCEL(output.writeFloat, planeEquation.a);
+    SAFE_PARCEL(output.writeFloat, planeEquation.b);
+    SAFE_PARCEL(output.writeFloat, planeEquation.c);
+    SAFE_PARCEL(output.writeFloat, planeEquation.d);
+
+    SAFE_PARCEL(output.writeFloat, quadWidth);
+    SAFE_PARCEL(output.writeFloat, quadHeight);
+    /* QTI_END */
+
     SAFE_PARCEL(output.writeParcelable, metadata);
     SAFE_PARCEL(output.writeFloat, bgColor.r);
     SAFE_PARCEL(output.writeFloat, bgColor.g);
@@ -260,6 +306,38 @@ status_t layer_state_t::read(const Parcel& input)
     SAFE_PARCEL(input.read, &colorTransform, 16 * sizeof(float));
     SAFE_PARCEL(input.readFloat, &cornerRadius);
     SAFE_PARCEL(input.readUint32, &backgroundBlurRadius);
+
+    /* QTI_BEGIN */
+    int tmpInt = 0;
+    SAFE_PARCEL(input.readInt32, &tmpInt);
+    compositionLayerType = static_cast<gui::CompositionLayerType>(tmpInt);
+    SAFE_PARCEL(input.readInt32, &tmpInt);
+    referenceSpaceType = static_cast<gui::RenderLayerReferenceSpaceType>(tmpInt);
+    SAFE_PARCEL(input.readInt32, &tmpInt);
+    layerVisibilityType = static_cast<gui::LayerVisibilityType>(tmpInt);
+
+    SAFE_PARCEL(input.readFloat, &frustum.angleLeft);
+    SAFE_PARCEL(input.readFloat, &frustum.angleRight);
+    SAFE_PARCEL(input.readFloat, &frustum.angleUp);
+    SAFE_PARCEL(input.readFloat, &frustum.angleDown);
+
+    SAFE_PARCEL(input.readFloat, &pose.pos.x);
+    SAFE_PARCEL(input.readFloat, &pose.pos.y);
+    SAFE_PARCEL(input.readFloat, &pose.pos.z);
+    SAFE_PARCEL(input.readFloat, &pose.orientation.x);
+    SAFE_PARCEL(input.readFloat, &pose.orientation.y);
+    SAFE_PARCEL(input.readFloat, &pose.orientation.z);
+    SAFE_PARCEL(input.readFloat, &pose.orientation.w);
+
+    SAFE_PARCEL(input.readFloat, &planeEquation.a);
+    SAFE_PARCEL(input.readFloat, &planeEquation.b);
+    SAFE_PARCEL(input.readFloat, &planeEquation.c);
+    SAFE_PARCEL(input.readFloat, &planeEquation.d);
+
+    SAFE_PARCEL(input.readFloat, &quadWidth);
+    SAFE_PARCEL(input.readFloat, &quadHeight);
+    /* QTI_END */
+
     SAFE_PARCEL(input.readParcelable, &metadata);
 
     SAFE_PARCEL(input.readFloat, &tmpFloat);
@@ -551,6 +629,37 @@ void layer_state_t::merge(const layer_state_t& other) {
         what |= eBackgroundBlurRadiusChanged;
         backgroundBlurRadius = other.backgroundBlurRadius;
     }
+    /* QTI_BEGIN */
+    if (other.what & eCompositionLayerTypeChanged) {
+        what |= eCompositionLayerTypeChanged;
+        compositionLayerType = other.compositionLayerType;
+    }
+    if (other.what & eReferenceSpaceTypeChanged) {
+        what |= eReferenceSpaceTypeChanged;
+        referenceSpaceType = other.referenceSpaceType;
+    }
+    if (other.what & eFrustumChanged) {
+        what |= eFrustumChanged;
+        frustum = other.frustum;
+    }
+    if (other.what & ePoseChanged) {
+        what |= ePoseChanged;
+        pose = other.pose;
+    }
+    if (other.what & ePlaneEquationChanged) {
+        what |= ePlaneEquationChanged;
+        planeEquation = other.planeEquation;
+    }
+    if (other.what & eQuadSizeChanged) {
+        what |= eQuadSizeChanged;
+        quadWidth = other.quadWidth;
+        quadHeight = other.quadHeight;
+    }
+    if (other.what & eLayerVisibilityChanged) {
+        what |= eLayerVisibilityChanged;
+        layerVisibilityType = other.layerVisibilityType;
+    }
+    /* QTI_END */
     if (other.what & eBlurRegionsChanged) {
         what |= eBlurRegionsChanged;
         blurRegions = other.blurRegions;
@@ -732,6 +841,16 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     CHECK_DIFF(diff, eLayerStackChanged, other, layerStack);
     CHECK_DIFF(diff, eCornerRadiusChanged, other, cornerRadius);
     CHECK_DIFF(diff, eBackgroundBlurRadiusChanged, other, backgroundBlurRadius);
+    /* QTI_BEGIN */
+    CHECK_DIFF(diff, ePlaneEquationChanged, other, planeEquation);
+    CHECK_DIFF(diff, eReferenceSpaceTypeChanged, other, referenceSpaceType);
+    CHECK_DIFF(diff, eCompositionLayerTypeChanged, other, compositionLayerType);
+    CHECK_DIFF(diff, eLayerVisibilityChanged, other, layerVisibilityType);
+    CHECK_DIFF(diff, ePoseChanged, other, pose);
+    CHECK_DIFF(diff, eQuadSizeChanged, other, quadWidth);
+    CHECK_DIFF(diff, eQuadSizeChanged, other, quadHeight);
+    CHECK_DIFF(diff, eFrustumChanged, other, frustum);
+    /* QTI_END */
     if (other.what & eBlurRegionsChanged) diff |= eBlurRegionsChanged;
     if (other.what & eRelativeLayerChanged) {
         diff |= eRelativeLayerChanged;

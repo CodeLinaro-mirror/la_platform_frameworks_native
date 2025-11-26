@@ -1,4 +1,5 @@
-/* Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+/*
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 // #define LOG_NDEBUG 0
@@ -997,6 +998,27 @@ void QtiSurfaceFlingerExtension::qtiSetPowerMode(const sp<IBinder>& displayToken
     }
 }
 
+void QtiSurfaceFlingerExtension::qtiSetDisplayConfig(
+        const sp<IBinder>& displayToken, const gui::DisplayDeviceConfig& displayDeviceConfig) {
+    sp<DisplayDevice> display = nullptr;
+    {
+        Mutex::Autolock lock(mQtiFlinger->mStateLock);
+        display = (mQtiFlinger->getDisplayDeviceLocked(displayToken));
+    }
+
+    if (!display) {
+        ALOGE("Attempt to set Projection Matrix for invalid display token %p", displayToken.get());
+        return;
+    }
+
+    const auto displayId = HalDisplayId::tryCast(display->getId());
+    if (!displayId) {
+        ALOGW("Attempt to set invalid displayId");
+        return;
+    }
+
+    mQtiHWComposerExtnIntf->qtiSetDisplayConfig(*displayId, displayDeviceConfig);
+}
 void QtiSurfaceFlingerExtension::qtiSetPowerModeOverrideConfig(sp<DisplayDevice> display) {
     bool supported = false;
     const auto physicalDisplayId = PhysicalDisplayId::tryCast(display->getId());
