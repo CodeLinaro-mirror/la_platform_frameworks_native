@@ -1,4 +1,4 @@
-/* Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 // #define LOG_NDEBUG 0
@@ -88,6 +88,10 @@ void QtiFeatureManager::qtiInit() {
     propName = qtiGetPropName(kIdleFallback);
     mQtiAllowIdleFallback = base::GetBoolProperty(propName, false);
     ALOGI_IF(mQtiAllowIdleFallback, "Allow idle fallback");
+
+    propName = qtiGetPropName(QtiFeature::kAllowSecureCamGpuComp);
+    mQtiAllowSecureCamGpuComp = base::GetBoolProperty(propName, false);
+    ALOGI_IF(mQtiAllowSecureCamGpuComp, "Allow GPU composition for secure buffers");
 }
 
 void QtiFeatureManager::qtiSetIDisplayConfig(std::shared_ptr<IDisplayConfig> aidl) {
@@ -146,6 +150,8 @@ bool QtiFeatureManager::qtiIsExtensionFeatureEnabled(QtiFeature feature) {
             return mQtiUseWorkDurations;
         case QtiFeature::kIdleFallback:
             return mQtiAllowIdleFallback;
+        case QtiFeature::kAllowSecureCamGpuComp:
+            return mQtiAllowSecureCamGpuComp;
         default:
             ALOGW("Queried unknown SF extension feature %d", feature);
             return false;
@@ -186,6 +192,8 @@ string QtiFeatureManager::qtiGetPropName(QtiFeature feature) {
             return "debug.sf.use_phase_offsets_as_durations";
         case QtiFeature::kIdleFallback:
             return "vendor.display.enable_allow_idle_fallback";
+        case QtiFeature::kAllowSecureCamGpuComp:
+            return "vendor.display.allow_secure_cam_gpu_comp";
         default:
             ALOGW("Queried unknown SF extension feature %d", feature);
             return "";

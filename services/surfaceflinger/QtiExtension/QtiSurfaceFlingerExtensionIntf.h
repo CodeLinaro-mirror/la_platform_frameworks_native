@@ -1,4 +1,4 @@
-/* Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 #pragma once
@@ -37,6 +37,7 @@ enum QtiFeature {
     kVsyncSourceReliableOnDoze,
     kWorkDurations,
     kIdleFallback,
+    kAllowSecureCamGpuComp,
 };
 
 class QtiSurfaceFlingerExtensionIntf {
@@ -112,6 +113,8 @@ public:
     virtual void qtiSetPowerMode(const sp<IBinder>& displayToken, int mode) = 0;
     virtual void qtiSetPowerModeOverrideConfig(sp<DisplayDevice> display) = 0;
     virtual void qtiSetLayerAsMask(uint32_t hwcDisplayId, uint64_t layerId) = 0;
+    virtual void qtiSetDisplayConfig(const sp<IBinder>& displayToken,
+                                     const gui::DisplayDeviceConfig& displayDeviceConfig) = 0;
 
     /*
      * Methods for Virtual, WiFi, and Secure Displays

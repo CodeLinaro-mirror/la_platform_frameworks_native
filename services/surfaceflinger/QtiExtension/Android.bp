@@ -89,6 +89,7 @@ qtidisplayextension_cc_library_static {
         "QtiNullExtension.cpp",
         "QtiNullDisplaySurfaceExtension.cpp",
         "QtiSurfaceFlingerExtensionFactory.cpp",
+        "QtiLayerExtension.cpp",
     ],
     soong_config_variables: {
         displayextension: {
