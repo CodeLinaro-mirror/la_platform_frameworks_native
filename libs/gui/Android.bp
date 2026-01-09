@@ -21,6 +21,28 @@ package {
     default_team: "trendy_team_android_core_graphics_stack",
 }
 
+soong_config_module_type {
+    name: "gpp_extension_cc_library_shared",
+    module_type: "cc_library_shared",
+    config_namespace: "video_extensions",
+    variables: ["enable_gpp_extensions"],
+    // Properties can be extended to other properties as well
+    properties: ["cflags"],
+}
+
+soong_config_module_type {
+    name: "gpp_extension_cc_defaults",
+    module_type: "cc_defaults",
+    config_namespace: "video_extensions",
+    variables: ["enable_gpp_extensions"],
+    // Properties can be extended to other properties as well
+    properties: ["static_libs"],
+}
+
+soong_config_bool_variable {
+    name: "enable_gpp_extensions",
+}
+
 aconfig_declarations {
     name: "libgui_flags",
     package: "com.android.graphics.libgui.flags",
@@ -337,7 +359,7 @@ filegroup {
     ],
 }
 
-cc_defaults {
+gpp_extension_cc_defaults {
     name: "libgui-defaults",
     defaults: ["libgui_bufferqueue-defaults"],
     tidy: true,
@@ -357,9 +379,14 @@ cc_defaults {
     export_static_lib_headers: [
         "libguiflags",
     ],
+    soong_config_variables: {
+        enable_gpp_extensions: {
+                static_libs: ["libqtiguiextension"],
+        },
+    },
 }
 
-cc_library_shared {
+gpp_extension_cc_library_shared {
     name: "libgui",
     vendor_available: true,
     double_loadable: true,
@@ -413,6 +440,12 @@ cc_library_shared {
         "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
         "-Wthread-safety",
     ],
+
+    soong_config_variables: {
+        enable_gpp_extensions: {
+                cflags: ["-DQTI_VIDEO_EXTENSION"],
+        },
+    },
 }
 
 // Used by media codec services exclusively as a static lib for
@@ -572,4 +605,45 @@ cc_library_static {
     ],
 }
 
+cc_library_static {
+    name: "libqtiguiextension",
+    vendor_available: true,
+    defaults: [
+        "libgui_bufferqueue-defaults",
+        "libguiextension_defaults",
+    ],
+    header_libs: [
+        "jni_headers",
+        "libgui_aidl_headers",
+    ],
+    static_libs: [
+        "libgui_window_info_static"
+    ],
+    srcs: [
+        "QtiExtension/QtiSurfaceExtensionGPP.cpp",
+    ],
+    local_include_dirs: ["QtiExtension"],
+    export_include_dirs: ["QtiExtension"],
+}
+
+cc_defaults {
+    name: "guicommonsys_defaults",
+    header_libs: [
+        "display_intf_headers",
+        "libimapper_stablec",
+    ],
+    shared_libs: [
+        "libvndksupport",
+        "libgralloctypes",
+        "libhidlbase",
+        "android.hardware.graphics.mapper@4.0",
+    ],
+}
+
+cc_defaults {
+    name: "libguiextension_defaults",
+    defaults: [
+        "guicommonsys_defaults",
+    ],
+}
 subdirs = ["tests"]
