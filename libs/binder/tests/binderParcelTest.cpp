@@ -21,9 +21,10 @@
 using android::IPCThreadState;
 using android::OK;
 using android::Parcel;
+using android::PERMISSION_DENIED;
+using android::status_t;
 using android::String16;
 using android::String8;
-using android::status_t;
 
 TEST(Parcel, NonNullTerminatedString8) {
     String8 kTestString = String8("test-is-good");
@@ -59,6 +60,15 @@ TEST(Parcel, NonNullTerminatedString16) {
     EXPECT_EQ(output.size(), 0);
 }
 
+TEST(Parcel, AppendOverObject) {
+    Parcel p1;
+    p1.writeDupFileDescriptor(0);
+    Parcel p2;
+    p2.writeInt32(2);
+
+    p1.setDataPosition(8);
+    ASSERT_EQ(PERMISSION_DENIED, p1.appendFrom(&p2, 0, p2.dataSize()));
+}
 // Tests a second operation results in a parcel at the same location as it
 // started.
 void parcelOpSameLength(const std::function<void(Parcel*)>& a, const std::function<void(Parcel*)>& b) {

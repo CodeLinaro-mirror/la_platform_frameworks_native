@@ -49,6 +49,7 @@ static constexpr bool DEBUG_TOUCH_OCCLUSION = true;
 
 #include <InputFlingerProperties.sysprop.h>
 #include <android-base/chrono_utils.h>
+#include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <android/os/IInputConstants.h>
@@ -2073,6 +2074,16 @@ InputEventInjectionResult InputDispatcher::findTouchedWindowTargetsLocked(
                     newTouchedWindowHandle = nullptr;
                 }
             }
+        }
+
+        if (newTouchedWindowHandle->getInfo()->touchOcclusionMode ==
+                TouchOcclusionMode::USE_OPACITY &&
+                newTouchedWindowHandle->getInfo()->alpha < 0.5f) {
+            LOG(INFO) << "Not sending motion to "
+                      << newTouchedWindowHandle->getName()
+                      << ", window opacity="
+                      << newTouchedWindowHandle->getInfo()->alpha
+                      << " is below the threshold";
         }
 
         // Drop touch events if requested by input feature
