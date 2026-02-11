@@ -6,9 +6,11 @@
 #include "QtiAidlComposerHalExtension.h"
 #include <aidl/vendor/qti/hardware/display/composer3/QtiLayerCommand.h>
 
+#ifdef QTI_LSR_ENABLED
 using aidl::vendor::qti::hardware::display::composer3::QtiDisplayDeviceConfig;
 using aidl::vendor::qti::hardware::display::composer3::QtiDisplayProjectionMatrix;
 using aidl::vendor::qti::hardware::display::composer3::QtiLayerOrientation;
+#endif
 
 namespace android::surfaceflingerextension {
 
@@ -59,6 +61,7 @@ Error QtiAidlComposerHalExtension::qtiSetLayerType(Display display, V2_1_Layer l
     return error;
 }
 
+#ifdef QTI_LSR_ENABLED
 Error QtiAidlComposerHalExtension::qtiSetCompositionLayerType(
         Display display, V2_1_Layer layer, gui::CompositionLayerType compositionLayerType) {
 #ifdef QTI_COMPOSER3_EXTENSIONS
@@ -145,6 +148,7 @@ Error QtiAidlComposerHalExtension::qtiSetQuadSize(Display display, V2_1_Layer la
 #endif
     return Error::NONE;
 }
+#endif
 
 Error QtiAidlComposerHalExtension::qtiSetLayerFlag(Display display, V2_1_Layer layer,
                                                    uint32_t flags) {
@@ -208,6 +212,7 @@ Error QtiAidlComposerHalExtension::qtiTryDrawMethod(Display display,
     return ret;
 }
 
+#ifdef QTI_LSR_ENABLED
 Error QtiAidlComposerHalExtension::qtiSetDisplayConfig(
         Display display, const gui::DisplayDeviceConfig& displayDeviceConfig) {
     Error ret = Error::NONE;
@@ -240,5 +245,6 @@ Error QtiAidlComposerHalExtension::qtiSetDisplayConfig(
 #endif
     return ret;
 }
+#endif
 
 } // namespace android::surfaceflingerextension

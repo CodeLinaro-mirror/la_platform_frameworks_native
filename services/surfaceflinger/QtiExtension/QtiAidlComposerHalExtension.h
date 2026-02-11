@@ -35,6 +35,7 @@ public:
                                  uint32_t dataspace) override;
     Error qtiSetLayerFlag(Display display, V2_1_Layer layer,
                           uint32_t layerFlag) override;
+#ifdef QTI_LSR_ENABLED
     Error qtiSetCompositionLayerType(Display display, V2_1_Layer layer,
                                      gui::CompositionLayerType compositionLayerType) override;
     Error qtiSetLayerVisibilityType(Display display, V2_1_Layer layer,
@@ -49,6 +50,7 @@ public:
                          float quadHeight) override;
     Error qtiSetDisplayConfig(Display display,
                               const gui::DisplayDeviceConfig& displayDeviceConfig) override;
+#endif
 
 private:
     Hwc2::AidlComposer* mQtiAidlComposer = nullptr;

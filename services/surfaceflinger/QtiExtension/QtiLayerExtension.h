@@ -5,6 +5,7 @@
 
 #pragma once
 
+#ifdef QTI_LSR_ENABLED
 #include <android/gui/CompositionLayerType.h>
 #include <android/gui/Frustum.h>
 #include <android/gui/LayerVisibilityType.h>
@@ -49,3 +50,4 @@ private:
 
 } // namespace layerextension
 } // namespace android
+#endif

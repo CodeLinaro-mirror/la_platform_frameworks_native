@@ -53,6 +53,7 @@
 #include <scheduler/Seamlessness.h>
 
 // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
 #include <android/gui/CompositionLayerType.h>
 #include <android/gui/Frustum.h>
 #include <android/gui/LayerVisibilityType.h>
@@ -61,6 +62,7 @@
 #include <android/gui/Pose.h>
 #include <android/gui/Position.h>
 #include <android/gui/RenderLayerReferenceSpaceType.h>
+#endif
 // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 #include <cstdint>
@@ -180,6 +182,7 @@ public:
         int64_t latchedVsyncId = 0;
         bool useVsyncIdForRefreshRateSelection = false;
         // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
         gui::CompositionLayerType compositionLayerType;
         gui::LayerVisibilityType layerVisibilityType;
         gui::RenderLayerReferenceSpaceType referenceSpaceType;
@@ -188,6 +191,7 @@ public:
         gui::PlaneEquation planeEquation;
         float quadWidth;
         float quadHeight;
+#endif
         // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
     };
 
@@ -207,6 +211,7 @@ public:
     bool setCrop(const FloatRect& crop);
 
     // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
     virtual bool setPlaneEquation(gui::PlaneEquation planeEquation);
     virtual bool setReferenceSpaceType(gui::RenderLayerReferenceSpaceType referenceSpaceType);
     virtual bool setCompositionLayerType(gui::CompositionLayerType compositionLayerType);
@@ -214,6 +219,7 @@ public:
     virtual bool setPose(gui::Pose pose);
     virtual bool setQuadSize(float quadWidth, float quadHeight);
     virtual bool setFrustum(gui::Frustum frustum);
+#endif
     // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
     bool setTransform(uint32_t /*transform*/);

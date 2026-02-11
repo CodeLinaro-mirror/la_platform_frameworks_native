@@ -1730,6 +1730,7 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::unsetBuf
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setReferenceSpaceType(
         const sp<SurfaceControl>& sc,
         const gui::RenderLayerReferenceSpaceType& referenceSpaceType) {
+#ifdef QTI_LSR_ENABLED
     layer_state_t* s = getLayerState(sc);
     if (!s) {
         mStatus = BAD_INDEX;
@@ -1739,11 +1740,13 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setRefer
     s->referenceSpaceType = referenceSpaceType;
 
     registerSurfaceControlForCallback(sc);
+#endif
     return *this;
 }
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setCompositionLayerType(
         const sp<SurfaceControl>& sc, const gui::CompositionLayerType& compositionLayerType) {
+#ifdef QTI_LSR_ENABLED
     layer_state_t* s = getLayerState(sc);
     if (!s) {
         mStatus = BAD_INDEX;
@@ -1753,11 +1756,13 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setCompo
     s->compositionLayerType = compositionLayerType;
 
     registerSurfaceControlForCallback(sc);
+#endif
     return *this;
 }
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setPose(
         const sp<SurfaceControl>& sc, const gui::Pose& pose) {
+#ifdef QTI_LSR_ENABLED
     layer_state_t* s = getLayerState(sc);
     if (!s) {
         mStatus = BAD_INDEX;
@@ -1767,11 +1772,13 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setPose(
     s->pose = pose;
 
     registerSurfaceControlForCallback(sc);
+#endif
     return *this;
 }
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setQuadSize(
         const sp<SurfaceControl>& sc, float width, float height) {
+#ifdef QTI_LSR_ENABLED
     layer_state_t* s = getLayerState(sc);
     if (!s) {
         mStatus = BAD_INDEX;
@@ -1782,11 +1789,13 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setQuadS
     s->quadHeight = height;
 
     registerSurfaceControlForCallback(sc);
+#endif
     return *this;
 }
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setFrustum(
         const sp<SurfaceControl>& sc, const gui::Frustum& frustum) {
+#ifdef QTI_LSR_ENABLED
     layer_state_t* s = getLayerState(sc);
     if (!s) {
         mStatus = BAD_INDEX;
@@ -1796,11 +1805,13 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setFrust
     s->frustum = frustum;
 
     registerSurfaceControlForCallback(sc);
+#endif
     return *this;
 }
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setPlaneEquation(
         const sp<SurfaceControl>& sc, const gui::PlaneEquation& planeEquation) {
+#ifdef QTI_LSR_ENABLED
     layer_state_t* s = getLayerState(sc);
     if (!s) {
         mStatus = BAD_INDEX;
@@ -1810,11 +1821,13 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setPlane
     s->planeEquation = planeEquation;
 
     registerSurfaceControlForCallback(sc);
+#endif
     return *this;
 }
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setLayerVisibilityType(
         const sp<SurfaceControl>& sc, const gui::LayerVisibilityType& layerVisibilityType) {
+#ifdef QTI_LSR_ENABLED
     layer_state_t* s = getLayerState(sc);
     if (!s) {
         mStatus = BAD_INDEX;
@@ -1824,6 +1837,7 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setLayer
     s->layerVisibilityType = layerVisibilityType;
 
     registerSurfaceControlForCallback(sc);
+#endif
     return *this;
 }
 // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
@@ -3271,6 +3285,7 @@ std::optional<DisplayDecorationSupport> SurfaceComposerClient::getDisplayDecorat
 // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
 status_t SurfaceComposerClient::setDisplayConfig(const sp<IBinder>& display,
                                                  gui::DisplayDeviceConfig& displayDeviceConfig) {
+#ifdef QTI_LSR_ENABLED
     binder::Status status =
             ComposerServiceAIDL::getComposerService()->setDisplayConfig(display,
                                                                         displayDeviceConfig);
@@ -3279,7 +3294,7 @@ status_t SurfaceComposerClient::setDisplayConfig(const sp<IBinder>& display,
         ALOGE("setDisplayConfig failed:  %s (%d)", strerror(-err), err);
         return UNKNOWN_ERROR;
     }
-
+#endif
     return NO_ERROR;
 }
 // QTI_END: 2026-01-26: Display: sf: Add reprojection API.

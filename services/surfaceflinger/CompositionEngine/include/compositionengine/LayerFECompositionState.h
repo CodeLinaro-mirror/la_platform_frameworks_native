@@ -46,6 +46,7 @@
 #pragma clang diagnostic ignored "-Wextra"
 
 // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
 #include <android/gui/CompositionLayerType.h>
 #include <android/gui/Frustum.h>
 #include <android/gui/LayerVisibilityType.h>
@@ -54,6 +55,7 @@
 #include <android/gui/Pose.h>
 #include <android/gui/Position.h>
 #include <android/gui/RenderLayerReferenceSpaceType.h>
+#endif
 // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 #include <gui/BufferQueue.h>
 #include <ui/EdgeExtensionEffect.h>
@@ -267,6 +269,7 @@ struct LayerFECompositionState {
     uint32_t qtiLayerClass; // Layer Classification
                             // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
                             // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API
+#ifdef QTI_LSR_ENABLED
     gui::CompositionLayerType qtiCompositionLayerType;
     gui::RenderLayerReferenceSpaceType qtiReferenceSpaceType;
     gui::LayerVisibilityType qtiLayerVisibilityType;
@@ -275,6 +278,7 @@ struct LayerFECompositionState {
     gui::PlaneEquation qtiPlaneEquation;
     float qtiQuadWidth;
     float qtiQuadHeight;
+#endif
     // QTI_END: 2026-01-26: Display: sf: Add reprojection API
 };
 

@@ -781,6 +781,7 @@ void OutputLayer::writeOutputIndependentPerFrameStateToHWC(
                               getLayerFE().getDebugName());
     // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
     // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
     QtiOutputExtension::qtiSetCompositionLayerType(hwcLayer,
                                                    outputIndependentState.qtiCompositionLayerType,
                                                    getLayerFE().getDebugName());
@@ -799,6 +800,7 @@ void OutputLayer::writeOutputIndependentPerFrameStateToHWC(
     QtiOutputExtension::qtiSetQuadSize(hwcLayer, outputIndependentState.qtiQuadWidth,
                                        outputIndependentState.qtiQuadHeight,
                                        getLayerFE().getDebugName());
+#endif
     // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 }
 

@@ -186,6 +186,7 @@ status_t layer_state_t::write(Parcel& output) const
     SAFE_PARCEL(output.writeUint32, backgroundBlurRadius);
 
     // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
     int tmpInt = static_cast<int>(compositionLayerType);
     SAFE_PARCEL(output.writeInt32, tmpInt);
     tmpInt = static_cast<int>(referenceSpaceType);
@@ -213,6 +214,7 @@ status_t layer_state_t::write(Parcel& output) const
 
     SAFE_PARCEL(output.writeFloat, quadWidth);
     SAFE_PARCEL(output.writeFloat, quadHeight);
+#endif
     // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
     SAFE_PARCEL(output.writeParcelable, metadata);
@@ -355,6 +357,7 @@ status_t layer_state_t::read(const Parcel& input)
     SAFE_PARCEL(input.readUint32, &backgroundBlurRadius);
 
     // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
     int tmpInt = 0;
     SAFE_PARCEL(input.readInt32, &tmpInt);
     compositionLayerType = static_cast<gui::CompositionLayerType>(tmpInt);
@@ -383,6 +386,7 @@ status_t layer_state_t::read(const Parcel& input)
 
     SAFE_PARCEL(input.readFloat, &quadWidth);
     SAFE_PARCEL(input.readFloat, &quadHeight);
+#endif
     // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
     SAFE_PARCEL(input.readParcelable, &metadata);
@@ -717,6 +721,7 @@ void layer_state_t::merge(const layer_state_t& other) {
         backgroundBlurRadius = other.backgroundBlurRadius;
     }
     // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
     if (other.what & eCompositionLayerTypeChanged) {
         what |= eCompositionLayerTypeChanged;
         compositionLayerType = other.compositionLayerType;
@@ -746,6 +751,7 @@ void layer_state_t::merge(const layer_state_t& other) {
         what |= eLayerVisibilityChanged;
         layerVisibilityType = other.layerVisibilityType;
     }
+#endif
     // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
     if (other.what & eBlurRegionsChanged) {
         what |= eBlurRegionsChanged;
@@ -967,6 +973,7 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     CHECK_DIFF(diff, eClientDrawnCornerRadiusChanged, other, clientDrawnCornerRadius);
     CHECK_DIFF(diff, eBackgroundBlurRadiusChanged, other, backgroundBlurRadius);
     // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
     CHECK_DIFF(diff, ePlaneEquationChanged, other, planeEquation);
     CHECK_DIFF(diff, eReferenceSpaceTypeChanged, other, referenceSpaceType);
     CHECK_DIFF(diff, eCompositionLayerTypeChanged, other, compositionLayerType);
@@ -975,6 +982,7 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     CHECK_DIFF(diff, eQuadSizeChanged, other, quadWidth);
     CHECK_DIFF(diff, eQuadSizeChanged, other, quadHeight);
     CHECK_DIFF(diff, eFrustumChanged, other, frustum);
+#endif
     // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
     if (other.what & eBlurRegionsChanged) diff |= eBlurRegionsChanged;
     if (other.what & eRelativeLayerChanged) {

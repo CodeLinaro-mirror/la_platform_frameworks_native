@@ -181,6 +181,7 @@ Layer::Layer(const surfaceflinger::LayerCreationArgs& args)
     mPotentialCursor = args.flags & ISurfaceComposerClient::eCursorWindow;
 
     // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
     mDrawingState.compositionLayerType = gui::CompositionLayerType::COMPOSITION_LAYER_NONE;
     mDrawingState.layerVisibilityType = gui::LayerVisibilityType::LAYER_VISIBILITY_NONE;
     mDrawingState.referenceSpaceType =
@@ -190,6 +191,7 @@ Layer::Layer(const surfaceflinger::LayerCreationArgs& args)
     mDrawingState.planeEquation = gui::PlaneEquation();
     mDrawingState.quadWidth = 0.0;
     mDrawingState.quadHeight = 0.0;
+#endif
     // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
     // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
     mQtiLayerClass = mFlinger->mQtiSFExtnIntf->qtiGetLayerClass(mName);
@@ -420,6 +422,7 @@ bool Layer::setCrop(const FloatRect& crop) {
 }
 
 // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
 bool Layer::setPlaneEquation(gui::PlaneEquation planeEquation) {
     if (mDrawingState.planeEquation == planeEquation) return false;
     mDrawingState.sequence++;
@@ -478,6 +481,7 @@ bool Layer::setFrustum(gui::Frustum frustum) {
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
+#endif
 // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 bool Layer::isLayerFocusedBasedOnPriority(int32_t priority) {

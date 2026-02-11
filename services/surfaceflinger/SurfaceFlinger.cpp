@@ -5752,6 +5752,7 @@ uint32_t SurfaceFlinger::updateLayerCallbacksAndStats(const FrameTimelineInfo& f
     }
 
     // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
     if (what & layer_state_t::ePlaneEquationChanged) {
         if (layer->setPlaneEquation(s.planeEquation)) {
             flags |= eTraversalNeeded;
@@ -5787,6 +5788,7 @@ uint32_t SurfaceFlinger::updateLayerCallbacksAndStats(const FrameTimelineInfo& f
             flags |= eTraversalNeeded;
         }
     }
+#endif
     // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
     if (what & layer_state_t::eBufferChanged) {
         std::optional<ui::Transform::RotationFlags> transformHint = std::nullopt;
@@ -10004,7 +10006,9 @@ binder::Status SurfaceComposerAIDL::setDisplayBrightness(const sp<IBinder>& disp
 // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
 binder::Status SurfaceComposerAIDL::setDisplayConfig(
         const sp<IBinder>& displayToken, const gui::DisplayDeviceConfig& displayDeviceConfig) {
+#ifdef QTI_LSR_ENABLED
     mFlinger->mQtiSFExtnIntf->qtiSetDisplayConfig(displayToken, displayDeviceConfig);
+#endif
     return binder::Status::ok();
 }
 // QTI_END: 2026-01-26: Display: sf: Add reprojection API.

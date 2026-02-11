@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
+#ifdef QTI_LSR_ENABLED
 #include <cutils/properties.h>
 #include <log/log.h>
 
@@ -79,3 +80,4 @@ bool QtiLayerExtension::isQuadSizeChanged(const float& quadWidth, const float& q
     return true;
 }
 } // namespace android::layerextension
+#endif

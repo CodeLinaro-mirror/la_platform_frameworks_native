@@ -127,6 +127,7 @@ void QtiOutputExtension::qtiSetLayerType(HWC2::Layer* layer, uint32_t type,
     }
 }
 
+#ifdef QTI_LSR_ENABLED
 void QtiOutputExtension::qtiSetCompositionLayerType(HWC2::Layer* layer,
                                                     gui::CompositionLayerType compositionLayerType,
                                                     const char* debugName __unused) {
@@ -185,6 +186,7 @@ void QtiOutputExtension::qtiSetQuadSize(HWC2::Layer* layer, float quadWidth, flo
         hwcextn->qtiSetQuadSize(layer, quadWidth, quadHeight);
     }
 }
+#endif
 
 bool QtiOutputExtension::qtiUseSpecFence(void) {
     auto sfext = QtiExtensionContext::instance().getQtiSurfaceFlingerExtn();

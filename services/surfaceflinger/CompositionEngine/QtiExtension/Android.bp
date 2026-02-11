@@ -27,6 +27,11 @@ qtidisplayextension_cc_library_static {
                 "-Wno-unused-parameter",
             ],
         },
+        qtilsrenabled: {
+            cflags: [
+                "-DQTI_LSR_ENABLED",
+            ],
+        },
     },
     include_dirs: ["frameworks/native/services/surfaceflinger/CompositionEngine/include"],
 }
