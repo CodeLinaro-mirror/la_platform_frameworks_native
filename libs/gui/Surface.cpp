@@ -188,10 +188,9 @@ Surface::Surface(const sp<IGraphicBufferProducer>& bufferProducer, bool controll
 
 #ifdef QTI_VIDEO_EXTENSION
     char value[PROPERTY_VALUE_MAX];
-    int intValue = 0;
     property_get("vendor.gpp.create_frc_extension", value, "0");
-    intValue = atoi(value);
-    if (!mQtiSurfaceGPPExtn && intValue == 1) {
+    mEnableGPP = atoi(value);
+    if (!mQtiSurfaceGPPExtn && mEnableGPP) {
         mQtiSurfaceGPPExtn = std::make_shared<libguiextension::QtiSurfaceExtensionGPP>(IGraphicBufferProducer::asBinder(bufferProducer), &mGraphicBufferProducer);
     }
 #endif
@@ -240,7 +239,7 @@ void Surface::setSidebandStream(const sp<NativeHandle>& stream) {
     mGraphicBufferProducer->setSidebandStream(stream);
 
 #ifdef QTI_VIDEO_EXTENSION
-    if (mQtiSurfaceGPPExtn) {
+    if (mEnableGPP && mQtiSurfaceGPPExtn) {
         mQtiSurfaceGPPExtn->setSidebandStream(stream);
     }
 #endif
@@ -702,7 +701,7 @@ int Surface::dequeueBuffer(sp<GraphicBuffer>* buffer, int* fenceFd) {
     SURF_LOGV("Surface::dequeueBuffer");
 
 #ifdef QTI_VIDEO_EXTENSION
-    if (mQtiSurfaceGPPExtn) {
+    if (mEnableGPP && mQtiSurfaceGPPExtn) {
         mQtiSurfaceGPPExtn->DynamicEnable(&mGraphicBufferProducer);
     }
 #endif
@@ -887,7 +886,7 @@ int Surface::dequeueBuffers(std::vector<BatchBuffer>* buffers) {
     SURF_LOGV("Surface::dequeueBuffers");
 
 #ifdef QTI_VIDEO_EXTENSION
-    if (mQtiSurfaceGPPExtn) {
+    if (mEnableGPP && mQtiSurfaceGPPExtn) {
         mQtiSurfaceGPPExtn->DynamicEnable(&mGraphicBufferProducer);
     }
 #endif
@@ -2200,7 +2199,7 @@ int Surface::connect(int api, const sp<SurfaceListener>& listener, bool reportBu
     mReportRemovedBuffers = reportBufferRemoval;
 
 #ifdef QTI_VIDEO_EXTENSION
-    if (mQtiSurfaceGPPExtn) {
+    if (mEnableGPP && mQtiSurfaceGPPExtn) {
         mQtiSurfaceGPPExtn->Connect(api, &mGraphicBufferProducer);
     }
 #endif
@@ -2230,7 +2229,7 @@ int Surface::connect(int api, const sp<SurfaceListener>& listener, bool reportBu
         mConsumerRunningBehind = (output.numPendingBuffers >= 2);
 
 #ifdef QTI_VIDEO_EXTENSION
-        if (mQtiSurfaceGPPExtn) {
+        if (mEnableGPP && mQtiSurfaceGPPExtn) {
             mQtiSurfaceGPPExtn->StoreConnect(api, mListenerProxy, reportBufferRemoval);
         }
 #endif
@@ -2308,7 +2307,7 @@ int Surface::disconnect(int api, IGraphicBufferProducer::DisconnectMode mode) {
     mIsConnected = false;
 
 #ifdef QTI_VIDEO_EXTENSION
-    if (mQtiSurfaceGPPExtn) {
+    if (mEnableGPP && mQtiSurfaceGPPExtn) {
         mQtiSurfaceGPPExtn->Disconnect(api, &mGraphicBufferProducer);
     }
 #endif

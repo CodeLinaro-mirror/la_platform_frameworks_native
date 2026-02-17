@@ -787,6 +787,7 @@ protected:
     uint64_t mId GUARDED_BY(mDebugMutex) = 0;
 #ifdef QTI_VIDEO_EXTENSION
     std::shared_ptr<libguiextension::QtiSurfaceExtensionGPP> mQtiSurfaceGPPExtn = nullptr;
+    bool mEnableGPP = false;
 #endif
 };
 
