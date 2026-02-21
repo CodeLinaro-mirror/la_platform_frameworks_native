@@ -293,6 +293,8 @@ private:
 
         void setDisplayInfos(const std::vector<android::gui::DisplayInfo>& displayInfos);
 
+        bool hasDisplay(ui::LogicalDisplayId displayId) const;
+
         void removeDisplay(ui::LogicalDisplayId displayId);
 
         void setMaximumObscuringOpacityForTouch(float opacity);
@@ -970,7 +972,8 @@ private:
             REQUIRES(mLock);
     void sendFocusChangedCommandLocked(const sp<IBinder>& oldToken, const sp<IBinder>& newToken)
             REQUIRES(mLock);
-    void sendDropWindowCommandLocked(const sp<IBinder>& token, float x, float y) REQUIRES(mLock);
+    void sendDropWindowCommandLocked(const sp<IBinder>& token, vec2 location, vec2 rawLocation)
+            REQUIRES(mLock);
     void onAnrLocked(const std::shared_ptr<Connection>& connection) REQUIRES(mLock);
     void onAnrLocked(std::shared_ptr<InputApplicationHandle> application) REQUIRES(mLock);
     void updateLastAnrStateLocked(const sp<android::gui::WindowInfoHandle>& window,

@@ -20,12 +20,10 @@
 #include <android/gui/IActivePictureListener.h>
 #include <android/gui/IDisplayEventConnection.h>
 #include <android/gui/ISurfaceComposer.h>
-#include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
 #include <android/hardware_buffer.h>
 #include <android/native_window.h>
 #include <binder/ProcessState.h>
 #include <com_android_graphics_libgui_flags.h>
-#include <configstore/Utils.h>
 #include <gui/AidlUtil.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/BufferQueue.h>
@@ -70,9 +68,6 @@
 namespace android {
 
 using namespace std::chrono_literals;
-// retrieve wide-color and hdr settings from configstore
-using namespace android::hardware::configstore;
-using namespace android::hardware::configstore::V1_0;
 using aidl::android::hardware::graphics::common::DisplayDecorationSupport;
 using gui::IDisplayEventConnection;
 using gui::IRegionSamplingListener;
@@ -358,6 +353,57 @@ TEST_F(SurfaceTest, SettingGenerationNumber) {
     ASSERT_EQ(NO_ERROR, window->dequeueBuffer(window.get(), &buffer, &fenceFd));
     graphicBuffer = static_cast<GraphicBuffer*>(buffer);
     ASSERT_EQ(1U, graphicBuffer->getGenerationNumber());
+}
+
+TEST_F(SurfaceTest, AutoGenerationUpdate) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+
+    // Allocate a buffer.
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    ASSERT_EQ(NO_ERROR, surface->connect(NATIVE_WINDOW_API_CPU, nullptr));
+    ASSERT_EQ(NO_ERROR, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(buffer, fence));
+
+    // Detach the buffer and check its generation number.
+    sp<GraphicBuffer> graphicBuffer;
+    ASSERT_EQ(NO_ERROR, surface->detachNextBuffer(&graphicBuffer, &fence));
+    ASSERT_EQ(0U, graphicBuffer->getGenerationNumber());
+
+    // Auto-generation is on by default. Attaching should update the generation number.
+    ASSERT_EQ(NO_ERROR, surface->setGenerationNumber(1));
+    ASSERT_EQ(NO_ERROR, surface->attachBuffer(graphicBuffer));
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(graphicBuffer, fence));
+    ASSERT_EQ(NO_ERROR, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(1U, buffer->getGenerationNumber());
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(buffer, fence));
+    ASSERT_EQ(NO_ERROR, surface->detachNextBuffer(&graphicBuffer, &fence));
+    ASSERT_EQ(1U, graphicBuffer->getGenerationNumber());
+
+    // Turn auto-generation off. Attaching should not update the generation number. And,
+    // importantly, attaching should fail for generation number mismatch.
+    surface->setAutoGenerationUpdate(false);
+    ASSERT_EQ(NO_ERROR, surface->setGenerationNumber(2));
+    ASSERT_EQ(BAD_VALUE, surface->attachBuffer(graphicBuffer));
+
+    graphicBuffer->setGenerationNumber(2);
+    ASSERT_EQ(NO_ERROR, surface->attachBuffer(graphicBuffer));
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(graphicBuffer, fence));
+
+    ASSERT_EQ(NO_ERROR, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(2U, buffer->getGenerationNumber());
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(buffer, fence));
+    ASSERT_EQ(NO_ERROR, surface->detachNextBuffer(&graphicBuffer, &fence));
+    ASSERT_EQ(2U, graphicBuffer->getGenerationNumber());
+
+    // Turn auto-generation back on. Attaching should update the generation number again.
+    surface->setAutoGenerationUpdate(true);
+    ASSERT_EQ(NO_ERROR, surface->setGenerationNumber(3));
+    ASSERT_EQ(NO_ERROR, surface->attachBuffer(graphicBuffer));
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(graphicBuffer, fence));
+    ASSERT_EQ(NO_ERROR, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(3U, buffer->getGenerationNumber());
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(buffer, fence));
 }
 
 TEST_F(SurfaceTest, GetConsumerName) {
@@ -2592,6 +2638,53 @@ TEST_F(SurfaceTest, QueueBufferOutput_TracksReplacements_Plural) {
     EXPECT_EQ(2u, outputs.size());
     EXPECT_TRUE(outputs[0].bufferReplaced);
     EXPECT_TRUE(outputs[1].bufferReplaced);
+}
+
+TEST_F(SurfaceTest, QueueBufferInputOutput) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    ASSERT_EQ(OK, consumer->setDefaultBufferSize(20, 20));
+    surface->connect(NATIVE_WINDOW_API_CPU, nullptr, false);
+
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+
+    SurfaceQueueBufferInput input;
+    input.fence = fence;
+    input.crop = Rect(0, 0, 10, 10);
+    input.transform = NATIVE_WINDOW_TRANSFORM_ROT_90;
+    input.timestamp = 12345;
+
+    SurfaceQueueBufferOutput output;
+    ASSERT_EQ(OK, surface->queueBuffer(buffer, input, &output));
+
+    EXPECT_GE(output.nextFrameNumber, 1u);
+}
+
+TEST_F(SurfaceTest, CancelBuffer_GraphicBuffer_Fence) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    surface->connect(NATIVE_WINDOW_API_CPU, nullptr, false);
+
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+
+    ASSERT_EQ(OK, surface->cancelBuffer(buffer, fence));
+}
+
+TEST_F(SurfaceTest, AttachBuffer_GraphicBuffer) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    surface->connect(NATIVE_WINDOW_API_CPU, nullptr, false);
+
+    // We need a detached buffer.
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(OK, surface->detachBuffer(buffer));
+
+    ASSERT_EQ(OK, surface->attachBuffer(buffer));
+    // Can cancel/queue after attach
+    ASSERT_EQ(OK, surface->cancelBuffer(buffer, fence));
 }
 
 TEST_F(SurfaceTest, UnlimitedSlots_FailsOnIncompatibleConsumer) {

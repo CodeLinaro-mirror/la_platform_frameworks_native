@@ -769,7 +769,8 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
     snapshot.contentDirty |= (snapshot.clientChanges & layer_state_t::CONTENT_DIRTY) != 0;
     snapshot.isHiddenByPolicyFromParent = parentSnapshot.isHiddenByPolicyFromParent ||
             parentSnapshot.invalidTransform || requested.isHiddenByPolicy() ||
-            (args.excludeLayerIds.find(path.id) != args.excludeLayerIds.end());
+            (args.excludeLayerIds.find(path.id) != args.excludeLayerIds.end()) ||
+            (args.exclusionMask & requested.compositionFilterFlag);
     const bool forceUpdate = args.forceUpdate == ForceUpdateFlags::ALL ||
             snapshot.clientChanges & layer_state_t::eReparent ||
             snapshot.changes.any(RequestedLayerState::Changes::Visibility |
@@ -1016,8 +1017,12 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
         }
     }
 
-    if (forceUpdate || snapshot.clientChanges & layer_state_t::eRenderCommandBufferChanged) {
-        snapshot.renderCommandBufferConsumer = requested.renderCommandBufferConsumer;
+    if (forceUpdate ||
+        (requested.what &
+         (layer_state_t::eRenderCommandBufferChanged |
+          layer_state_t::eRenderCommandBufferFrameIdChanged))) {
+        snapshot.renderCommandBuffer = requested.renderCommandBuffer;
+        snapshot.renderCommandBufferFrameId = requested.renderCommandBufferFrameId;
     }
 
     if (forceUpdate || snapshot.clientChanges & layer_state_t::eRenderResourceTokenChanged) {
@@ -1053,7 +1058,7 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
             snapshot.stretchEffect.hasEffect() || snapshot.edgeExtensionEffect.hasEffect() ||
             snapshot.borderSettings.strokeWidth > 0 ||
             !snapshot.boxShadowSettings.boxShadows.empty() ||
-            snapshot.renderCommandBufferConsumer != nullptr || hasSmpte2094_50;
+            snapshot.renderCommandBuffer != nullptr || hasSmpte2094_50;
 
     snapshot.contentOpaque = snapshot.isContentOpaque();
     snapshot.isOpaque = snapshot.contentOpaque &&
@@ -1138,9 +1143,10 @@ void LayerSnapshotBuilder::updateRoundedCorner(LayerSnapshot& snapshot,
 
 bool LayerSnapshotBuilder::shouldDisableCornerRounding(LayerSnapshot& snapshot,
                                                        const RequestedLayerState& requested) {
-    bool radiiMatch = requested.clientDrawnCornerRadii == snapshot.roundedCorner.reportedRadii;
+    bool radiiMatch =
+            snapshot.roundedCorner.clientDrawnRadii == snapshot.roundedCorner.reportedRadii;
     bool boundsMatch = snapshot.geomLayerBounds == requested.clientDrawnCornerRadiusCrop;
-    return !requested.clientDrawnCornerRadii.isEmpty() && radiiMatch && boundsMatch;
+    return !snapshot.roundedCorner.clientDrawnRadii.isEmpty() && radiiMatch && boundsMatch;
 }
 
 RoundedCornerState LayerSnapshotBuilder::calculateLayerRoundedCornerSettings(
@@ -1302,8 +1308,9 @@ void LayerSnapshotBuilder::updateLayerBounds(LayerSnapshot& snapshot,
 
     FloatRect parentBounds = parentSnapshot.geomLayerBounds;
     parentBounds = snapshot.localTransform.inverse().transform(parentBounds);
-    snapshot.geomLayerBounds =
-            requested.externalTexture || requested.renderCommandBufferConsumer ? snapshot.bufferSize.toFloatRect() : parentBounds;
+    snapshot.geomLayerBounds = requested.externalTexture || requested.renderCommandBuffer
+            ? snapshot.bufferSize.toFloatRect()
+            : parentBounds;
     snapshot.geomLayerCrop = parentBounds;
     if (!requested.crop.isEmpty()) {
         snapshot.geomLayerCrop = snapshot.geomLayerCrop.intersect(requested.crop);

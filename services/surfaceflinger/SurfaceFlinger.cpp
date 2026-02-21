@@ -34,9 +34,6 @@
 #include <android/configuration.h>
 #include <android/gui/IDisplayEventConnection.h>
 #include <android/gui/StaticDisplayInfo.h>
-#include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
-#include <android/hardware/configstore/1.1/ISurfaceFlingerConfigs.h>
-#include <android/hardware/configstore/1.1/types.h>
 #include <android/native_window.h>
 #include <android/os/IInputFlinger.h>
 #include <binder/IPCThreadState.h>
@@ -60,7 +57,6 @@
 #include <compositionengine/impl/DisplayColorProfile.h>
 #include <compositionengine/impl/OutputCompositionState.h>
 #include <compositionengine/impl/OutputLayerCompositionState.h>
-#include <configstore/Utils.h>
 #include <cutils/compiler.h>
 #include <cutils/properties.h>
 #include <fmt/format.h>
@@ -160,7 +156,6 @@
 #include "Jank/JankTracker.h"
 #include "Layer.h"
 #include "LayerProtoHelper.h"
-#include "LayerVector.h"
 #include "MutexUtils.h"
 #include "PowerAdvisor/PowerAdvisor.h"
 #include "PowerAdvisor/Workload.h"
@@ -188,13 +183,23 @@
 #define NO_THREAD_SAFETY_ANALYSIS \
     _Pragma("GCC error \"Prefer <ftl/fake_guard.h> or MutexUtils.h helpers.\"")
 
+#define MODE_TRANSITION_LOCK_IF(cond)                                                             \
+    ConditionalLock lock(mStateLock,                                                              \
+                         !FlagManager::getInstance()                                              \
+                                         .follower_arbitrary_refresh_rate_selection_combined() && \
+                                 cond);                                                           \
+    ConditionalLock                                                                               \
+    modeLock(mModeTransitionMutex,                                                                \
+             FlagManager::getInstance().follower_arbitrary_refresh_rate_selection_combined() &&   \
+                     cond)
+
+#define MODE_TRANSITION_LOCK() MODE_TRANSITION_LOCK_IF(true)
+
 namespace android {
 using namespace std::chrono_literals;
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
-using namespace hardware::configstore;
-using namespace hardware::configstore::V1_0;
 using namespace sysprop;
 using ftl::Flags;
 using namespace ftl::flag_operators;
@@ -1005,6 +1010,10 @@ void SurfaceFlinger::init() FTL_FAKE_GUARD(kMainThreadContext) {
     LOG_ALWAYS_FATAL_IF(!display, "Failed to configure the primary display");
     LOG_ALWAYS_FATAL_IF(!getHwComposer().isConnected(display->getPhysicalId()),
                         "Primary display is disconnected");
+
+    ConditionalLock modeLock(mModeTransitionMutex,
+                             FlagManager::getInstance()
+                                     .follower_arbitrary_refresh_rate_selection_combined());
 
     // TODO: b/355424160 - The Scheduler needlessly depends on creating the CompositionEngine part
     // of the DisplayDevice, hence the above commit of the primary display. Remove that special case
@@ -2883,7 +2892,8 @@ bool SurfaceFlinger::commit(PhysicalDisplayId pacesetterId,
         const bool hasPacesetterDisplay =
                 FTL_FAKE_GUARD(mStateLock, mPhysicalDisplays.contains(pacesetterId));
         if (!hasPacesetterDisplay) {
-            FTL_FAKE_GUARD(mStateLock, processDisplayChangesLocked());
+            MODE_TRANSITION_LOCK();
+            processDisplayChangesLocked();
             mScheduler->scheduleFrame();
             return false;
         }
@@ -2901,7 +2911,8 @@ bool SurfaceFlinger::commit(PhysicalDisplayId pacesetterId,
     }
 
     {
-        Mutex::Autolock lock(mStateLock);
+        MODE_TRANSITION_LOCK();
+
         for (const auto [displayId, _] : frameTargets) {
             if (mDisplayModeController.isModeSetPending(displayId)) {
                 if (!finalizeDisplayModeChange(displayId)) {
@@ -2926,13 +2937,16 @@ bool SurfaceFlinger::commit(PhysicalDisplayId pacesetterId,
 
     // Determine if any displays, either physical or virtual, are on so that
     // power hints may be reported for performance boosts.
-    const bool hasDisplayWithPowerModeOn =
-            FTL_FAKE_GUARD(mStateLock, hasDisplay([](const DisplayDevice& display) {
-                               return display.getPowerMode() == hal::PowerMode::ON;
-                           }));
+    bool shouldEnablePowerHintSession = true;
+    if (!FlagManager::getInstance().align_adpf_with_sf_opt_policy()) {
+        shouldEnablePowerHintSession =
+                FTL_FAKE_GUARD(mStateLock, hasDisplay([](const DisplayDevice& display) {
+                                   return display.getPowerMode() == hal::PowerMode::ON;
+                               }));
+    }
 
     // Save this once per commit + composite to ensure consistency.
-    mPowerHintSessionEnabled = mPowerAdvisor->usePowerHintSession() && hasDisplayWithPowerModeOn;
+    mPowerHintSessionEnabled = mPowerAdvisor->usePowerHintSession() && shouldEnablePowerHintSession;
     if (mPowerHintSessionEnabled) {
         mPowerAdvisor->setCommitStart(pacesetterFrameTargetPtr->frameBeginTime());
         mPowerAdvisor->setExpectedPresentTime(pacesetterFrameTargetPtr->expectedPresentTime());
@@ -2971,10 +2985,14 @@ bool SurfaceFlinger::commit(PhysicalDisplayId pacesetterId,
     // Composite if transactions were committed, or if requested by HWC.
     bool mustComposite = mMustComposite.exchange(false);
     {
+        const bool powerModeChangeInProgress = mPowerModeInProgressCount > 0 ||
+                (mustComposite ? mPowerModeChangeInProgress.exchange(false)
+                               : mPowerModeChangeInProgress.load());
         scheduler::FrameTimelineDisplayState displayState = {
                 .poweredOn = FTL_FAKE_GUARD(mStateLock, getDisplayDeviceLocked(pacesetterId))
                                      ->getPowerMode() == hal::PowerMode::ON,
                 .modeChangeInProgress = mScheduler->getVsyncSchedule()->isModeChangeInProgress(),
+                .powerModeChangeInProgress = powerModeChangeInProgress,
         };
         mFrameTimeline->setSfWakeUp(ftl::to_underlying(vsyncId),
                                     pacesetterFrameTargetPtr->frameBeginTime().ns(),
@@ -3024,7 +3042,7 @@ bool SurfaceFlinger::commit(PhysicalDisplayId pacesetterId,
         bool updateAttachedChoreographer = mUpdateAttachedChoreographer;
         mUpdateAttachedChoreographer = false;
 
-        Mutex::Autolock lock(mStateLock);
+        MODE_TRANSITION_LOCK();
         mScheduler->chooseRefreshRateForContent(&mLayerHierarchyBuilder.getHierarchy(),
                                                 updateAttachedChoreographer);
 
@@ -3050,13 +3068,10 @@ bool SurfaceFlinger::commit(PhysicalDisplayId pacesetterId,
     return mustComposite && CC_LIKELY(mBootStage != BootStage::BOOTLOADER);
 }
 
-SurfaceFlinger::RefreshArgsPartition SurfaceFlinger::addOutputsToRefreshArgs(
+std::optional<compositionengine::CompositionRefreshArgs> SurfaceFlinger::addOutputsToRefreshArgs(
         PhysicalDisplayId pacesetterId,
-        const compositionengine::CompositionRefreshArgs& refreshArgs,
+        compositionengine::CompositionRefreshArgs& mainThreadRefreshArgs,
         const scheduler::FrameTargeters& frameTargeters) {
-    compositionengine::CompositionRefreshArgs mainThreadRefreshArgs = refreshArgs;
-    compositionengine::CompositionRefreshArgs offloadedRefreshArgs = refreshArgs;
-
     const auto& pacesetterTarget = frameTargeters.get(pacesetterId)->get()->target();
     const auto& displays = FTL_FAKE_GUARD(mStateLock, mDisplays);
 
@@ -3104,6 +3119,9 @@ SurfaceFlinger::RefreshArgsPartition SurfaceFlinger::addOutputsToRefreshArgs(
         mainThreadRefreshArgs.frameTargets.try_emplace(id, &targeter->target());
     }
 
+    // Lazily initialize offloadedRefreshArgs which is a less-commonly used mode.
+    std::optional<compositionengine::CompositionRefreshArgs> offloadedRefreshArgs;
+
     const bool canOffloadGpuComposition =
             FlagManager::getInstance().offload_gpu_composition() && mRenderEngine->isThreaded();
     for (const auto& [_, display] : displays) {
@@ -3112,8 +3130,13 @@ SurfaceFlinger::RefreshArgsPartition SurfaceFlinger::addOutputsToRefreshArgs(
         }
 
         const Fps refreshRate = display->getAdjustedRefreshRate();
-        if (refreshRate.isValid() &&
-            !mScheduler->isVsyncInPhase(pacesetterTarget.frameBeginTime(), refreshRate)) {
+        const auto vsyncTime = FlagManager::getInstance().bugfix_virtual_display_refresh_rate()
+                ? pacesetterTarget.expectedPresentTime()
+                : pacesetterTarget.frameBeginTime();
+        if (refreshRate.isValid() && !mScheduler->isVsyncInPhase(vsyncTime, refreshRate)) {
+            if (FlagManager::getInstance().bugfix_virtual_display_refresh_rate()) {
+                mScheduler->scheduleFrame();
+            }
             continue;
         }
 
@@ -3125,23 +3148,24 @@ SurfaceFlinger::RefreshArgsPartition SurfaceFlinger::addOutputsToRefreshArgs(
         // client composition to avoid performance issue.
         if (canOffloadGpuComposition && !anyMainThreadClientComposition &&
             display->isGpuVirtualDisplay()) {
-            offloadedRefreshArgs.outputs.push_back(display->getCompositionDisplay());
+            if (!offloadedRefreshArgs) {
+                // Initialize the offloadedRefreshArgs now that it is known to be needed.
+                offloadedRefreshArgs = mainThreadRefreshArgs;
+                offloadedRefreshArgs->outputs.clear();
+                offloadedRefreshArgs->frameTargets.clear();
+
+                // Populate properties for offload thread
+                offloadedRefreshArgs->hasTrustedPresentationListener = false;
+                offloadedRefreshArgs->bufferIdsToUncache = {};
+            }
+            offloadedRefreshArgs->outputs.push_back(display->getCompositionDisplay());
 
         } else {
             mainThreadRefreshArgs.outputs.push_back(display->getCompositionDisplay());
         }
     }
 
-    // Populate properties for offload thread
-    if (offloadedRefreshArgs.outputs.empty()) {
-        return {.mainThreadRefreshArgs = std::move(mainThreadRefreshArgs),
-                .offloadedRefreshArgs = std::nullopt};
-    }
-    offloadedRefreshArgs.hasTrustedPresentationListener = false;
-    offloadedRefreshArgs.bufferIdsToUncache = {};
-
-    return {.mainThreadRefreshArgs = std::move(mainThreadRefreshArgs),
-            .offloadedRefreshArgs = offloadedRefreshArgs};
+    return offloadedRefreshArgs;
 }
 
 std::future<void> SurfaceFlinger::offloadGpuCompositedDisplays(
@@ -3226,21 +3250,21 @@ CompositeResultsPerDisplay SurfaceFlinger::composite(
     const auto presentTime = systemTime();
     refreshArgs.refreshStartTime = presentTime;
 
-    auto [mainThreadRefreshArgs, optionalOffloadedRefreshArgs] =
+    auto optionalOffloadedRefreshArgs =
             addOutputsToRefreshArgs(pacesetterId, refreshArgs, frameTargeters);
 
     constexpr bool kCursorOnly = false;
     const auto layers = mLayerSnapshotBuilder.hasMergedSnapshots()
-            ? copyMergedSnapshots(mainThreadRefreshArgs)
-            : addLayerSnapshotsToCompositionArgs(mainThreadRefreshArgs, kCursorOnly);
-    // setVisibleRegionDirtyIfNeeded(mainThreadRefreshArgs);
+            ? copyMergedSnapshots(refreshArgs)
+            : addLayerSnapshotsToCompositionArgs(refreshArgs, kCursorOnly);
+    // setVisibleRegionDirtyIfNeeded(refreshArgs);
 
-    prepareLayersForComposition(mainThreadRefreshArgs, kCursorOnly, layers);
+    prepareLayersForComposition(refreshArgs, kCursorOnly, layers);
 
     for (auto& [layer, layerFE] : layers) {
         validateForReadback(layerFE);
     }
-    setupOutputsForReadback(mainThreadRefreshArgs.outputs);
+    setupOutputsForReadback(refreshArgs.outputs);
 
     std::vector<std::pair<Layer*, LayerFE*>> offloadedLayers;
     if (optionalOffloadedRefreshArgs) {
@@ -3251,11 +3275,11 @@ CompositeResultsPerDisplay SurfaceFlinger::composite(
     }
 
     std::unordered_set<uint32_t> mainThreadLayerStacks;
-    for (auto& output : mainThreadRefreshArgs.outputs) {
+    for (auto& output : refreshArgs.outputs) {
         mainThreadLayerStacks.insert(output->getState().layerFilter.layerStack.id);
     }
 
-    mainThreadRefreshArgs.layersWithQueuedFrames.reserve(mLayersWithQueuedFrames.size());
+    refreshArgs.layersWithQueuedFrames.reserve(mLayersWithQueuedFrames.size());
     if (optionalOffloadedRefreshArgs) {
         optionalOffloadedRefreshArgs->layersWithQueuedFrames.reserve(
                 mLayersWithQueuedFrames.size());
@@ -3268,7 +3292,7 @@ CompositeResultsPerDisplay SurfaceFlinger::composite(
                 (layerFE->mSnapshot != nullptr &&
                  layerFE->mSnapshot->outputFilter.layerStack != ui::UNASSIGNED_LAYER_STACK &&
                  mainThreadLayerStacks.count(layerFE->mSnapshot->outputFilter.layerStack.id))) {
-                mainThreadRefreshArgs.layersWithQueuedFrames.push_back(layerFE);
+                refreshArgs.layersWithQueuedFrames.push_back(layerFE);
             } else {
                 optionalOffloadedRefreshArgs->layersWithQueuedFrames.push_back(layerFE);
             }
@@ -3290,13 +3314,12 @@ CompositeResultsPerDisplay SurfaceFlinger::composite(
                 offloadGpuCompositedDisplays(std::move(*optionalOffloadedRefreshArgs));
     }
 
-    mCompositionEngine->present(mainThreadRefreshArgs);
+    mCompositionEngine->present(refreshArgs);
 
-    finalizeReadback(mainThreadRefreshArgs.outputs);
+    finalizeReadback(refreshArgs.outputs);
 
     ftl::Flags<adpf::Workload> compositedWorkload;
-    if (mainThreadRefreshArgs.updatingGeometryThisFrame ||
-        mainThreadRefreshArgs.updatingOutputGeometryThisFrame) {
+    if (refreshArgs.updatingGeometryThisFrame || refreshArgs.updatingOutputGeometryThisFrame) {
         compositedWorkload |= adpf::Workload::VISIBLE_REGION;
     }
     if (mFrontEndDisplayInfosChanged) {
@@ -3396,11 +3419,11 @@ CompositeResultsPerDisplay SurfaceFlinger::composite(
     }
 
     if (!mLayerSnapshotBuilder.hasMergedSnapshots()) {
-        moveSnapshotsFromCompositionArgs(refreshArgs, layers);
+        moveSnapshotsFromCompositionArgs(layers);
     }
     if (optionalOffloadedRefreshArgs) {
         offloadedCompositionFuture->wait();
-        moveSnapshotsFromCompositionArgs(*optionalOffloadedRefreshArgs, offloadedLayers);
+        moveSnapshotsFromCompositionArgs(offloadedLayers);
     }
     mTimeStats->recordFrameDuration(pacesetterTarget.frameBeginTime().ns(), systemTime());
 
@@ -4256,12 +4279,7 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
         nativeWindow->setSwapInterval(nativeWindow.get(), 0);
     }
 
-    if (FlagManager::getInstance().correct_virtual_display_power_state()) {
-        creationArgs.initialPowerMode = state.initialPowerMode;
-    } else {
-        creationArgs.initialPowerMode =
-                state.isVirtual() ? hal::PowerMode::ON : hal::PowerMode::OFF;
-    }
+    creationArgs.initialPowerMode = state.initialPowerMode;
 
     creationArgs.requestedRefreshRate = state.requestedRefreshRate;
 
@@ -4282,7 +4300,9 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
     display->setProjection(state.orientation, state.layerStackSpaceRect,
                            state.orientedDisplaySpaceRect);
     display->setDisplayName(state.displayName);
-    display->setOptimizationPolicy(state.optimizationPolicy);
+    if (state.optimizationPolicy == gui::ISurfaceComposer::OptimizationPolicy::optimizeForPower) {
+        display->enableForceOptimizationPolicyForPower();
+    }
     display->setFlags(state.flags);
 
     return display;
@@ -4292,7 +4312,6 @@ void SurfaceFlinger::incRefreshableDisplays() {
     if (FlagManager::getInstance().no_vsyncs_on_screen_off()) {
         mRefreshableDisplays++;
         if (mRefreshableDisplays == 1) {
-            ftl::FakeGuard guard(kMainThreadContext);
             mScheduler->omitVsyncDispatching(false);
         }
     }
@@ -4302,7 +4321,6 @@ void SurfaceFlinger::decRefreshableDisplays() {
     if (FlagManager::getInstance().no_vsyncs_on_screen_off()) {
         mRefreshableDisplays--;
         if (mRefreshableDisplays == 0) {
-            ftl::FakeGuard guard(kMainThreadContext);
             mScheduler->omitVsyncDispatching(true);
         }
     }
@@ -4439,9 +4457,7 @@ void SurfaceFlinger::processDisplayAdded(const wp<IBinder>& displayToken,
         incRefreshableDisplays();
     }
 
-    if (FlagManager::getInstance().correct_virtual_display_power_state()) {
-        applyOptimizationPolicy(__func__);
-    }
+    applyOptimizationPolicy(__func__);
 
     mDisplays.try_emplace(displayToken, std::move(display));
 
@@ -4501,9 +4517,7 @@ void SurfaceFlinger::processDisplayRemoved(const wp<IBinder>& displayToken) {
         }));
     }
 
-    if (FlagManager::getInstance().correct_virtual_display_power_state()) {
-        applyOptimizationPolicy(__func__);
-    }
+    applyOptimizationPolicy(__func__);
 }
 
 void SurfaceFlinger::processDisplayChanged(const wp<IBinder>& displayToken,
@@ -4540,17 +4554,24 @@ void SurfaceFlinger::processDisplayChanged(const wp<IBinder>& displayToken,
         processDisplayAdded(displayToken, currentState);
 
         if (currentState.isPhysical()) {
-            const auto display = getDisplayDeviceLocked(displayToken);
-            if (!mSkipPowerOnForQuiescent) {
-                setPhysicalDisplayPowerMode(display, hal::PowerMode::ON);
-            }
+            static_cast<void>(
+                    mScheduler->schedule([this, displayToken]() FTL_FAKE_GUARD(kMainThreadContext) {
+                        const auto display =
+                                (ftl::FakeGuard(mStateLock), getDisplayDeviceLocked(displayToken));
+                        if (!display) return;
 
-            if (display->getPhysicalId() == mFrontInternalDisplayId) {
-                if (mScheduler->designatePacesetterDisplay()) {
-                    onNewPacesetterDisplay();
-                }
-                onNewFrontInternalDisplay(nullptr, *display);
-            }
+                        if (!mSkipPowerOnForQuiescent) {
+                            setPhysicalDisplayPowerMode(display, hal::PowerMode::ON);
+                        }
+
+                        if (display->getPhysicalId() == mFrontInternalDisplayId) {
+                            if (mScheduler->designatePacesetterDisplay()) {
+                                MODE_TRANSITION_LOCK();
+                                onNewPacesetterDisplay();
+                            }
+                            onNewFrontInternalDisplay(nullptr, *display);
+                        }
+                    }));
         }
         return;
     }
@@ -4561,7 +4582,11 @@ void SurfaceFlinger::processDisplayChanged(const wp<IBinder>& displayToken,
                                                               currentState.layerStack));
         }
         if (currentState.flags != drawingState.flags) {
+            auto prevOptimizationPolicy = display->getOptimizationPolicy();
             display->setFlags(currentState.flags);
+            if (prevOptimizationPolicy != display->getOptimizationPolicy()) {
+                applyOptimizationPolicy(__func__);
+            }
         }
 
         const auto updateDisplaySize = [&]() REQUIRES(mStateLock) {
@@ -4681,22 +4706,15 @@ void SurfaceFlinger::updateInputFlinger(VsyncId vsyncId, TimePoint frameTime) {
     std::vector<WindowInfo> windowInfos;
     std::vector<DisplayInfo> displayInfos;
     bool updateWindowInfo = false;
+    bool visibleWindowsChanged = false;
     if (mUpdateInputInfo) {
         mUpdateInputInfo = false;
         updateWindowInfo = true;
-        buildWindowInfos(windowInfos, displayInfos);
-    }
-
-    std::unordered_set<int32_t> visibleWindowIds;
-    for (WindowInfo& windowInfo : windowInfos) {
-        if (!windowInfo.inputConfig.test(WindowInfo::InputConfig::NOT_VISIBLE)) {
-            visibleWindowIds.insert(windowInfo.id);
+        buildWindowInfos(windowInfos, displayInfos, mVisibleWindowIds);
+        if (mVisibleWindowIds != mLastVisibleWindowIds) {
+            visibleWindowsChanged = true;
+            std::swap(mLastVisibleWindowIds, mVisibleWindowIds);
         }
-    }
-    bool visibleWindowsChanged = false;
-    if (visibleWindowIds != mVisibleWindowIds) {
-        visibleWindowsChanged = true;
-        mVisibleWindowIds = std::move(visibleWindowIds);
     }
 
     BackgroundExecutor::getInstance().sendCallbacks(
@@ -4763,14 +4781,18 @@ void SurfaceFlinger::persistDisplayBrightness(bool needsComposite) {
 }
 
 void SurfaceFlinger::buildWindowInfos(std::vector<WindowInfo>& outWindowInfos,
-                                      std::vector<DisplayInfo>& outDisplayInfos) {
+                                      std::vector<DisplayInfo>& outDisplayInfos,
+                                      std::vector<int32_t>& outVisibleWindowIds) {
     static size_t sNumWindowInfos = 0;
     outWindowInfos.reserve(sNumWindowInfos);
-    sNumWindowInfos = 0;
+    outVisibleWindowIds.clear();
 
     mLayerSnapshotBuilder.forEachInputSnapshot(
-            [&outWindowInfos](const frontend::LayerSnapshot& snapshot) {
+            [&outWindowInfos, &outVisibleWindowIds](const frontend::LayerSnapshot& snapshot) {
                 outWindowInfos.push_back(snapshot.inputInfo);
+                if (!snapshot.inputInfo.inputConfig.test(WindowInfo::InputConfig::NOT_VISIBLE)) {
+                    outVisibleWindowIds.push_back(snapshot.inputInfo.id);
+                }
             });
 
     sNumWindowInfos = outWindowInfos.size();
@@ -4793,7 +4815,7 @@ void SurfaceFlinger::updateCursorAsync() {
     constexpr bool kCursorOnly = true;
     const auto layers = addLayerSnapshotsToCompositionArgs(refreshArgs, kCursorOnly);
     mCompositionEngine->updateCursorAsync(refreshArgs);
-    moveSnapshotsFromCompositionArgs(refreshArgs, layers);
+    moveSnapshotsFromCompositionArgs(layers);
 }
 
 void SurfaceFlinger::requestHardwareVsync(PhysicalDisplayId displayId, bool enable) {
@@ -4815,11 +4837,9 @@ void SurfaceFlinger::requestDisplayModes(std::vector<display::DisplayModeRequest
 
     SFTRACE_CALL();
 
-    // If this is called from the main thread mStateLock must be locked before
-    // Currently the only way to call this function from the main thread is from
-    // Scheduler::chooseRefreshRateForContent
-
-    ConditionalLock lock(mStateLock, std::this_thread::get_id() != mMainThreadId);
+    // The caller context may be the main thread (via Scheduler::chooseRefreshRateForContent) or a
+    // OneShotTimer thread. The main thread already locks, so only lock when off the main thread.
+    MODE_TRANSITION_LOCK_IF(std::this_thread::get_id() != mMainThreadId);
 
     for (auto& request : modeRequests) {
         const auto& modePtr = request.mode.modePtr;
@@ -5658,6 +5678,9 @@ bool SurfaceFlinger::applyAndCommitDisplayTransactionStatesLocked(
 
     mFrontEndDisplayInfosChanged = mTransactionFlags & eDisplayTransactionNeeded;
     if (mFrontEndDisplayInfosChanged) {
+        ConditionalLock lock(mModeTransitionMutex,
+                             FlagManager::getInstance()
+                                     .follower_arbitrary_refresh_rate_selection_combined());
         processDisplayChangesLocked();
         mFrontEndDisplayInfos.clear();
         for (const auto& [_, display] : mDisplays) {
@@ -6125,11 +6148,13 @@ void SurfaceFlinger::initializeDisplays() {
     }
 
     {
-        ftl::FakeGuard guard(mStateLock);
+        const auto& displays = FTL_FAKE_GUARD(mStateLock, mDisplays);
 
         // In case of a restart, ensure all displays are off.
-        for (const auto& [id, display] : mPhysicalDisplays) {
-            setPhysicalDisplayPowerMode(getDisplayDeviceLocked(id), hal::PowerMode::OFF);
+        for (const auto& [_, display] : displays) {
+            if (display->isPhysical()) {
+                setPhysicalDisplayPowerMode(display, hal::PowerMode::OFF);
+            }
         }
 
         // Power on all displays. The primary display is first, so becomes the active display. Also,
@@ -6137,8 +6162,10 @@ void SurfaceFlinger::initializeDisplays() {
         // before responding to any Binder query from DisplayManager about display capabilities.
         // Additionally, do not turn on displays if the boot should be quiescent.
         if (!mSkipPowerOnForQuiescent) {
-            for (const auto& [id, display] : mPhysicalDisplays) {
-                setPhysicalDisplayPowerMode(getDisplayDeviceLocked(id), hal::PowerMode::ON);
+            for (const auto& [_, display] : displays) {
+                if (display->isPhysical()) {
+                    setPhysicalDisplayPowerMode(display, hal::PowerMode::ON);
+                }
             }
         }
     }
@@ -6153,6 +6180,7 @@ void SurfaceFlinger::setPhysicalDisplayPowerMode(const sp<DisplayDevice>& displa
 ftl::FinalizerStd SurfaceFlinger::makePowerModeAsyncFinalizer(PhysicalDisplayId displayId,
                                                               hal::PowerMode mode) {
     return ftl::Finalizer([this, displayId, mode]() FTL_FAKE_GUARD(kMainThreadContext) {
+        mPowerModeChangeInProgress = true;
         if (displayId == mFrontInternalDisplayId) {
             mTimeStats->setPowerMode(mode);
             mScheduler->setActiveDisplayPowerModeForRefreshRateStats(mode);
@@ -6180,10 +6208,12 @@ SurfaceFlinger::setPhysicalDisplayPowerModeAsync(const sp<DisplayDevice>& displa
     if (currentMode == mode) {
         return {ftl::yield<status_t>(NO_ERROR), ftl::FinalizerStd()};
     }
+    mPowerModeChangeInProgress = true;
 
-    const bool isInternalDisplay = mPhysicalDisplays.get(displayId)
-                                           .transform(&PhysicalDisplay::isInternal)
-                                           .value_or(false);
+    const bool isInternalDisplay = (ftl::FakeGuard(mStateLock),
+                                    mPhysicalDisplays.get(displayId)
+                                            .transform(&PhysicalDisplay::isInternal)
+                                            .value_or(false));
 
     const bool couldRefresh = display->isRefreshable();
     display->setPowerMode(mode);
@@ -6195,22 +6225,18 @@ SurfaceFlinger::setPhysicalDisplayPowerModeAsync(const sp<DisplayDevice>& displa
         incRefreshableDisplays();
     }
 
-    const bool shouldApplyOptimizationPolicy =
-            FlagManager::getInstance().disable_synthetic_vsync_for_performance() &&
-            FlagManager::getInstance().correct_virtual_display_power_state();
-    if (shouldApplyOptimizationPolicy) {
-        applyOptimizationPolicy(__func__);
-    }
+    applyOptimizationPolicy(__func__);
 
     if (mScheduler->setDisplayPowerMode(displayId, mode)) {
+        MODE_TRANSITION_LOCK();
         onNewPacesetterDisplay();
     }
 
     const auto activeMode = display->refreshRateSelector().getActiveMode().modePtr;
-    using OptimizationPolicy = gui::ISurfaceComposer::OptimizationPolicy;
     if (currentMode == hal::PowerMode::OFF) {
         // Turn on the display
-        const auto frontInternalDisplay = getFrontInternalDisplayLocked();
+        const auto frontInternalDisplay =
+                (ftl::FakeGuard(mStateLock), getFrontInternalDisplayLocked());
 
         // Detects the new front internal display when the inner or outer display of a foldable is
         // powered on. This condition relies on the above DisplayDevice::setPowerMode. If `display`
@@ -6221,18 +6247,12 @@ SurfaceFlinger::setPhysicalDisplayPowerModeAsync(const sp<DisplayDevice>& displa
             onNewFrontInternalDisplay(frontInternalDisplay.get(), *display);
         }
 
-        if (displayId == mFrontInternalDisplayId && !shouldApplyOptimizationPolicy) {
-            optimizeThreadScheduling("setPhysicalDisplayPowerMode(ON/DOZE)",
-                                     OptimizationPolicy::optimizeForPerformance);
-        }
-
         if (FlagManager::getInstance().set_power_mode_async()) {
             // Revert to OFF until hardware op completes.
             display->setPowerMode(currentMode);
         }
         return {getHwComposer().setPowerMode(displayId, mode),
-                ftl::Finalizer([this, displayId, mode, shouldApplyOptimizationPolicy, activeMode,
-                                display]()
+                ftl::Finalizer([this, displayId, mode, activeMode, display]()
                                        FTL_FAKE_GUARD(kMainThreadContext) {
                                            const auto _ =
                                                    makePowerModeAsyncFinalizer(displayId, mode);
@@ -6246,11 +6266,6 @@ SurfaceFlinger::setPhysicalDisplayPowerModeAsync(const sp<DisplayDevice>& displa
                                                        mScheduler->getVsyncSchedule(displayId)
                                                                ->getPendingHardwareVsyncState();
                                                requestHardwareVsync(displayId, enable);
-
-                                               if (displayId == mFrontInternalDisplayId &&
-                                                   !shouldApplyOptimizationPolicy) {
-                                                   mScheduler->enableSyntheticVsync(false);
-                                               }
 
                                                constexpr bool kAllowToEnable = true;
                                                mScheduler->resyncToHardwareVsync(displayId,
@@ -6268,17 +6283,9 @@ SurfaceFlinger::setPhysicalDisplayPowerModeAsync(const sp<DisplayDevice>& displa
 
         if (displayId == mFrontInternalDisplayId) {
             if (const auto display = findFrontInternalDisplay()) {
-                const auto frontInternalDisplay = getFrontInternalDisplayLocked();
+                const auto frontInternalDisplay =
+                        (ftl::FakeGuard(mStateLock), getFrontInternalDisplayLocked());
                 onNewFrontInternalDisplay(frontInternalDisplay.get(), *display);
-            } else {
-                if (!shouldApplyOptimizationPolicy) {
-                    optimizeThreadScheduling("setPhysicalDisplayPowerMode(OFF)",
-                                             OptimizationPolicy::optimizeForPower);
-                }
-
-                if (currentModeNotDozeSuspend && !shouldApplyOptimizationPolicy) {
-                    mScheduler->enableSyntheticVsync();
-                }
             }
         }
         if (currentModeNotDozeSuspend) {
@@ -6303,31 +6310,28 @@ SurfaceFlinger::setPhysicalDisplayPowerModeAsync(const sp<DisplayDevice>& displa
     } else if (mode == hal::PowerMode::DOZE || mode == hal::PowerMode::ON) {
         // Update display while dozing
         return {getHwComposer().setPowerMode(displayId, mode),
-                ftl::Finalizer([this, currentMode, displayId, mode, shouldApplyOptimizationPolicy,
-                                activeMode]() FTL_FAKE_GUARD(kMainThreadContext) {
-                    const auto _ = makePowerModeAsyncFinalizer(displayId, mode);
-                    if (currentMode == hal::PowerMode::DOZE_SUSPEND) {
-                        if (displayId == mFrontInternalDisplayId) {
-                            ALOGI("Force repainting for DOZE_SUSPEND -> DOZE or ON.");
-                            mVisibleRegionsDirty = true;
-                            scheduleRepaint();
-                            if (!shouldApplyOptimizationPolicy) {
-                                mScheduler->enableSyntheticVsync(false);
-                            }
-                        }
-                        constexpr bool kAllowToEnable = true;
-                        mScheduler->resyncToHardwareVsync(displayId, kAllowToEnable,
-                                                          activeMode.get());
-                    }
-                })};
+                ftl::Finalizer([this, currentMode, displayId, mode, activeMode]()
+                                       FTL_FAKE_GUARD(kMainThreadContext) {
+                                           const auto _ =
+                                                   makePowerModeAsyncFinalizer(displayId, mode);
+                                           if (currentMode == hal::PowerMode::DOZE_SUSPEND) {
+                                               if (displayId == mFrontInternalDisplayId) {
+                                                   ALOGI("Force repainting for DOZE_SUSPEND -> "
+                                                         "DOZE or ON.");
+                                                   mVisibleRegionsDirty = true;
+                                                   scheduleRepaint();
+                                               }
+                                               constexpr bool kAllowToEnable = true;
+                                               mScheduler->resyncToHardwareVsync(displayId,
+                                                                                 kAllowToEnable,
+                                                                                 activeMode.get());
+                                           }
+                                       })};
     } else if (mode == hal::PowerMode::DOZE_SUSPEND) {
         // Leave display going to doze
         constexpr bool kDisallow = true;
         mScheduler->disableHardwareVsync(displayId, kDisallow);
 
-        if (displayId == mFrontInternalDisplayId && !shouldApplyOptimizationPolicy) {
-            mScheduler->enableSyntheticVsync();
-        }
         return {getHwComposer().setPowerMode(displayId, mode),
                 makePowerModeAsyncFinalizer(displayId, mode)};
     } else {
@@ -6347,7 +6351,7 @@ void SurfaceFlinger::setVirtualDisplayPowerMode(const sp<DisplayDevice>& display
     const auto displayId = display->getVirtualId();
     ALOGD("Setting power mode %d on virtual display %s %s", mode, to_string(displayId).c_str(),
           display->getDisplayName().c_str());
-
+    mPowerModeChangeInProgress = true;
     display->setPowerMode(static_cast<hal::PowerMode>(mode));
 
     applyOptimizationPolicy(__func__);
@@ -6368,17 +6372,23 @@ void SurfaceFlinger::optimizeThreadScheduling(
     setSchedFifo(optimizeForPerformance, whence);
 }
 
-void SurfaceFlinger::applyOptimizationPolicy(const char* whence) {
+void SurfaceFlinger::applyOptimizationPolicy(const char* whence) FTL_FAKE_GUARD(mStateLock) {
     using OptimizationPolicy = gui::ISurfaceComposer::OptimizationPolicy;
 
     const bool optimizeForPerformance =
             std::any_of(mDisplays.begin(), mDisplays.end(), [](const auto& pair) {
                 const auto& display = pair.second;
-                return display->isPoweredOn() &&
+                const bool displayPoweredOn =
+                        FlagManager::getInstance().align_adpf_with_sf_opt_policy()
+                        ? display->getPowerMode() == hal::PowerMode::ON
+                        : display->isPoweredOn();
+                return displayPoweredOn &&
                         display->getOptimizationPolicy() ==
                         OptimizationPolicy::optimizeForPerformance;
             });
-
+    if (FlagManager::getInstance().align_adpf_with_sf_opt_policy()) {
+        mPowerAdvisor->setOptimizeForPerformance(optimizeForPerformance);
+    }
     optimizeThreadScheduling(whence,
                              optimizeForPerformance ? OptimizationPolicy::optimizeForPerformance
                                                     : OptimizationPolicy::optimizeForPower);
@@ -6398,9 +6408,14 @@ void SurfaceFlinger::applyOptimizationPolicy(const char* whence) {
 }
 
 void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
+    const auto powerMode = static_cast<hal::PowerMode>(mode);
+    const char* whence = __func__;
+    SFTRACE_FORMAT("%s(%s)", whence, toString(powerMode).c_str());
+    mPowerModeInProgressCount++;
     auto future = mScheduler->schedule([=, this]() FTL_FAKE_GUARD(kMainThreadContext)
                                                -> std::pair<ftl::Future<status_t>,
                                                             ftl::FinalizerStd> {
+        SFTRACE_FORMAT("%s(%s)", whence, toString(powerMode).c_str());
         mSkipPowerOnForQuiescent = false;
         const auto display = FTL_FAKE_GUARD(mStateLock, getDisplayDeviceLocked(displayToken));
         if (!display) {
@@ -6410,29 +6425,23 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
                 if (state.isVirtual()) {
                     ALOGD("Setting power mode %d for a dormant virtual display with token %p", mode,
                           displayToken.get());
-                    state.initialPowerMode = static_cast<hal::PowerMode>(mode);
+                    state.initialPowerMode = powerMode;
                     return {ftl::yield<status_t>(NO_ERROR), ftl::FinalizerStd()};
                 }
             }
             ALOGE("Failed to set power mode %d for display token %p", mode, displayToken.get());
         } else if (display->isVirtual()) {
-            if (FlagManager::getInstance().correct_virtual_display_power_state()) {
-                ftl::FakeGuard guard(mStateLock);
-                setVirtualDisplayPowerMode(display, static_cast<hal::PowerMode>(mode));
-            } else {
-                ALOGW("Attempt to set power mode %d for virtual display", mode);
-            }
+            setVirtualDisplayPowerMode(display, powerMode);
         } else {
-            ftl::FakeGuard guard(mStateLock);
             if (FlagManager::getInstance().set_power_mode_async() &&
                 display->getCompositionDisplay()->supportsOffloadPresent()) {
                 ALOGD("Setting power mode %d asynchronously for a physical display with token %p",
                       mode, displayToken.get());
-                return setPhysicalDisplayPowerModeAsync(display, static_cast<hal::PowerMode>(mode));
+                return setPhysicalDisplayPowerModeAsync(display, powerMode);
             } else {
                 ALOGD("Setting power mode %d synchronously for a physical display with token %p",
                       mode, displayToken.get());
-                setPhysicalDisplayPowerMode(display, static_cast<hal::PowerMode>(mode));
+                setPhysicalDisplayPowerMode(display, powerMode);
             }
         }
         return {ftl::yield<status_t>(NO_ERROR), ftl::FinalizerStd()};
@@ -6441,6 +6450,7 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
     auto [hwcFuture, finalizer] = future.get();
     hwcFuture.get();
     mScheduler->schedule([c = std::move(finalizer)]() {}).wait();
+    mPowerModeInProgressCount--;
 }
 
 status_t SurfaceFlinger::doDump(int fd, const DumpArgs& args, bool asProto) {
@@ -6932,24 +6942,15 @@ void SurfaceFlinger::dumpRenderCommandBuffers(std::string& result) {
 
     int numDumps = 0;
     mLayerSnapshotBuilder.forEachSnapshot([&](const frontend::LayerSnapshot& snapshot) {
-        if (snapshot.renderCommandBufferConsumer != nullptr) {
+        if (snapshot.renderCommandBuffer != nullptr) {
             std::string filename_prefix = dump_output_path + std::to_string(numDumps) + "_";
             std::string rcb_filename = filename_prefix + "rcb.dump";
 
-            auto buffer = snapshot.renderCommandBufferConsumer->getCurrentBuffer();
+            snapshot.renderCommandBuffer->dumpToFile(rcb_filename.c_str());
 
-            if (buffer != nullptr) {
-                buffer->dumpToFile(
-                        rcb_filename.c_str());
-
-                dump_output_string << "  Layer: " << snapshot.name << " (sequence: "
-                                   << snapshot.sequence << ")\n";
-                dump_output_string << "    RenderCommandBuffer dumped to: " << rcb_filename << "\n";
-            } else {
-                dump_output_string << "  Layer: " << snapshot.name << " (sequence: "
-                                   << snapshot.sequence << ")\n";
-                dump_output_string << "    ERROR: RenderCommandBuffer is null.\n";
-            }
+            dump_output_string << "  Layer: " << snapshot.name
+                               << " (sequence: " << snapshot.sequence << ")\n";
+            dump_output_string << "    RenderCommandBuffer dumped to: " << rcb_filename << "\n";
             numDumps++;
         }
     });
@@ -8032,25 +8033,26 @@ void SurfaceFlinger::captureDisplay(const DisplayCaptureArgs& args,
         return;
     }
 
-    ScreenshotArgs screenshotArgs{.captureTypeVariant = args.displayToken,
-                                  .snapshotRequest =
-                                          SnapshotRequestArgs{.uid = gui::Uid{static_cast<uid_t>(
-                                                                      captureArgs.uid)},
-                                                              .excludeLayerIds =
-                                                                      excludeLayerIds.value()},
-                                  .sourceCrop = gui::aidl_utils::fromARect(captureArgs.sourceCrop),
-                                  .size = ui::Size(args.width, args.height),
-                                  .dataspace = static_cast<ui::Dataspace>(captureArgs.dataspace),
-                                  .disableBlur = false,
-                                  .isGrayscale = captureArgs.grayscale,
-                                  .isSecure =
-                                          captureArgs.secureLayerMode == SecureLayerMode::Capture,
-                                  .includeProtected = captureArgs.protectedLayerMode ==
-                                          ProtectedLayerMode::Capture,
-                                  .preserveDisplayColors = captureArgs.preserveDisplayColors,
-                                  .requireDpuReadback =
-                                          captureArgs.captureMode == CaptureMode::RequireOptimized,
-                                  .debugName = "ScreenCapture"};
+    ScreenshotArgs
+            screenshotArgs{.captureTypeVariant = args.displayToken,
+                           .snapshotRequest =
+                                   SnapshotRequestArgs{.uid = gui::Uid{static_cast<uid_t>(
+                                                               captureArgs.uid)},
+                                                       .excludeLayerIds = excludeLayerIds.value(),
+                                                       .exclusionMask = static_cast<uint32_t>(
+                                                               captureArgs.exclusionMask)},
+                           .sourceCrop = gui::aidl_utils::fromARect(captureArgs.sourceCrop),
+                           .size = ui::Size(args.width, args.height),
+                           .dataspace = static_cast<ui::Dataspace>(captureArgs.dataspace),
+                           .disableBlur = false,
+                           .isGrayscale = captureArgs.grayscale,
+                           .isSecure = captureArgs.secureLayerMode == SecureLayerMode::Capture,
+                           .includeProtected =
+                                   captureArgs.protectedLayerMode == ProtectedLayerMode::Capture,
+                           .preserveDisplayColors = captureArgs.preserveDisplayColors,
+                           .requireDpuReadback =
+                                   captureArgs.captureMode == CaptureMode::RequireOptimized,
+                           .debugName = "ScreenCapture"};
 
     captureScreenCommon(screenshotArgs, static_cast<ui::PixelFormat>(captureArgs.pixelFormat),
                         captureListener);
@@ -8121,28 +8123,28 @@ void SurfaceFlinger::captureLayers(const LayerCaptureArgs& args,
         return;
     }
 
-    ScreenshotArgs screenshotArgs{.captureTypeVariant = LayerHandle::getLayerId(args.layerHandle),
-                                  .snapshotRequest =
-                                          SnapshotRequestArgs{.uid = gui::Uid{static_cast<uid_t>(
-                                                                      captureArgs.uid)},
-                                                              .rootLayerId =
-                                                                      LayerHandle::getLayerId(
-                                                                              args.layerHandle),
-                                                              .excludeLayerIds =
-                                                                      excludeLayerIds.value(),
-                                                              .childrenOnly = args.childrenOnly},
-                                  .sourceCrop = gui::aidl_utils::fromARect(captureArgs.sourceCrop),
-                                  .dataspace = static_cast<ui::Dataspace>(captureArgs.dataspace),
-                                  .frameScaleX = captureArgs.frameScaleX,
-                                  .frameScaleY = captureArgs.frameScaleY,
-                                  .disableBlur = false,
-                                  .isGrayscale = captureArgs.grayscale,
-                                  .isSecure =
-                                          captureArgs.secureLayerMode == SecureLayerMode::Capture,
-                                  .includeProtected = captureArgs.protectedLayerMode ==
-                                          ProtectedLayerMode::Capture,
-                                  .preserveDisplayColors = captureArgs.preserveDisplayColors,
-                                  .debugName = "ScreenCapture"};
+    ScreenshotArgs
+            screenshotArgs{.captureTypeVariant = LayerHandle::getLayerId(args.layerHandle),
+                           .snapshotRequest =
+                                   SnapshotRequestArgs{.uid = gui::Uid{static_cast<uid_t>(
+                                                               captureArgs.uid)},
+                                                       .rootLayerId = LayerHandle::getLayerId(
+                                                               args.layerHandle),
+                                                       .excludeLayerIds = excludeLayerIds.value(),
+                                                       .childrenOnly = args.childrenOnly,
+                                                       .exclusionMask = static_cast<uint32_t>(
+                                                               captureArgs.exclusionMask)},
+                           .sourceCrop = gui::aidl_utils::fromARect(captureArgs.sourceCrop),
+                           .dataspace = static_cast<ui::Dataspace>(captureArgs.dataspace),
+                           .frameScaleX = captureArgs.frameScaleX,
+                           .frameScaleY = captureArgs.frameScaleY,
+                           .disableBlur = false,
+                           .isGrayscale = captureArgs.grayscale,
+                           .isSecure = captureArgs.secureLayerMode == SecureLayerMode::Capture,
+                           .includeProtected =
+                                   captureArgs.protectedLayerMode == ProtectedLayerMode::Capture,
+                           .preserveDisplayColors = captureArgs.preserveDisplayColors,
+                           .debugName = "ScreenCapture"};
 
     captureScreenCommon(screenshotArgs, static_cast<ui::PixelFormat>(captureArgs.pixelFormat),
                         captureListener);
@@ -8785,12 +8787,6 @@ ftl::SharedFuture<FenceResult> SurfaceFlinger::renderScreenImpl(
     return presentFuture;
 }
 
-void SurfaceFlinger::traverseLegacyLayers(const LayerVector::Visitor& visitor) const {
-    for (auto& layer : mLegacyLayers) {
-        visitor(layer.second.get());
-    }
-}
-
 // ---------------------------------------------------------------------------
 
 ftl::Optional<scheduler::FrameRateMode> SurfaceFlinger::getPreferredDisplayMode(
@@ -8816,7 +8812,7 @@ status_t SurfaceFlinger::setDesiredDisplayModeSpecsInternal(
     const auto displayId = display->getPhysicalId();
     SFTRACE_NAME(ftl::Concat(__func__, ' ', displayId.value).c_str());
 
-    Mutex::Autolock lock(mStateLock);
+    MODE_TRANSITION_LOCK();
 
     if (mDebugDisplayModeSetByBackdoor) {
         // ignore this request as mode is overridden by backdoor
@@ -9126,7 +9122,8 @@ status_t SurfaceFlinger::getMaxAcquiredBufferCount(int* buffers) const {
     if (!getHwComposer().isHeadless()) {
         const sp<const DisplayDevice> display = getPacesetterDisplay();
         if (display) {
-            maxRefreshRate = display->refreshRateSelector().getSupportedRefreshRateRange().max;
+            maxRefreshRate = display->refreshRateSelector().
+                getConfigGroupSupportedRefreshRateRange().max;
         }
     }
 
@@ -9168,7 +9165,7 @@ void SurfaceFlinger::sample() {
     mRegionSamplingThread->onCompositionComplete(scheduleFrameTimeOpt);
 }
 
-sp<DisplayDevice> SurfaceFlinger::findFrontInternalDisplay() const {
+sp<DisplayDevice> SurfaceFlinger::findFrontInternalDisplay() const FTL_FAKE_GUARD(mStateLock) {
     if (mPhysicalDisplays.size() == 1) return nullptr;
 
     return findDisplay([this](const DisplayDevice& display) REQUIRES(mStateLock) {
@@ -9371,7 +9368,6 @@ void SurfaceFlinger::setVisibleRegionDirtyIfNeeded(
 }
 
 void SurfaceFlinger::moveSnapshotsFromCompositionArgs(
-        compositionengine::CompositionRefreshArgs& refreshArgs,
         const std::vector<std::pair<Layer*, LayerFE*>>& layers) {
     std::vector<std::unique_ptr<frontend::LayerSnapshot>>& snapshots =
             mLayerSnapshotBuilder.getSnapshots();
@@ -9489,7 +9485,7 @@ SurfaceFlinger::getLayerSnapshotsForScreenshots(const SnapshotRequestArgs& args)
     };
 
     std::vector<std::pair<Layer*, sp<LayerFE>>> layers;
-    if (args.rootLayerId || !args.excludeLayerIds.empty()) {
+    if (args.rootLayerId || !args.excludeLayerIds.empty() || args.exclusionMask) {
         // Create and update LayerSnapshotBuilder args before iterating through snapshots
         frontend::LayerSnapshotBuilder::Args
                 builderArgs{.root = args.rootLayerId
@@ -9510,7 +9506,9 @@ SurfaceFlinger::getLayerSnapshotsForScreenshots(const SnapshotRequestArgs& args)
                                     getHwComposer().getSupportedLayerGenericMetadata(),
                             .genericLayerMetadataKeyMap = getGenericLayerMetadataKeyMap(),
                             .skipRoundCornersWhenProtected =
-                                    !getRenderEngine().supportsProtectedContent()};
+                                    !getRenderEngine().supportsProtectedContent(),
+                            .renderResourceCache = mIpcCache.get(),
+                            .exclusionMask = args.exclusionMask};
         if (args.rootLayerId) {
             if (builderArgs.root.hasLayerCycle()) {
                 return base::unexpected(BAD_VALUE);
@@ -9632,6 +9630,10 @@ status_t SurfaceFlinger::sfdo_forcePacesetter(PhysicalDisplayId displayId) {
                                        return NAME_NOT_FOUND;
                                    }
                                    if (mScheduler->forcePacesetterDisplay(displayId)) {
+                                       ConditionalLock lock(
+                                               mModeTransitionMutex,
+                                               FlagManager::getInstance()
+                                                       .follower_arbitrary_refresh_rate_selection_combined());
                                        onNewPacesetterDisplay();
                                    }
                                    return OK;
@@ -9643,6 +9645,10 @@ void SurfaceFlinger::sfdo_resetForcedPacesetter() {
     mScheduler
             ->schedule([=, this]() FTL_FAKE_GUARD(kMainThreadContext) FTL_FAKE_GUARD(mStateLock) {
                 if (mScheduler->resetForcedPacesetterDisplay()) {
+                    ConditionalLock
+                            lock(mModeTransitionMutex,
+                                 FlagManager::getInstance()
+                                         .follower_arbitrary_refresh_rate_selection_combined());
                     onNewPacesetterDisplay();
                 }
             })

@@ -1243,7 +1243,7 @@ ftl::Optional<FrameRateMode> RefreshRateSelector::onKernelTimerChanged(
                     })
                     .value();
 
-    const DisplayModePtr& min = mMinRefreshRateModeIt->second;
+    const DisplayModePtr& min = mConfigGroupMinRefreshRateModeIt->second;
     if (current.modePtr->getId() == min->getId()) {
         return {};
     }
@@ -1600,11 +1600,13 @@ void RefreshRateSelector::constructAvailableRefreshRates() {
 
     const auto& defaultMode = mDisplayModes.get(policy->defaultMode)->get();
     const auto sortedModes = sortByRefreshRate(mDisplayModes);
-    mMinRefreshRateModeIt = *std::find_if(sortedModes.cbegin(), sortedModes.cend(),
+    mGlobalMinRefreshRateModeIt = sortedModes.front();
+    mGlobalMaxRefreshRateModeIt = sortedModes.back();
+    mConfigGroupMinRefreshRateModeIt = *std::find_if(sortedModes.cbegin(), sortedModes.cend(),
                                             [group = defaultMode->getGroup()](const auto& it) {
                                                 return it->second->getGroup() == group;
                                             });
-    mMaxRefreshRateModeIt = *std::find_if(sortedModes.crbegin(), sortedModes.crend(),
+    mConfigGroupMaxRefreshRateModeIt = *std::find_if(sortedModes.crbegin(), sortedModes.crend(),
                                             [group = defaultMode->getGroup()](const auto& it) {
                                                 return it->second->getGroup() == group;
                                             });
@@ -1612,11 +1614,15 @@ void RefreshRateSelector::constructAvailableRefreshRates() {
     const auto filterRefreshRates = [&](const FpsRanges& ranges,
                                         const char* rangeName) REQUIRES(mLock) {
         const auto filterModes = [&](const DisplayMode& mode) {
+            bool hdrOutputTypeMatches = FlagManager::getInstance().enable_user_preferred_hdr_mode()
+                    ? mode.getHdrOutputType() == defaultMode->getHdrOutputType()
+                    : true;
             return mode.getResolution() == defaultMode->getResolution() &&
                     mode.getDpi() == defaultMode->getDpi() &&
                     (policy->allowGroupSwitching || mode.getGroup() == defaultMode->getGroup()) &&
                     ranges.physical.includes(mode.getPeakFps()) &&
-                    (supportsFrameRateOverride() || ranges.render.includes(mode.getPeakFps()));
+                    (supportsFrameRateOverride() || ranges.render.includes(mode.getPeakFps())) &&
+                    hdrOutputTypeMatches;
         };
 
         auto frameRateModes = createFrameRateModes(*policy, filterModes, ranges.render);
@@ -1695,13 +1701,13 @@ void RefreshRateSelector::setLayerFilter(LayerFilter layerFilter) {
 }
 
 FpsRange RefreshRateSelector::getSupportedFrameRateRangeLocked() const {
-    return {0_Hz, mMaxRefreshRateModeIt->second->getPeakFps()};
+    return {0_Hz, mConfigGroupMaxRefreshRateModeIt->second->getPeakFps()};
 }
 
 auto RefreshRateSelector::getIdleTimerAction() const -> KernelIdleTimerAction {
     std::lock_guard lock(mLock);
 
-    const Fps deviceMinFps = mMinRefreshRateModeIt->second->getPeakFps();
+    const Fps deviceMinFps = mConfigGroupMinRefreshRateModeIt->second->getPeakFps();
     const DisplayModePtr& minByPolicy = getMinRefreshRateByPolicyLocked();
 
     // Kernel idle timer will set the refresh rate to the device min. If DisplayManager says that

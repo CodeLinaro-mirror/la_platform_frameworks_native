@@ -167,6 +167,11 @@ std::string jankTypeBitmaskToString(int32_t jankType) {
         jankType &= ~JankType::DisplayModeChangeInProgress;
     }
 
+    if (jankType & JankType::DisplayPowerModeChangeInProgress) {
+        janks.emplace_back("PowerModeChange in progress");
+        jankType &= ~JankType::DisplayPowerModeChangeInProgress;
+    }
+
     // jankType should be 0 if all types of jank were checked for.
     LOG_ALWAYS_FATAL_IF(jankType != 0, "Unrecognized jank type value 0x%x", jankType);
     return std::accumulate(janks.begin(), janks.end(), std::string(),
@@ -312,6 +317,11 @@ int32_t jankTypeBitmaskToProto(int32_t jankType) {
         jankType &= ~JankType::DisplayModeChangeInProgress;
     }
 
+    if (jankType & JankType::DisplayPowerModeChangeInProgress) {
+        protoJank |= FrameTimelineEvent::JANK_DISPLAY_POWER_MODE_CHANGE_IN_PROGRESS;
+        jankType &= ~JankType::DisplayPowerModeChangeInProgress;
+    }
+
     // jankType should be 0 if all types of jank were checked for.
     LOG_ALWAYS_FATAL_IF(jankType != 0, "Unrecognized jank type value 0x%x", jankType);
     return protoJank;
@@ -392,7 +402,8 @@ std::pair<float, JankSeverityType> calculateJankSeverity(int32_t jankType,
             JankType::PredictionError | JankType::SurfaceFlingerScheduling | JankType::Unknown |
             JankType::Dropped | JankType::AppResyncedJitter;
     const int32_t nonJankBitmask = JankType::BufferStuffing | JankType::SurfaceFlingerStuffing |
-            JankType::NonAnimating | JankType::DisplayNotOn | JankType::DisplayModeChangeInProgress;
+            JankType::NonAnimating | JankType::DisplayNotOn |
+            JankType::DisplayModeChangeInProgress | JankType::DisplayPowerModeChangeInProgress;
     static_assert((kJankTypeAll & ~(jankBitmask | nonJankBitmask)) == 0);
 
     if ((jankType & jankBitmask) == 0) { // Not Janky
@@ -528,7 +539,8 @@ SurfaceFrame::PreviousFrameData SurfaceFrame::previousFrameDataLocked() const {
     }
 
     std::scoped_lock lock(prev->mMutex);
-    return PreviousFrameData::create(prev->mPredictions, prev->mActuals);
+    return PreviousFrameData::create(prev->mPredictions, prev->mActuals,
+                                     prev->mVsyncResyncedJitter);
 }
 
 // TODO(b/316171339): migrate from perfetto side
@@ -567,6 +579,16 @@ std::optional<JankSeverityType> SurfaceFrame::getJankSeverityType() const {
         return std::nullopt;
     }
     return mJankSeverityTypeLegacy;
+}
+
+std::optional<float> SurfaceFrame::getJankSeverityScore() const {
+    std::scoped_lock lock(mMutex);
+    if (mActuals.presentTime == 0) {
+        // Frame hasn't been presented yet.
+        return std::nullopt;
+    }
+    return calculateJankSeverity(mJankType.value(), mExpectedPresentDelta, mActualPresentDelta)
+            .first;
 }
 
 nsecs_t SurfaceFrame::getBaseTime() const {
@@ -905,10 +927,14 @@ void SurfaceFrame::classifyJankLocked(int32_t displayFrameJankTypeLegacy,
                     mFramePresentMetadata.experimental() = FramePresentMetadata::LatePresent;
                     break;
                 case PreviousFrameData::Status::Valid: {
+                    const auto thisExpectedPresentTime =
+                            mPredictions.presentTime + mVsyncResyncedJitter;
+                    const auto prevExpectedPresentTime = previousFrameData.predictions.presentTime +
+                            previousFrameData.vsyncResyncedJitter;
+
                     mActualPresentDelta =
                             mActuals.presentTime - previousFrameData.actuals.presentTime;
-                    mExpectedPresentDelta =
-                            mPredictions.presentTime - previousFrameData.predictions.presentTime;
+                    mExpectedPresentDelta = thisExpectedPresentTime - prevExpectedPresentTime;
                     const nsecs_t presentationConsistencyDelay =
                             mActualPresentDelta - mExpectedPresentDelta;
                     const float deltaFrameRatio = mExpectedPresentDelta == 0
@@ -946,6 +972,11 @@ void SurfaceFrame::classifyJankLocked(int32_t displayFrameJankTypeLegacy,
 
     if (displayFrameJankTypeExperimental & JankType::DisplayNotOn) {
         mJankType.experimental() = JankType::DisplayNotOn;
+        return;
+    }
+
+    if (displayFrameJankTypeExperimental & JankType::DisplayPowerModeChangeInProgress) {
+        mJankType.experimental() = JankType::DisplayPowerModeChangeInProgress;
         return;
     }
 
@@ -1018,7 +1049,7 @@ void SurfaceFrame::classifyJankLocked(int32_t displayFrameJankTypeLegacy,
 
     if (mVsyncResyncedJitter > 0) {
         // the app adjusted the vsync time due to a delay on the main thread - mark is as
-        // AppDeadlineMissed
+        // AppResyncedJitter
         mJankType.experimental() |= JankType::AppResyncedJitter;
     }
 }
@@ -1276,19 +1307,36 @@ namespace impl {
 int64_t TokenManager::generateTokenForPredictions(TimelineItem&& predictions) {
     SFTRACE_CALL();
     std::scoped_lock lock(mMutex);
-    while (mPredictions.size() >= kMaxTokens) {
-        mPredictions.erase(mPredictions.begin());
-    }
     const int64_t assignedToken = mCurrentToken++;
-    mPredictions[assignedToken] = predictions;
+    if (assignedToken < static_cast<int64_t>(kMaxTokens)) {
+        // Append to the back until max capacity is reached.
+        mPredictions.push_back({assignedToken, predictions});
+    } else {
+        // Overwrite the oldest entry.
+        size_t insertIndex = static_cast<size_t>(assignedToken) % kMaxTokens;
+        mPredictions[insertIndex] = {assignedToken, predictions};
+    }
+
     return assignedToken;
 }
 
 std::optional<TimelineItem> TokenManager::getPredictionsForToken(int64_t token) const {
     std::scoped_lock lock(mMutex);
-    auto predictionsIterator = mPredictions.find(token);
-    if (predictionsIterator != mPredictions.end()) {
-        return predictionsIterator->second;
+    // Start searching from the most recent tokens.
+    // mCurrentToken is the next token to be assigned. If mCurrentToken is 0,
+    // it means no tokens have been assigned yet, so we return early.
+    if (mCurrentToken == 0) {
+        return {};
+    }
+
+    const size_t startIndex = (static_cast<size_t>(mCurrentToken) - 1) % kMaxTokens;
+    const size_t numElements = std::min(static_cast<size_t>(mCurrentToken), kMaxTokens);
+    for (size_t i = 0; i < numElements; ++i) {
+        const size_t index = (startIndex + (kMaxTokens - i)) % kMaxTokens;
+        const auto& [assignedToken, predictions] = mPredictions[index];
+        if (assignedToken == token) {
+            return predictions;
+        }
     }
     return {};
 }
@@ -1692,6 +1740,10 @@ void FrameTimeline::DisplayFrame::classifyJank(nsecs_t& deadlineDelta,
 
     if (mJankType.experimental() != JankType::None && mDisplayState.modeChangeInProgress) {
         mJankType.experimental() |= JankType::DisplayModeChangeInProgress;
+    }
+
+    if (mJankType.experimental() != JankType::None && mDisplayState.powerModeChangeInProgress) {
+        mJankType.experimental() = JankType::DisplayPowerModeChangeInProgress;
     }
 }
 

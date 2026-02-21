@@ -11,6 +11,16 @@ flag {
 } # adpf_gpu_sf
 
 flag {
+  name: "align_adpf_with_sf_opt_policy"
+  namespace: "window_surfaces"
+  description: "Align ADPF with SF optimization policy"
+  bug: "477953599"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # align_adpf_with_sf_opt_policy
+
+flag {
   name: "arr_setframerate_api"
   namespace: "core_graphics"
   description: "New SDK Surface#setFrameRate API and Surface.FrameRateParams for Android 16"
@@ -29,6 +39,16 @@ flag {
 } # arr_surfacecontrol_setframerate_api
 
 flag {
+  name: "bugfix_layer_caching_color_inversion_flickering"
+  namespace: "core_graphics"
+  description: "Fixes the flickering when turning on color inversion and the layer caching"
+  bug: "404903019"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # bugfix_layer_caching_color_inversion_flickering
+
+flag {
   name: "bugfix_resize_virtual_display_surfaces"
   namespace: "core_graphics"
   description: "Surfaces should be resized when virtual display size is set"
@@ -37,6 +57,16 @@ flag {
     purpose: PURPOSE_BUGFIX
   }
 } # bugfix_resize_virtual_display_surfaces
+
+flag {
+  name: "bugfix_virtual_display_refresh_rate"
+  namespace: "core_graphics"
+  description: "Fixes Virtual Display setRequestedRefreshRate api"
+  bug: "478905638"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # bugfix_virtual_display_refresh_rate
 
 flag {
   name: "color_transform_translation"
@@ -478,3 +508,4 @@ flag {
 } # window_blur_kawase2_preallocate_buffers
 
 # IMPORTANT - please keep alphabetize to reduce merge conflicts
+

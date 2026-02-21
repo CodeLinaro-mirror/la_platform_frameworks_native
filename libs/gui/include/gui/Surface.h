@@ -39,6 +39,18 @@ namespace android {
 
 class GraphicBuffer;
 
+#ifndef NO_BINDER
+namespace hardware {
+namespace graphics {
+namespace bufferqueue {
+namespace V2_0 {
+struct IGraphicBufferProducer;
+} // namespace V2_0
+} // namespace bufferqueue
+} // namespace graphics
+} // namespace hardware
+#endif
+
 namespace gui {
 class FrameTimelineInfo;
 class ISurfaceComposer;
@@ -85,11 +97,59 @@ public:
     virtual void onBufferDetached(int /*slot*/) override {}
 };
 
+struct SurfaceQueueBufferInput {
+    sp<Fence> fence;
+
+    android_dataspace dataSpace = HAL_DATASPACE_UNKNOWN;
+    HdrMetadata hdrMetadata;
+
+    Rect crop;
+    int scalingMode = 0;
+    uint32_t transform = 0;
+    uint32_t stickyTransform = 0;
+    Region surfaceDamage;
+
+    int64_t timestamp = 0;
+    int isAutoTimestamp = 0;
+    bool getFrameTimestamps = false;
+
+    std::optional<PictureProfileHandle> pictureProfileHandle;
+};
+
 // Contains additional data from the queueBuffer operation.
 struct SurfaceQueueBufferOutput {
     // True if this queueBuffer caused a buffer to be replaced in the queue
-    // (and therefore not will not be acquired)
+    // (and therefore not will not be acquired).
+    //
+    // This happens when the producer queues a buffer but the consumer has
+    // configured the BufferQueue to drop older buffers (e.g. in async mode),
+    // and the queue was full or the last buffer was droppable.
     bool bufferReplaced = false;
+
+    // The default width and height of the buffers in the queue, as set by
+    // setDefaultBufferSize(). This may be different from the dimensions of the
+    // buffer just queued if the producer is scaling or if the default size was
+    // changed recently.
+    uint32_t width = 0;
+    uint32_t height = 0;
+
+    // The transform hint (NATIVE_WINDOW_TRANSFORM_*) that the consumer would like
+    // the producer to apply to the buffer content. This usually corresponds to
+    // the display rotation.
+    uint32_t transformHint = 0;
+
+    // The number of buffers currently in the queue waiting to be acquired by the
+    // consumer. This includes the buffer just queued.
+    uint32_t numPendingBuffers = 0;
+
+    // The frame number that will be assigned to the next buffer queued.
+    // This is useful for the producer to know what frame number it just used
+    // (nextFrameNumber - 1).
+    uint64_t nextFrameNumber = 0;
+
+    // If requested by the input, this will contain any recent changes to the
+    // frame event history (timestamps for previous frames).
+    FrameEventHistoryDelta frameTimestamps;
 };
 
 /*
@@ -137,6 +197,14 @@ public:
      * Get the underlying Surface from the given ANativeWindow.
      */
     static sp<Surface> from(ANativeWindow* anw);
+
+    /*
+     * creates a Surface from a HIDL IGraphicBufferProducer token (v2.0).
+     */
+#ifndef NO_BINDER
+    static sp<Surface> fromHidl(
+            const sp<hardware::graphics::bufferqueue::V2_0::IGraphicBufferProducer>& token);
+#endif
 
     /*
      * Null-safe check of whether two surfaces represent the same underlying object. Roughly
@@ -207,6 +275,14 @@ public:
      * See IGBP::setGenerationNumber for more information. */
     status_t setGenerationNumber(uint32_t generationNumber);
 
+    /*
+     * Set whether the Surface should automatically update the generation number
+     * on any buffers attached to it after this call.
+     *
+     * Default is true.
+     */
+    void setAutoGenerationUpdate(bool autoGeneration);
+
     // See IGraphicBufferProducer::getConsumerName
     String8 getConsumerName() const;
 
@@ -263,6 +339,10 @@ public:
             nsecs_t* outLastRefreshStartTime, nsecs_t* outGlCompositionDoneTime,
             nsecs_t* outDisplayPresentTime, nsecs_t* outDequeueReadyTime,
             nsecs_t* outReleaseTime);
+
+    // Pass through to IGraphicBufferProducer::getFrameTimestamps, ignoring the cached data.
+    // Please avoid using. Do NOT use with getFrameTimestamps.
+    status_t getFrameEventHistoryDelta(FrameEventHistoryDelta* delta);
 
     status_t getWideColorSupport(bool* supported) __attribute__((__deprecated__));
     status_t getHdrSupport(bool* supported) __attribute__((__deprecated__));
@@ -395,7 +475,6 @@ private:
 
 protected:
     virtual int dequeueBuffer(sp<GraphicBuffer>* buffer, int* fenceFd);
-    virtual int cancelBuffer(sp<GraphicBuffer>&& buffer, int fenceFd);
     virtual int perform(int operation, va_list args);
     virtual int setSwapInterval(int interval);
 
@@ -434,6 +513,7 @@ public:
                         bool needsDroppedNotify = false);
     virtual int detachNextBuffer(sp<GraphicBuffer>* outBuffer, sp<Fence>* outFence);
     virtual int attachBuffer(ANativeWindowBuffer*);
+    virtual int attachBuffer(const sp<GraphicBuffer>& buffer);
 
     virtual void destroy();
 
@@ -458,6 +538,12 @@ public:
     // attachBuffer operation.
     status_t queueBuffer(const sp<GraphicBuffer>& buffer, const sp<Fence>& fd = Fence::NO_FENCE,
                          SurfaceQueueBufferOutput* output = nullptr);
+
+    status_t queueBuffer(const sp<GraphicBuffer>& buffer, const SurfaceQueueBufferInput& input,
+                         SurfaceQueueBufferOutput* output = nullptr);
+
+    // Cancels the buffer, returning it to the BufferQueue without actually queuing it.
+    virtual status_t cancelBuffer(const sp<GraphicBuffer>& buffer, const sp<Fence>& fence);
 
     // Detaches this buffer, dissociating it from this Surface. This buffer must have been returned
     // by queueBuffer or associated with this Surface via an attachBuffer operation.
@@ -535,10 +621,10 @@ protected:
         bool mNeedsDroppedNotify;
 
         std::mutex mMutex;
-        ANativeWindow_OnAcquiredCallback mOnAcquiredCallback GUARDED_BY(mMutex);
-        void* mOnAcquiredCallbackData GUARDED_BY(mMutex);
-        ANativeWindow_OnDroppedCallback mOnDroppedCallback GUARDED_BY(mMutex);
-        void* mOnDroppedCallbackData GUARDED_BY(mMutex);
+        ANativeWindow_OnAcquiredCallback mOnAcquiredCallback GUARDED_BY(mMutex) = nullptr;
+        void* mOnAcquiredCallbackData GUARDED_BY(mMutex) = nullptr;
+        ANativeWindow_OnDroppedCallback mOnDroppedCallback GUARDED_BY(mMutex) = nullptr;
+        void* mOnDroppedCallbackData GUARDED_BY(mMutex) = nullptr;
     };
 
     class ProducerDeathListenerProxy : public IBinder::DeathRecipient {
@@ -566,6 +652,10 @@ protected:
     void getQueueBufferInputLocked(const sp<GraphicBuffer>& buffer, const sp<Fence>& fence,
                                    nsecs_t timestamp,
                                    IGraphicBufferProducer::QueueBufferInput* out);
+
+    status_t queueBufferImpl(const sp<GraphicBuffer>& buffer, const sp<Fence>& fence,
+                             const SurfaceQueueBufferInput* maybeInput,
+                             SurfaceQueueBufferOutput* output) EXCLUDES(mMutex);
 
     // For easing in adoption of gralloc4 metadata by vendor components, as well as for supporting
     // the public ANativeWindow api, allow setting relevant metadata when queueing a buffer through
@@ -745,6 +835,10 @@ protected:
     // Stores the current generation number. See setGenerationNumber and
     // IGraphicBufferProducer::setGenerationNumber for more information.
     uint32_t mGenerationNumber;
+
+    // If true, the generation number is automatically updated on any buffers
+    // attached to this surface.
+    bool mAutoGenerationUpdate = true;
 
     // Caches the values that have been passed to the producer.
     bool mSharedBufferMode;

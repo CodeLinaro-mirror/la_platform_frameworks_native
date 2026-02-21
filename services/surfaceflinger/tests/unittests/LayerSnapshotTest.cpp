@@ -444,7 +444,7 @@ TEST_F(LayerSnapshotTest, UpdateMetadataOfHiddenLayers) {
                                     .genericLayerMetadataKeyMap = {}};
     update(mSnapshotBuilder, args);
 
-    EXPECT_EQ(static_cast<int64_t>(getSnapshot(1)->clientChanges),
+    EXPECT_EQ(getSnapshot(1)->clientChanges,
               layer_state_t::eMetadataChanged | layer_state_t::eFlagsChanged);
     EXPECT_EQ(getSnapshot(1)->layerMetadata.getInt32(METADATA_OWNER_UID, -1), 123);
     EXPECT_EQ(getSnapshot(1)->layerMetadata.getInt32(METADATA_WINDOW_TYPE, -1), 234);
@@ -1683,6 +1683,76 @@ TEST_F(LayerSnapshotTest, SetClientDrawnClippedRadii) {
     EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.clientDrawnRadii, CLIPPED_RADIUS);
 }
 
+TEST_F(LayerSnapshotTest, shouldDisableCornerRounding_EmptyClientDrawnRadii) {
+    static constexpr float RADIUS = 123.f;
+    static const gui::CornerRadii ZERO_RADIUS = gui::CornerRadii(0.f);
+    static const gui::CornerRadii ACTUAL_RADIUS = gui::CornerRadii(RADIUS);
+
+    setRoundedCorners(1, RADIUS);
+    setCrop(1, Rect{1000, 1000});
+    setClientDrawnCornerRadius(1, RADIUS, FloatRect{0, 0, 1000, 1000});
+
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.sfDrawnRadii, ZERO_RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.clientDrawnRadii, ACTUAL_RADIUS);
+
+    // ClientDrawnRadii is empty -> SF draws corners
+    setClientDrawnCornerRadius(1, 0.f, FloatRect{0, 0, 1000, 1000});
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.sfDrawnRadii, ACTUAL_RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.clientDrawnRadii, ZERO_RADIUS);
+}
+
+TEST_F(LayerSnapshotTest, shouldDisableCornerRounding_BoundsMismatch) {
+    static constexpr float RADIUS = 123.f;
+    static const gui::CornerRadii ZERO_RADIUS = gui::CornerRadii(0.f);
+    static const gui::CornerRadii ACTUAL_RADIUS = gui::CornerRadii(RADIUS);
+
+    setRoundedCorners(1, RADIUS);
+    setCrop(1, Rect{1000, 1000});
+    setClientDrawnCornerRadius(1, RADIUS, FloatRect{0, 0, 1000, 1000});
+
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.sfDrawnRadii, ZERO_RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.clientDrawnRadii, ACTUAL_RADIUS);
+
+    // Bounds don't match -> SF draws corners
+    setClientDrawnCornerRadius(1, RADIUS, FloatRect{0, 0, 999, 999});
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.sfDrawnRadii, ACTUAL_RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.clientDrawnRadii, ACTUAL_RADIUS);
+}
+
+TEST_F(LayerSnapshotTest, clientDrawnCornerRadiiOnlyUpdatesOnFlag) {
+    static constexpr float RADIUS_A = 123.f;
+    static constexpr float RADIUS_B = 456.f;
+    static const gui::CornerRadii CORNER_A = gui::CornerRadii(RADIUS_A);
+    static const gui::CornerRadii CORNER_B = gui::CornerRadii(RADIUS_B);
+
+    // Set the client drawn corner radius to A
+    setRoundedCorners(1, RADIUS_A);
+    setCrop(1, Rect{1000, 1000});
+    setClientDrawnCornerRadius(1, RADIUS_A, FloatRect{0, 0, 1000, 1000});
+
+    // Should be A
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.clientDrawnRadii, CORNER_A);
+
+    // Trigger an update that does NOT include eClientDrawnCornerRadiusChanged
+    setAlpha(1, 0.5f);
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+
+    // Should still be A
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.clientDrawnRadii, CORNER_A);
+
+    // Now trigger an update includes eClientDrawnCornerRadiusChanged
+    setClientDrawnCornerRadius(1, RADIUS_B, FloatRect{0, 0, 1000, 1000});
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+
+    // Should now be B
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.clientDrawnRadii, CORNER_B);
+}
+
 TEST_F(LayerSnapshotTest, reportedRadiiWithCornerRegionOverlap) {
     static const gui::CornerRadii RADIUS = gui::CornerRadii(111.f, 222.f, 333.f, 444.f);
 
@@ -2574,6 +2644,42 @@ TEST_F(LayerSnapshotTest, systemContentPriorityPassedToChildLayers) {
     EXPECT_EQ(getSnapshot({.id = 12})->systemContentPriority, 2);
     EXPECT_EQ(getSnapshot({.id = 122})->systemContentPriority, 2);
     EXPECT_EQ(getSnapshot({.id = 1221})->systemContentPriority, 2);
+}
+
+TEST_F(LayerSnapshotTest, ExclusionMaskFiltersLayers) {
+    // Set composition filter flag for layer 11
+    std::vector<QueuedTransactionState> transactions;
+    transactions.emplace_back();
+    transactions.back().states.push_back({});
+    transactions.back().states.front().state.what = layer_state_t::eCompositionFilterFlagChanged;
+    transactions.back().states.front().state.compositionFilterFlag = 1u << 2;
+    transactions.back().states.front().layerId = 11;
+    transactions.back().states.front().state.layerId = 11;
+    mLifecycleManager.applyTransactions(transactions);
+
+    // Update with exclusion mask that matches the flag
+    LayerSnapshotBuilder::Args args{.root = mHierarchyBuilder.getHierarchy(),
+                                    .layerLifecycleManager = mLifecycleManager,
+                                    .includeMetadata = false,
+                                    .displays = mFrontEndDisplayInfos,
+                                    .globalShadowSettings = globalShadowSettings,
+                                    .supportsBlur = true,
+                                    .supportedLayerGenericMetadata = {},
+                                    .genericLayerMetadataKeyMap = {},
+                                    .exclusionMask = 1u << 2};
+    update(mSnapshotBuilder, args);
+
+    // Layer 11 should be hidden by policy
+    EXPECT_TRUE(getSnapshot(11)->isHiddenByPolicyFromParent);
+    // Children should also be hidden
+    EXPECT_TRUE(getSnapshot(111)->isHiddenByPolicyFromParent);
+
+    // Update with exclusion mask that DOES NOT match
+    args.exclusionMask = 1u << 3;
+    update(mSnapshotBuilder, args);
+
+    // Layer 11 should NOT be hidden by policy
+    EXPECT_FALSE(getSnapshot(11)->isHiddenByPolicyFromParent);
 }
 
 } // namespace android::surfaceflinger::frontend

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2025 The Android Open Source Project
+ * Copyright (C) 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,25 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define LOG_TAG "libbinder.Binder"
 
-#pragma once
+#include <binder/internal/JavaBBinderBase.h>
 
-#include <SkPaint.h>
-#include <SkColor.h>
+namespace android::internal {
 
-namespace android {
-struct ShmemPaint {
-    SkColor4f color;
-    SkPaint::Style style;
-    SkScalar strokeWidth;
-    SkScalar strokeMiter;
-    SkPaint::Cap strokeCap;
-    SkPaint::Join strokeJoin;
-    bool antiAlias;
-    bool dither;
-    SkBlendMode blendMode;
-};
+JavaBBinderBase::JavaBBinderBase() = default;
+JavaBBinderBase::~JavaBBinderBase() = default;
 
-ShmemPaint toShmemPaint(const SkPaint& paint);
-SkPaint fromShmemPaint(const ShmemPaint& paint);
-} // namespace android
+const void* JavaBBinderBase::getExtSubclassID() {
+    static const char* const kSubclassID = "JavaBBinderExt";
+    return kSubclassID;
+}
+
+} // namespace android::internal

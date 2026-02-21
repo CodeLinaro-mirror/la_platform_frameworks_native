@@ -17,8 +17,8 @@
 #pragma once
 
 #include <binder/IBinder.h>
+#include <gui/LocklessQueue.h>
 #include <map>
-#include "LocklessQueue.h"
 
 namespace android {
 struct IPCServerResourceCache;
@@ -44,6 +44,7 @@ public:
     std::shared_ptr<IPCServerResourceCache> getCache(const sp<IBinder>& token);
 
 private:
+    std::shared_ptr<IPCServerResourceCache> createCache(const sp<IBinder>& token);
     void binderDied(const wp<IBinder>& binder) override;
 
     std::map<wp<IBinder>, std::shared_ptr<IPCServerResourceCache>> mCaches;

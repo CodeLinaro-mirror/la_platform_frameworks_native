@@ -2894,12 +2894,14 @@ void InputDispatcher::finishDragAndDrop(ui::LogicalDisplayId displayId, float x,
     sp<WindowInfoHandle> dropWindow =
             mWindowInfos.findTouchedWindowAt(displayId, x, y, isStylus, /*ignoreWindow=*/
                                              mDragState->dragWindow);
+    vec2 raw = mWindowInfos.getDisplayTransform(displayId).transform(x, y);
+
     if (dropWindow) {
         vec2 local = dropWindow->getInfo()->transform.transform(x, y);
-        sendDropWindowCommandLocked(dropWindow->getToken(), local.x, local.y);
+        sendDropWindowCommandLocked(dropWindow->getToken(), local, raw);
     } else {
         ALOGW("No window found when drop.");
-        sendDropWindowCommandLocked(nullptr, 0, 0);
+        sendDropWindowCommandLocked(nullptr, {0, 0}, raw);
     }
     mDragState.reset();
 }
@@ -2978,7 +2980,7 @@ void InputDispatcher::addDragEventLocked(const MotionEntry& entry) {
             break;
         case AMOTION_EVENT_ACTION_CANCEL: {
             ALOGD("Receiving cancel when drag and drop.");
-            sendDropWindowCommandLocked(nullptr, 0, 0);
+            sendDropWindowCommandLocked(nullptr, /*location=*/{0, 0}, /*rawLocation=*/{0, 0});
             mDragState.reset();
             break;
         }
@@ -4291,7 +4293,8 @@ void InputDispatcher::synthesizeCancellationEventsForConnectionLocked(
                         LOG(INFO) << __func__
                                   << ": Canceling drag and drop because the pointers for the drag "
                                      "window are being canceled.";
-                        sendDropWindowCommandLocked(nullptr, /*x=*/0, /*y=*/0);
+                        sendDropWindowCommandLocked(nullptr, /*location=*/{0, 0},
+                                                    /*rawLocation=*/{0, 0});
                         mDragState.reset();
                     }
                     mTouchStates
@@ -4645,7 +4648,7 @@ void InputDispatcher::notifyMotion(const NotifyMotionArgs& args) {
                 mVerifiersByDisplay.try_emplace(resolvedDisplayId,
                                                 StringPrintf("display %s",
                                                              resolvedDisplayId.toString().c_str()));
-        Result<void> result =
+        Result<bool> result =
                 it->second.processMovement(args.deviceId, args.eventTime, args.source, args.action,
                                            args.actionButton, args.getPointerCount(),
                                            args.pointerProperties.data(), args.pointerCoords.data(),
@@ -4653,6 +4656,11 @@ void InputDispatcher::notifyMotion(const NotifyMotionArgs& args) {
         if (!result.ok()) {
             logDispatchStateLocked();
             LOG(FATAL) << "Bad stream: " << result.error() << " caused by " << args.dump();
+        } else if (*result) {
+            // The verifier is empty. Remove it if the display is gone.
+            if (!mWindowInfos.hasDisplay(resolvedDisplayId)) {
+                mVerifiersByDisplay.erase(it);
+            }
         }
     }
 
@@ -4840,7 +4848,7 @@ bool InputDispatcher::shouldRejectInjectedMotionLocked(const MotionEvent& motion
                                                                       displayId.toString());
     InputVerifier& verifier = it->second;
 
-    Result<void> result =
+    Result<bool> result =
             verifier.processMovement(deviceId, motionEvent.getEventTime(), motionEvent.getSource(),
                                      motionEvent.getAction(), motionEvent.getActionButton(),
                                      motionEvent.getPointerCount(),
@@ -5283,6 +5291,10 @@ void InputDispatcher::DispatcherWindowInfo::setWindowHandlesForDisplay(
     mWindowHandlesByDisplay[displayId] = std::move(windowHandles);
 }
 
+bool InputDispatcher::DispatcherWindowInfo::hasDisplay(ui::LogicalDisplayId displayId) const {
+    return mDisplayInfos.find(displayId) != mDisplayInfos.end();
+}
+
 void InputDispatcher::DispatcherWindowInfo::setDisplayInfos(
         const std::vector<android::gui::DisplayInfo>& displayInfos) {
     mDisplayInfos.clear();
@@ -5293,6 +5305,7 @@ void InputDispatcher::DispatcherWindowInfo::setDisplayInfos(
 
 void InputDispatcher::DispatcherWindowInfo::removeDisplay(ui::LogicalDisplayId displayId) {
     mWindowHandlesByDisplay.erase(displayId);
+    mDisplayInfos.erase(displayId);
 }
 
 const std::vector<sp<android::gui::WindowInfoHandle>>&
@@ -5666,7 +5679,7 @@ void InputDispatcher::setInputWindowsLocked(
         std::find(windowHandles.begin(), windowHandles.end(), mDragState->dragWindow) ==
                 windowHandles.end()) {
         ALOGI("Drag window went away: %s", mDragState->dragWindow->getName().c_str());
-        sendDropWindowCommandLocked(nullptr, 0, 0);
+        sendDropWindowCommandLocked(nullptr, /*location=*/{0, 0}, /*rawLocation=*/{0, 0});
         mDragState.reset();
     }
 
@@ -6078,7 +6091,7 @@ InputDispatcher::DispatcherTouchState::transferTouchGesture(
     // Transferring touch focus using this API should not effect the focused window.
     newTargetFlags |= InputTarget::Flags::NO_FOCUS_CHANGE;
     sp<IBinder> forwardingWindowToken;
-    if (transferEntireGesture && com::android::input::flags::allow_transfer_of_entire_gesture()) {
+    if (transferEntireGesture) {
         forwardingWindowToken = fromToken;
     }
     state.addOrUpdateWindow(toWindowHandle, InputTarget::DispatchMode::AS_IS, newTargetFlags,
@@ -6687,10 +6700,11 @@ void InputDispatcher::sendFocusChangedCommandLocked(const sp<IBinder>& oldToken,
     postCommandLocked(std::move(command));
 }
 
-void InputDispatcher::sendDropWindowCommandLocked(const sp<IBinder>& token, float x, float y) {
-    auto command = [this, token, x, y]() REQUIRES(mLock) {
+void InputDispatcher::sendDropWindowCommandLocked(const sp<IBinder>& token, vec2 location,
+                                                  vec2 rawLocation) {
+    auto command = [this, token, location, rawLocation]() REQUIRES(mLock) {
         scoped_unlock unlock(mLock);
-        mPolicy.notifyDropWindow(token, x, y);
+        mPolicy.notifyDropWindow(token, location, rawLocation);
     };
     postCommandLocked(std::move(command));
 }
@@ -7260,7 +7274,14 @@ void InputDispatcher::displayRemoved(ui::LogicalDisplayId displayId) {
         std::erase(mIneligibleDisplaysForPointerCapture, displayId);
         // Remove the associated touch mode state.
         mTouchModePerDisplay.erase(displayId);
-        mVerifiersByDisplay.erase(displayId);
+        if (auto it = mVerifiersByDisplay.find(displayId); it != mVerifiersByDisplay.end()) {
+            if (it->second.isEmpty()) {
+                mVerifiersByDisplay.erase(it);
+            } else {
+                LOG(INFO) << "Not erasing InputVerifier on display " << displayId
+                          << ", it still has active input";
+            }
+        }
         mInputFilterVerifiersByDisplay.erase(displayId);
         mInteractionConnectionTokensByDisplay.erase(displayId);
     } // release lock

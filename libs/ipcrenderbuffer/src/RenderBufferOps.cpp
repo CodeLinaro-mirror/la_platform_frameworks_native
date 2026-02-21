@@ -19,6 +19,7 @@
 
 #include <SkColorFilter.h>
 #include <SkFontMgr.h>
+#include <SkSurface.h>
 
 #include "SkFontScanner_FreeType.h"
 #include "src/core/SkReadBuffer.h"
@@ -33,15 +34,7 @@
 
 namespace android {
 
-ShmemImageInfo toShmemImageInfo(const SkImageInfo& info) {
-    return ShmemImageInfo{info.width(), info.height(), info.colorType(), info.alphaType()};
-}
-
-SkImageInfo fromShmemImageInfo(const ShmemImageInfo& info) {
-    return SkImageInfo::Make(info.width, info.height, info.colorType, info.alphaType);
-}
-
-void renderOpToCanvas(IPCServerResourceCache* cache, RenderCommandBufferConsumer* consumer,
+void renderOpToCanvas(IPCServerResourceCache* cache, RenderCommandBuffer* buffer,
                       IPCRenderBufferOp* op, SkCanvas* canvas,
                       const std::function<void(int)>& renderProxyCallback) {
     switch (op->type) {
@@ -228,6 +221,11 @@ void renderOpToCanvas(IPCServerResourceCache* cache, RenderCommandBufferConsumer
             renderProxyCallback(co->proxyId);
             break;
         }
+        case TYPE_BEGINRENDERTARGET:
+        case TYPE_ENDRENDERTARGET: {
+            // Handled by loop
+            break;
+        }
         default: {
             ALOGE("Unexpected op in RenderCommandBuffer");
             break;
@@ -285,41 +283,66 @@ bool isDrawingOp(uint32_t type) {
     }
 }
 
-bool renderCommandBufferToCanvas(IPCServerResourceCache* cache, RenderCommandBufferConsumer* consumer,
+bool renderCommandBufferToCanvas(IPCServerResourceCache* cache, RenderCommandBuffer* buffer,
                                  SkCanvas* canvas,
                                  const std::function<void(int)>& renderProxyCallback) {
-    auto buffer = consumer->getCurrentBuffer();
-    if (buffer == nullptr) {
-        ALOGE("Failed to acquire RenderCommandBuffer for replay");
-        return false;
-    }
-
     bool foundFirstDrawingOp = false;
 
     if constexpr (DUMP_OPS) {
         ALOGE("Rendering command buffer");
     }
 
+    sk_sp<SkSurface> boundSurface = nullptr;
+
     for (IPCRenderBufferOp* op = buffer->getOps(); op; op = op->next) {
         if (!foundFirstDrawingOp && isDrawingOp(op->type)) {
             foundFirstDrawingOp = true;
-            if (op->type == TYPE_DRAWPAINT) {
-                DrawPaintOp* co = (DrawPaintOp*)op;
-                const ShmemPaint& paint = co->paint;
-                if (paint.color.fR == 0.0f && paint.color.fG == 0.0f && paint.color.fB == 0.0f &&
-                    paint.color.fA == 0.0f) {
-                  if constexpr (DUMP_OPS) {
-                      ALOGE("Skipping clear paint");
-                  }
-                    continue;
-                }
-            }
+            // TODO: Restore optimization for clear paints if possible with new ShmemPaint
         }
         if constexpr (DUMP_OPS) {
             ALOGE("Rendering op %s", opTypeToString(op->type).c_str());
             ALOGE("Details %s", opToString(op).c_str());
         }
-        renderOpToCanvas(cache, consumer, op, canvas, renderProxyCallback);
+
+        if (op->type == TYPE_BEGINRENDERTARGET) {
+            if (boundSurface) {
+                if constexpr (DUMP_OPS) {
+                    ALOGE("Nesting BeginRenderTargetOp is not supported");
+                }
+                return false;
+            }
+
+            if (cache) {
+                BeginRenderTargetOp* co = (BeginRenderTargetOp*)op;
+                auto it = cache->bitmaps.find(co->bufferId);
+                if (it != cache->bitmaps.end()) {
+                    boundSurface = it->second.surface;
+                } else {
+                    if constexpr (DUMP_OPS) {
+                        ALOGE("Failed to acquire buffer surface for %" PRIu64, co->bufferId);
+                    }
+                    return false;
+                }
+            } else {
+                if constexpr (DUMP_OPS) {
+                    ALOGE("IPC cache is null, BeginRenderTargetOp requires a non-null cache");
+                }
+                return false;
+            }
+
+        } else if (op->type == TYPE_ENDRENDERTARGET) {
+            if (!boundSurface) {
+                if constexpr (DUMP_OPS) {
+                    ALOGE("Encountered EndRenderTargetOp but no BeginRenderTargetOp was "
+                          "submitted");
+                }
+                return false;
+            }
+            boundSurface = nullptr;
+        } else {
+            renderOpToCanvas(cache, buffer, op, boundSurface ? boundSurface->getCanvas() : canvas,
+                             renderProxyCallback);
+        }
     }
     if constexpr (DUMP_OPS) {
         ALOGE("Done rendering command buffer");
@@ -327,25 +350,30 @@ bool renderCommandBufferToCanvas(IPCServerResourceCache* cache, RenderCommandBuf
     return true;
 }
 
-void resetRenderCommandBufferForReplay(IPCServerResourceCache* cache,
-                                       RenderCommandBufferConsumer* consumer) {
-    auto buffer = consumer->consumerAcquire();
-    if (buffer == nullptr) {
-        ALOGE("Failed to acquire RenderCommandBuffer for replay");
-        return;
-    }
+bool toShmemPaint(RenderCommandBuffer* buffer, const SkPaint& paint, ShmemPaint& outPaint) {
+    SkBinaryWriteBuffer writer(SkSerialProcs{});
+    SkPaintPriv::Flatten(paint, writer);
+    sk_sp<SkData> data = writer.snapshotAsData();
 
-    for (IPCRenderBufferOp* op = buffer->getOps(); op; op = op->next) {
-        //  TODO:
+    if (!SetRSpan(outPaint.data, buffer, (const uint8_t*)nullptr, data->size())) {
+        return false;
     }
+    if (data->size() > 0) {
+        memcpy(outPaint.data.data.get(), data->data(), data->size());
+    }
+    return true;
+}
+
+SkPaint fromShmemPaint(const ShmemPaint& paint) {
+    if (!paint.data.data) {
+        return SkPaint();
+    }
+    SkReadBuffer reader(paint.data.data.get(), paint.data.size);
+    return SkPaintPriv::Unflatten(reader);
 }
 
 std::string shmemPaintToString(const ShmemPaint& paint) {
-    return std::string("color: ") + std::to_string(paint.color.fR) + std::string(" ") +
-            std::to_string(paint.color.fG) + std::string(" ") + std::to_string(paint.color.fB) +
-            std::string(" ") + std::to_string(paint.color.fA) + std::string(" ") +
-            std::string(" style: ") + std::to_string((int)paint.style) + std::string(" ") +
-            std::to_string((int)paint.blendMode);
+    return std::string("ShmemPaint(size=") + std::to_string(paint.data.size) + ")";
 }
 
 #define OP_REQUIRE(expr)                                                                      \
@@ -397,7 +425,7 @@ SaveLayerOp* SaveLayerOp::Create(RenderCommandBuffer* commandBuffer, const SkRec
         op->hasBounds = false;
     }
     if (paint) {
-        op->paint = toShmemPaint(*paint);
+        OP_REQUIRE(toShmemPaint(commandBuffer, *paint, op->paint));
         op->hasPaint = true;
     } else {
         op->hasPaint = false;
@@ -616,7 +644,7 @@ std::string ResetClipOp::toString() const {
 DrawPaintOp* DrawPaintOp::Create(RenderCommandBuffer* commandBuffer, const SkPaint& p) {
     DrawPaintOp* op = commandBuffer->allocAligned<DrawPaintOp>();
     OP_REQUIRE(op);
-    op->paint = toShmemPaint(p);
+    OP_REQUIRE(toShmemPaint(commandBuffer, p, op->paint));
     op->type = kType;
     return op;
 }
@@ -632,7 +660,7 @@ std::string DrawPaintOp::toString() const {
 DrawBehindOp* DrawBehindOp::Create(RenderCommandBuffer* commandBuffer, const SkPaint& p) {
     DrawBehindOp* op = commandBuffer->allocAligned<DrawBehindOp>();
     OP_REQUIRE(op);
-    op->paint = toShmemPaint(p);
+    OP_REQUIRE(toShmemPaint(commandBuffer, p, op->paint));
     op->type = kType;
     return op;
 }
@@ -651,7 +679,7 @@ DrawPathOp* DrawPathOp::Create(RenderCommandBuffer* commandBuffer, const SkPath&
     size_t pathSize = path.writeToMemory(nullptr);
     OP_REQUIRE(SetRSpan<uint8_t>(op->pathData, commandBuffer, nullptr, pathSize));
     path.writeToMemory(op->pathData.data.get());
-    op->paint = toShmemPaint(p);
+    OP_REQUIRE(toShmemPaint(commandBuffer, p, op->paint));
     op->type = kType;
     return op;
 }
@@ -670,7 +698,7 @@ DrawRectOp* DrawRectOp::Create(RenderCommandBuffer* commandBuffer, const SkRect&
     DrawRectOp* op = commandBuffer->allocAligned<DrawRectOp>();
     OP_REQUIRE(op);
     op->rect = r;
-    op->paint = toShmemPaint(p);
+    OP_REQUIRE(toShmemPaint(commandBuffer, p, op->paint));
     op->type = kType;
     return op;
 }
@@ -691,7 +719,7 @@ DrawRegionOp* DrawRegionOp::Create(RenderCommandBuffer* commandBuffer, const SkR
     size_t regionSize = r.writeToMemory(nullptr);
     OP_REQUIRE(SetRSpan<uint8_t>(op->regionData, commandBuffer, nullptr, regionSize));
     r.writeToMemory(op->regionData.data.get());
-    op->paint = toShmemPaint(p);
+    OP_REQUIRE(toShmemPaint(commandBuffer, p, op->paint));
     op->type = kType;
     return op;
 }
@@ -711,7 +739,7 @@ DrawOvalOp* DrawOvalOp::Create(RenderCommandBuffer* commandBuffer, const SkRect&
     DrawOvalOp* op = commandBuffer->allocAligned<DrawOvalOp>();
     OP_REQUIRE(op);
     op->oval = o;
-    op->paint = toShmemPaint(p);
+    OP_REQUIRE(toShmemPaint(commandBuffer, p, op->paint));
     op->type = kType;
     return op;
 }
@@ -729,7 +757,7 @@ DrawArcOp* DrawArcOp::Create(RenderCommandBuffer* commandBuffer, const SkRect& o
     DrawArcOp* op = commandBuffer->allocAligned<DrawArcOp>();
     OP_REQUIRE(op);
     op->type = kType;
-    op->paint = toShmemPaint(paint);
+    OP_REQUIRE(toShmemPaint(commandBuffer, paint, op->paint));
     op->oval = oval;
     op->startAngle = startAngle;
     op->sweepAngle = sweepAngle;
@@ -750,7 +778,7 @@ DrawRRectOp* DrawRRectOp::Create(RenderCommandBuffer* commandBuffer, const SkRRe
                                  const SkPaint& p) {
     DrawRRectOp* op = commandBuffer->allocAligned<DrawRRectOp>();
     OP_REQUIRE(op);
-    op->paint = toShmemPaint(p);
+    OP_REQUIRE(toShmemPaint(commandBuffer, p, op->paint));
     op->rrect = rr;
     op->type = kType;
     return op;
@@ -839,7 +867,7 @@ DrawImageRectOp* DrawImageRectOp::Create(RenderCommandBuffer* commandBuffer, uin
     op->dst = dst;
     op->sampling = sampling;
     if (paint) {
-        op->paint = toShmemPaint(*paint);
+        OP_REQUIRE(toShmemPaint(commandBuffer, *paint, op->paint));
         op->hasPaint = true;
     } else {
         op->hasPaint = false;
@@ -850,7 +878,12 @@ DrawImageRectOp* DrawImageRectOp::Create(RenderCommandBuffer* commandBuffer, uin
 
 void DrawImageRectOp::draw(SkCanvas* c, const SkMatrix&, IPCServerResourceCache& resourceCache) {
     auto it = resourceCache.bitmaps.find(bitmapId);
-    LOG_ALWAYS_FATAL_IF(it == resourceCache.bitmaps.end(), "Bitmap not found in cache");
+    if (it == resourceCache.bitmaps.end()) {
+        // This currently only happens when a process shuts down.
+        // There may be a frame remaining that references bitmaps which were destroyed.
+        ALOGE("Bitmap not found in cache");
+        return;
+    }
     SkPaint p;
     const SkPaint* paintPtr = hasPaint ? &(p = fromShmemPaint(paint)) : nullptr;
     c->drawImageRect(it->second.image, src, dst, sampling, paintPtr, constraint);
@@ -905,7 +938,7 @@ DrawTextBlobOp* DrawTextBlobOp::Create(RenderCommandBuffer* commandBuffer, const
     OP_REQUIRE(op);
 
     op->type = kType;
-    op->paint = toShmemPaint(p);
+    OP_REQUIRE(toShmemPaint(commandBuffer, p, op->paint));
     op->x = x_in;
     op->y = y_in;
 
@@ -943,7 +976,7 @@ DrawPatchOp* DrawPatchOp::Create(RenderCommandBuffer* commandBuffer, const SkPoi
     OP_REQUIRE(op);
     op->type = kType;
     op->mode = inMode;
-    op->paint = toShmemPaint(inPaint);
+    OP_REQUIRE(toShmemPaint(commandBuffer, inPaint, op->paint));
 
     OP_REQUIRE(SetRSpan(op->points, commandBuffer, inPoints, 12));
     OP_REQUIRE(SetRSpan(op->colors, commandBuffer, inColors, 4));
@@ -965,13 +998,13 @@ DrawPointsOp* DrawPointsOp::Create(RenderCommandBuffer* commandBuffer, SkCanvas:
     OP_REQUIRE(op);
     op->type = kType;
     op->mode = mode;
-    op->paint = toShmemPaint(paint);
+    OP_REQUIRE(toShmemPaint(commandBuffer, paint, op->paint));
     OP_REQUIRE(SetRSpan(op->points, commandBuffer, points, count));
     return op;
 }
 
 void DrawPointsOp::draw(SkCanvas* c, const SkMatrix&) {
-    c->drawPoints(mode, points.size, points.data.get(), fromShmemPaint(paint));
+    c->drawPoints(mode, {points.data.get(), points.size}, fromShmemPaint(paint));
 }
 std::string DrawPointsOp::toString() const {
     return "DrawPointsOp";
@@ -988,7 +1021,7 @@ DrawVerticesOp* DrawVerticesOp::Create(RenderCommandBuffer* commandBuffer,
     OP_REQUIRE(op);
     op->type = kType;
     op->mode = mode;
-    op->paint = toShmemPaint(paint);
+    OP_REQUIRE(toShmemPaint(commandBuffer, paint, op->paint));
     SkBinaryWriteBuffer writeBuffer(SkSerialProcs{});
     vertices->priv().encode(writeBuffer);
     auto data = writeBuffer.snapshotAsData();
@@ -1068,6 +1101,34 @@ void DrawProxySurfaceControlOp::draw(SkCanvas* c, const SkMatrix&) {
 
 std::string DrawProxySurfaceControlOp::toString() const {
     return "DrawProxySurfaceControlOp";
+}
+
+BeginRenderTargetOp* BeginRenderTargetOp::Create(RenderCommandBuffer* commandBuffer,
+                                                 uint64_t bufferId) {
+    BeginRenderTargetOp* op = commandBuffer->allocAligned<BeginRenderTargetOp>();
+    OP_REQUIRE(op);
+    op->type = kType;
+    op->bufferId = bufferId;
+    return op;
+}
+
+void BeginRenderTargetOp::draw(SkCanvas* c, const SkMatrix&) {}
+
+std::string BeginRenderTargetOp::toString() const {
+    return "BeginRenderTargetOp";
+}
+
+EndRenderTargetOp* EndRenderTargetOp::Create(RenderCommandBuffer* commandBuffer) {
+    EndRenderTargetOp* op = commandBuffer->allocAligned<EndRenderTargetOp>();
+    OP_REQUIRE(op);
+    op->type = kType;
+    return op;
+}
+
+void EndRenderTargetOp::draw(SkCanvas* c, const SkMatrix&) {}
+
+std::string EndRenderTargetOp::toString() const {
+    return "EndRenderTargetOp";
 }
 
 } // namespace android

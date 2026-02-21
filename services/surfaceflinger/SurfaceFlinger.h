@@ -91,7 +91,6 @@
 #include "FrontEnd/LayerSnapshot.h"
 #include "FrontEnd/LayerSnapshotBuilder.h"
 #include "FrontEnd/TransactionHandler.h"
-#include "LayerVector.h"
 #include "MutexUtils.h"
 #include "PowerAdvisor/PowerAdvisor.h"
 #include "QueuedTransactionState.h"
@@ -392,10 +391,9 @@ private:
 
     class State {
     public:
-        explicit State(LayerVector::StateSet set) : stateSet(set) {}
+        State() = default;
+
         State& operator=(const State& other) {
-            // We explicitly don't copy stateSet so that, e.g., mDrawingState
-            // always uses the Drawing StateSet.
             displays = other.displays;
             colorMatrixChanged = other.colorMatrixChanged;
             if (colorMatrixChanged) {
@@ -405,8 +403,6 @@ private:
 
             return *this;
         }
-
-        const LayerVector::StateSet stateSet = LayerVector::StateSet::Invalid;
 
         ui::DisplayMap<wp<IBinder>, DisplayDeviceState> displays;
 
@@ -694,6 +690,9 @@ private:
             REQUIRES(kMainThreadContext);
 
     // ICEPowerCallback overrides:
+    // If the performance hint session is enabled, and SurfaceFlinger is in performance policy
+    // mode, this will provide a performance hint that SurfaceFlinger's CPU workload is
+    // increasing.
     void notifyCpuLoadUp() override;
 
     using KernelIdleTimerController = scheduler::RefreshRateSelector::KernelIdleTimerController;
@@ -717,13 +716,14 @@ private:
     status_t setActiveModeFromBackdoor(const sp<display::DisplayToken>&, DisplayModeId, Fps minFps,
                                        Fps maxFps);
 
-    void initiateDisplayModeChanges() REQUIRES(kMainThreadContext) REQUIRES(mStateLock);
+    void initiateDisplayModeChanges() REQUIRES(kMainThreadContext)
+            REQUIRES(mStateLock, mModeTransitionMutex);
 
     // Returns whether the commit stage should proceed. The return value is ignored when finalizing
     // immediate mode changes, which happen toward the end of the commit stage.
     // TODO: b/355427258 - Remove the return value once the `synced_resolution_switch` flag is live.
     bool finalizeDisplayModeChange(PhysicalDisplayId) REQUIRES(kMainThreadContext)
-            REQUIRES(mStateLock);
+            REQUIRES(mStateLock, mModeTransitionMutex);
 
     // TODO: Remove once `modeset_state_machine` flag is cleaned up.
     void dropModeRequest(PhysicalDisplayId) REQUIRES(kMainThreadContext);
@@ -734,17 +734,18 @@ private:
 
     // Called on the main thread in response to setPowerMode()
     void setPhysicalDisplayPowerMode(const sp<DisplayDevice>& display, hal::PowerMode mode)
-            REQUIRES(mStateLock, kMainThreadContext);
+            EXCLUDES(mStateLock, mModeTransitionMutex) REQUIRES(kMainThreadContext);
+
     // Returns a future for the slow hardware operation which can run on any
     // thread and a finalizer whose function must be scheduled on the main
     // thread.
     [[nodiscard]] std::pair<ftl::Future<status_t>, ftl::FinalizerStd>
     setPhysicalDisplayPowerModeAsync(const sp<DisplayDevice>& display, hal::PowerMode mode)
-            REQUIRES(mStateLock, kMainThreadContext);
+            EXCLUDES(mStateLock, mModeTransitionMutex) REQUIRES(kMainThreadContext);
     [[nodiscard]] ftl::FinalizerStd makePowerModeAsyncFinalizer(PhysicalDisplayId displayId,
                                                                 hal::PowerMode mode);
     void setVirtualDisplayPowerMode(const sp<DisplayDevice>& display, hal::PowerMode mode)
-            REQUIRES(mStateLock, kMainThreadContext);
+            REQUIRES(kMainThreadContext);
 
     // Adjusts thread scheduling according to the optimization policy
     static void optimizeThreadScheduling(
@@ -752,8 +753,7 @@ private:
 
     // Enables or disables power optimizations depending on whether there are displays that should
     // be optimized for performance.
-    void applyOptimizationPolicy(const char* whence) REQUIRES(kMainThreadContext)
-            REQUIRES(mStateLock);
+    void applyOptimizationPolicy(const char* whence) REQUIRES(kMainThreadContext);
 
     // Returns the preferred mode for PhysicalDisplayId if the Scheduler has selected one for that
     // display. Falls back to the display's defaultModeId otherwise.
@@ -762,12 +762,12 @@ private:
 
     status_t setDesiredDisplayModeSpecsInternal(
             const sp<DisplayDevice>&, const scheduler::RefreshRateSelector::PolicyVariant&)
-            EXCLUDES(mStateLock) REQUIRES(kMainThreadContext);
+            EXCLUDES(mStateLock, mModeTransitionMutex) REQUIRES(kMainThreadContext);
 
     // TODO(b/241285191): Look up RefreshRateSelector on Scheduler to remove redundant parameter.
     status_t applyRefreshRateSelectorPolicy(PhysicalDisplayId,
                                             const scheduler::RefreshRateSelector&)
-            REQUIRES(mStateLock, kMainThreadContext);
+            REQUIRES(mStateLock, mModeTransitionMutex, kMainThreadContext);
 
     void updateWorkDuration(const sp<DisplayDevice>&, const gui::DisplayModeSpecs&);
 
@@ -780,8 +780,7 @@ private:
             compositionengine::CompositionRefreshArgs& refreshArgs, bool cursorOnly)
             REQUIRES(kMainThreadContext);
 
-    void moveSnapshotsFromCompositionArgs(compositionengine::CompositionRefreshArgs& refreshArgs,
-                                          const std::vector<std::pair<Layer*, LayerFE*>>& layers)
+    void moveSnapshotsFromCompositionArgs(const std::vector<std::pair<Layer*, LayerFE*>>& layers)
             REQUIRES(kMainThreadContext);
     std::vector<std::pair<Layer*, LayerFE*>> copyMergedSnapshots(
             compositionengine::CompositionRefreshArgs& refreshArgs) REQUIRES(kMainThreadContext);
@@ -794,12 +793,13 @@ private:
     void updateInputFlinger(VsyncId vsyncId, TimePoint frameTime) REQUIRES(kMainThreadContext);
     void persistDisplayBrightness(bool needsComposite) REQUIRES(kMainThreadContext);
     void buildWindowInfos(std::vector<gui::WindowInfo>& outWindowInfos,
-                          std::vector<gui::DisplayInfo>& outDisplayInfos)
-            REQUIRES(kMainThreadContext);
+                          std::vector<gui::DisplayInfo>& outDisplayInfos,
+                          std::vector<int32_t>& outVisibleWindowIds) REQUIRES(kMainThreadContext);
     void commitInputWindowCommands() REQUIRES(mStateLock);
     void updateCursorAsync() REQUIRES(kMainThreadContext);
 
-    void initScheduler(const sp<const DisplayDevice>&) REQUIRES(kMainThreadContext, mStateLock);
+    void initScheduler(const sp<const DisplayDevice>&)
+            REQUIRES(kMainThreadContext, mStateLock, mModeTransitionMutex);
 
     /*
      * Transactions
@@ -920,6 +920,9 @@ private:
 
         std::function<bool(const frontend::LayerSnapshot&, bool& outStopTraversal)>
                 snapshotFilterFn{nullptr};
+
+        // A bitmask for filtering layers that have specific screen capture flags.
+        uint32_t exclusionMask;
     };
 
     /*
@@ -1196,7 +1199,8 @@ private:
             const DisplayDeviceState& state,
             const sp<compositionengine::DisplaySurface>& displaySurface,
             const sp<Surface>& compositionSurface) REQUIRES(mStateLock);
-    void processDisplayChangesLocked() REQUIRES(mStateLock, kMainThreadContext);
+    void processDisplayChangesLocked()
+            REQUIRES(mStateLock, mModeTransitionMutex, kMainThreadContext);
     void processDisplayAdded(const wp<IBinder>& displayToken, const DisplayDeviceState&)
             REQUIRES(mStateLock, kMainThreadContext);
     void processDisplayRemoved(const wp<IBinder>& displayToken)
@@ -1204,7 +1208,7 @@ private:
     void processDisplayChanged(const wp<IBinder>& displayToken,
                                const DisplayDeviceState& currentState,
                                const DisplayDeviceState& drawingState)
-            REQUIRES(mStateLock, kMainThreadContext);
+            REQUIRES(mStateLock, mModeTransitionMutex, kMainThreadContext);
 
     /*
      * Display identification
@@ -1282,13 +1286,13 @@ private:
     void releaseVirtualDisplay(VirtualDisplayIdVariant displayId);
     void releaseVirtualDisplaySnapshot(VirtualDisplayId displayId);
 
-    sp<DisplayDevice> findFrontInternalDisplay() const REQUIRES(mStateLock, kMainThreadContext);
+    sp<DisplayDevice> findFrontInternalDisplay() const REQUIRES(kMainThreadContext);
 
     void onNewFrontInternalDisplay(const DisplayDevice* oldFrontInternalDisplayPtr,
                                    const DisplayDevice& newFrontInternalDisplay)
-            REQUIRES(mStateLock, kMainThreadContext);
+            REQUIRES(kMainThreadContext);
 
-    void onNewPacesetterDisplay() REQUIRES(mStateLock, kMainThreadContext);
+    void onNewPacesetterDisplay() REQUIRES(mStateLock, mModeTransitionMutex, kMainThreadContext);
 
     /*
      * Debugging & dumpsys
@@ -1367,8 +1371,13 @@ private:
 
     ui::Rotation getPhysicalDisplayOrientation(PhysicalDisplayId, bool isPrimary) const
             REQUIRES(mStateLock);
-    void traverseLegacyLayers(const LayerVector::Visitor& visitor) const
-            REQUIRES(kMainThreadContext);
+
+    template <typename F>
+    void traverseLegacyLayers(F visitor) const REQUIRES(kMainThreadContext) {
+        for (auto& layer : mLegacyLayers) {
+            visitor(layer.second.get());
+        }
+    }
 
     void initBootProperties();
     void initTransactionTraceWriter();
@@ -1391,7 +1400,7 @@ private:
     // - write access from the main thread must lock mStateLock, since another
     // thread may be reading these variables.
     mutable Mutex mStateLock;
-    State mCurrentState{LayerVector::StateSet::Current};
+    State mCurrentState;
     std::atomic<int32_t> mTransactionFlags = 0;
     std::atomic<uint32_t> mUniqueTransactionId = 1;
 
@@ -1418,7 +1427,7 @@ private:
 
     // Can only accessed from the main thread, these members
     // don't need synchronization
-    State mDrawingState{LayerVector::StateSet::Drawing};
+    State mDrawingState;
     bool mVisibleRegionsDirty = false;
 
     bool mHdrLayerInfoChanged = false;
@@ -1503,6 +1512,7 @@ private:
     std::atomic<PhysicalDisplayId> mFrontInternalDisplayId;
 
     display::DisplayModeController mDisplayModeController;
+    std::mutex mModeTransitionMutex;
 
     struct {
         std::unique_ptr<DisplayIdGenerator<GpuVirtualDisplayId>> gpu =
@@ -1638,14 +1648,16 @@ private:
         return mScheduler->getLayerFramerate(now, id);
     }
 
-    bool mPowerHintSessionEnabled;
+    std::atomic_bool mPowerHintSessionEnabled;
+    std::atomic_int mPowerModeInProgressCount{0};
+    std::atomic_bool mPowerModeChangeInProgress{false};
     // Whether a display should be turned on when initialized
     bool mSkipPowerOnForQuiescent;
 
     // used for omitting vsync callbacks to apps when the display is not updatable
-    int mRefreshableDisplays GUARDED_BY(mStateLock) = 0;
-    void incRefreshableDisplays() REQUIRES(mStateLock);
-    void decRefreshableDisplays() REQUIRES(mStateLock);
+    int mRefreshableDisplays GUARDED_BY(kMainThreadContext) = 0;
+    void incRefreshableDisplays() REQUIRES(kMainThreadContext);
+    void decRefreshableDisplays() REQUIRES(kMainThreadContext);
 
     frontend::LayerLifecycleManager mLayerLifecycleManager GUARDED_BY(kMainThreadContext);
     frontend::LayerHierarchyBuilder mLayerHierarchyBuilder GUARDED_BY(kMainThreadContext);
@@ -1669,7 +1681,8 @@ private:
     bool mFrontEndDisplayInfosChanged GUARDED_BY(kMainThreadContext) = false;
 
     // WindowInfo ids visible during the last commit.
-    std::unordered_set<int32_t> mVisibleWindowIds GUARDED_BY(kMainThreadContext);
+    std::vector<int32_t> mVisibleWindowIds GUARDED_BY(kMainThreadContext);
+    std::vector<int32_t> mLastVisibleWindowIds GUARDED_BY(kMainThreadContext);
 
     // Mirroring
     // Map of displayid to mirrorRoot
@@ -1723,13 +1736,8 @@ private:
     void sfdo_resetForcedPacesetter();
 
     // Partition displays: physical for main thread, virtual for offloaded.
-    struct RefreshArgsPartition {
-        compositionengine::CompositionRefreshArgs mainThreadRefreshArgs;
-        std::optional<compositionengine::CompositionRefreshArgs> offloadedRefreshArgs;
-    };
-    RefreshArgsPartition addOutputsToRefreshArgs(
-            PhysicalDisplayId pacesetterId,
-            const compositionengine::CompositionRefreshArgs& refreshArgs,
+    std::optional<compositionengine::CompositionRefreshArgs> addOutputsToRefreshArgs(
+            PhysicalDisplayId pacesetterId, compositionengine::CompositionRefreshArgs& refreshArgs,
             const scheduler::FrameTargeters& frameTargeters);
     std::future<void> offloadGpuCompositedDisplays(
             compositionengine::CompositionRefreshArgs offloadedRefreshArgs);

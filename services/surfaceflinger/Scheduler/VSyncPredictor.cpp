@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <numeric>
 #include <sstream>
 
@@ -142,7 +143,7 @@ Period VSyncPredictor::minFramePeriodLocked() const {
     return Period::fromNs(slope * mNumVsyncsForFrame);
 }
 
-bool VSyncPredictor::addVsyncTimestamp(nsecs_t timestamp, VsyncTimeSource source) {
+bool VSyncPredictor::addVsyncTimestamp(nsecs_t timestamp) {
     SFTRACE_CALL();
 
     std::lock_guard lock(mMutex);
@@ -170,11 +171,6 @@ bool VSyncPredictor::addVsyncTimestamp(nsecs_t timestamp, VsyncTimeSource source
                                (mClock->now() - *mKnownTimestamp) / 1e6f);
         return false;
     }
-
-    const nsecs_t modelErrorNs = getModelAccuracyInNsLocked(timestamp);
-    SFTRACE_FORMAT("VsyncPredictionError(ms): error= %.2f, actual= %.2f, VsyncTimeSource: %s",
-                   static_cast<float>(modelErrorNs) / 1e6f, static_cast<float>(timestamp) / 1e6f,
-                   ftl::enum_string(source).c_str());
 
     if (mTimestamps.size() != kHistorySize) {
         mTimestamps.push_back(timestamp);
@@ -419,18 +415,28 @@ nsecs_t VSyncPredictor::nextAnticipatedVSyncTimeFrom(nsecs_t timePoint,
     return vsyncOpt->ns();
 }
 
-nsecs_t VSyncPredictor::getModelAccuracyInNs(nsecs_t knownVsync) const {
+VSyncTracker::ModelAccuracy VSyncPredictor::getModelAccuracy(nsecs_t timestamp) const {
     std::lock_guard lock(mMutex);
-    return getModelAccuracyInNsLocked(knownVsync);
+    return getModelAccuracyLocked(timestamp);
 }
 
-nsecs_t VSyncPredictor::getModelAccuracyInNsLocked(nsecs_t knownVsync) const {
+VSyncTracker::ModelAccuracy VSyncPredictor::getModelAccuracyLocked(nsecs_t knownVsync) const {
     const nsecs_t predictedVsync = snapToVsync(knownVsync - idealPeriod() / 2);
-    ALOGV("%s : knownVsync=%" PRId64 ", inputtime=%" PRId64 ", predictedVsync=%" PRId64
-          ", period=%" PRId64 ", error=%" PRId64,
-          __func__, knownVsync, knownVsync - idealPeriod() / 2, predictedVsync, idealPeriod(),
-          std::abs(predictedVsync - knownVsync));
-    return std::abs(predictedVsync - knownVsync);
+    const nsecs_t modelErrorNs = std::abs(predictedVsync - knownVsync);
+
+    // Calculate the number of ideal VSync periods that have elapsed between the last recorded VSync
+    // signal and the current knownVsync.
+    const std::optional<nsecs_t> lastVsync = !mTimestamps.empty()
+            ? std::make_optional(mTimestamps[mLastTimestampIndex])
+            : mKnownTimestamp;
+    const double vsyncPeriodsElapsed = lastVsync
+            ? static_cast<double>(knownVsync - *lastVsync) / static_cast<double>(idealPeriod())
+            : 0.0;
+
+    const auto stability = calculateVsyncStability(knownVsync);
+
+    return {modelErrorNs,  knownVsync,          predictedVsync,
+            idealPeriod(), vsyncPeriodsElapsed, stability};
 }
 
 /*
@@ -661,6 +667,8 @@ void VSyncPredictor::clearTimestamps(bool clearTimelines) {
         mLastTimestampIndex = 0;
     }
 
+    mVsyncErrors.clear();
+
     mIdealPeriod = Period::fromNs(idealPeriod());
     if (mTimelines.empty()) {
         mLastCommittedVsync = TimePoint::fromNs(0);
@@ -683,6 +691,63 @@ void VSyncPredictor::clearTimestamps(bool clearTimelines) {
 bool VSyncPredictor::needsMoreSamples() const {
     std::lock_guard lock(mMutex);
     return mTimestamps.size() < getMinSamplesRequiredForPrediction();
+}
+
+VSyncTracker::HwVsyncStability VSyncPredictor::calculateVsyncStability(nsecs_t timestamp) const {
+    HwVsyncStability stability;
+
+    // Find the most recent valid timestamp as a reference point for the interval.
+    nsecs_t lastTimestamp = 0;
+    if (!mTimestamps.empty()) {
+        lastTimestamp = mTimestamps[mLastTimestampIndex];
+    } else if (mKnownTimestamp) {
+        lastTimestamp = *mKnownTimestamp;
+    }
+
+    if (lastTimestamp != 0) {
+        // If this is the first sample after a long idle period, the delta will be large and
+        // the stability calculation will be meaningless. Clear the history in this case.
+        if (!isVsyncWithinThreshold(timestamp, lastTimestamp)) {
+            mVsyncErrors.clear();
+            return stability;
+        }
+
+        const nsecs_t delta = timestamp - lastTimestamp;
+        const nsecs_t ideal = idealPeriod();
+        if (ideal > 0) {
+            // Normalization. Find the nearest multiple of the ideal period that fits into the
+            // observed delta.
+            const int64_t n = (delta + ideal / 2) / ideal;
+            if (n > 0) {
+                // Calculate the variance between the observed timestamp and the theoretical ideal.
+                const nsecs_t error = delta - (n * ideal);
+                stability.error = error;
+
+                // Only use consecutive samples (n == 1) for the stability metric.
+                // This isolates immediate jitter from cumulative drift over skipped frames (n > 1).
+                if (n == 1) {
+                    mVsyncErrors.next() = error;
+
+                    // Calculate Standard Deviation. High stddev indicates an inconsistent or
+                    // jittery hardware signal, which makes prediction models unreliable.
+                    if (mVsyncErrors.size() >= kAbsoluteMinSamplesForPrediction) {
+                        double sum = 0;
+                        for (size_t i = 0; i < mVsyncErrors.size(); i++) {
+                            sum += static_cast<double>(mVsyncErrors[i]);
+                        }
+                        const double mean = sum / mVsyncErrors.size();
+                        double sumSqDiff = 0;
+                        for (size_t i = 0; i < mVsyncErrors.size(); i++) {
+                            sumSqDiff += std::pow(static_cast<double>(mVsyncErrors[i]) - mean, 2);
+                        }
+                        const double stddev = std::sqrt(sumSqDiff / mVsyncErrors.size());
+                        stability.stddev = static_cast<nsecs_t>(stddev);
+                    }
+                }
+            }
+        }
+    }
+    return stability;
 }
 
 void VSyncPredictor::resetModel() {

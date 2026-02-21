@@ -25,10 +25,16 @@ use crate::instance_data::{invalidate_current_vm, InstanceData};
 use crate::package_manager::PackageManager;
 use crate::payload::VmPayload;
 use crate::vsock_selinux::connect_with_cid_port_context;
+use aiseal_internal_service_aidl::aidl::com::android::internal::aiseal::IAiSealInternalService::{
+    BnAiSealInternalService, IAiSealInternalService,
+};
 use aisealhostservice_aidl::aidl::android::aiseal::IAiSealHostService::{
     BnAiSealHostService, IAiSealHostService,
 };
 use android_os_permissions_aidl::aidl::android::os::IPermissionController::IPermissionController;
+use android_system_virtualizationcommon::aidl::android::system::virtualizationcommon::{
+    ICEStoreKEK::{BnCEStoreKEK, ICEStoreKEK},
+};
 use android_system_virtualizationservice::aidl::android::system::virtualizationservice::{
     CpuOptions::CpuOptions,
     CpuOptions::CpuTopology::CpuTopology,
@@ -47,6 +53,11 @@ use binder::{
 use log::{error, info, warn};
 use rustutils::android::{users::AID_ROOT, users::AID_SYSTEM};
 use std::collections::HashMap;
+use std::fs;
+use std::fs::File;
+use std::io::Write;
+use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use vmclient::{DeathReason, ErrorCode, VmInstance, VmWaitError};
 
@@ -179,8 +190,13 @@ fn try_main() -> Result<()> {
         }
     }
 
-    let host_service = AiSealHostService::new_binder(pm, instance, aiseal_config);
+    let instance = Arc::new(instance);
+    let host_service = AiSealHostService::new_binder(pm, instance.clone(), aiseal_config);
     add_service("aiseal_host", host_service.as_binder()).context("Registering host service")?;
+
+    let internal_service = AiSealInternalService::new_binder(instance);
+    add_service("aiseal_internal", internal_service.as_binder())
+        .context("Registering internal service")?;
 
     info!("Registered services, joining threadpool");
     ProcessState::join_thread_pool();
@@ -276,7 +292,7 @@ fn replace_mls_level(context: &str, level: &str) -> binder::Result<String> {
 /// Implementation of the `IAiSealHostService` AIDL interface.
 struct AiSealHostService {
     pm: PackageManager,
-    instance: VmInstance,
+    instance: Arc<VmInstance>,
     service_to_owner: HashMap<String, ExportedServiceWithOwner>,
 }
 
@@ -287,7 +303,7 @@ impl AiSealHostService {
     /// Creates a new binder object for the `AiSealHostService`.
     fn new_binder(
         pm: PackageManager,
-        instance: VmInstance,
+        instance: Arc<VmInstance>,
         config: AiSealConfig,
     ) -> Strong<dyn IAiSealHostService> {
         let service_to_owner = config.aiseal_payload_config.get_service_to_owner_map();
@@ -339,5 +355,89 @@ impl IAiSealHostService for AiSealHostService {
         info!("vsock_new_context: {vsock_new_context}");
         connect_with_cid_port_context(self.instance.cid() as u32, port, &vsock_new_context)
             .or_binder_exception(ExceptionCode::SECURITY)
+    }
+}
+
+/// Implementation of the `IAiSealInternalService` AIDL interface.
+#[allow(dead_code)]
+struct AiSealInternalService {
+    instance: Arc<VmInstance>,
+}
+
+impl Interface for AiSealInternalService {}
+
+impl AiSealInternalService {
+    fn new_binder(instance: Arc<VmInstance>) -> Strong<dyn IAiSealInternalService> {
+        BnAiSealInternalService::new_binder(
+            AiSealInternalService { instance },
+            BinderFeatures::default(),
+        )
+    }
+}
+
+impl IAiSealInternalService for AiSealInternalService {
+    fn onUserUnlocking(&self, user_id: i32, kek_file: &str) -> binder::Result<()> {
+        info!("onUserUnlocking {user_id}");
+        let Some(guest_agent) = self.instance.vm.getGuestAgent()? else {
+            return Err(anyhow!("No guest agent"))
+                .or_binder_exception(ExceptionCode::ILLEGAL_STATE);
+        };
+        let kek = CEStoreKEK::new_binder(kek_file);
+        guest_agent.userUnlocked(user_id, &kek)
+    }
+
+    fn onUserStopped(&self, user_id: i32) -> binder::Result<()> {
+        info!("onUserStopped {user_id}");
+        Ok(())
+    }
+}
+
+struct CEStoreKEK {
+    kek_file: String,
+}
+
+impl Interface for CEStoreKEK {}
+
+impl CEStoreKEK {
+    fn new_binder(kek_file: &str) -> Strong<dyn ICEStoreKEK> {
+        BnCEStoreKEK::new_binder(
+            CEStoreKEK { kek_file: kek_file.to_owned() },
+            BinderFeatures::default(),
+        )
+    }
+}
+
+impl ICEStoreKEK for CEStoreKEK {
+    fn getKEK(&self) -> binder::Result<std::option::Option<Vec<u8>>> {
+        match fs::read(&self.kek_file) {
+            Ok(data) => Ok(Some(data)),
+            Err(_) => Ok(None),
+        }
+    }
+
+    fn onKEKCreated(&self, key: &[u8]) -> binder::Result<()> {
+        if let Err(e) = fs::create_dir_all(Path::new(&self.kek_file).parent().unwrap()) {
+            return Err(format!("Can't create directories for {}: {}", self.kek_file, e))
+                .or_binder_exception(ExceptionCode::ILLEGAL_STATE);
+        }
+
+        let mut f = match File::create(&self.kek_file) {
+            Ok(f) => f,
+            Err(e) => {
+                return Err(format!("Can't create kek file {}: {}", self.kek_file, e))
+                    .or_binder_exception(ExceptionCode::ILLEGAL_STATE);
+            }
+        };
+
+        if let Err(e) = f.write_all(key) {
+            return Err(format!("Can't write kek file {}: {}", self.kek_file, e))
+                .or_binder_exception(ExceptionCode::ILLEGAL_STATE);
+        }
+
+        if let Err(e) = f.sync_all() {
+            return Err(format!("Can't sync kek file {}: {}", self.kek_file, e))
+                .or_binder_exception(ExceptionCode::ILLEGAL_STATE);
+        }
+        Ok(())
     }
 }

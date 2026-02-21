@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2025 The Android Open Source Project
+ * Copyright (C) 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,16 +16,27 @@
 
 #pragma once
 
-namespace android {
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <mutex>
+#include <thread>
 
-struct ShmemImageInfo {
-    int width;
-    int height;
-    SkColorType colorType;
-    SkAlphaType alphaType;
+// A single worker thread that services a list of runnables.
+class AsyncWorker {
+public:
+    AsyncWorker();
+    ~AsyncWorker();
+
+    void post(std::function<void()> runnable);
+
+private:
+    std::thread mThread;
+    bool mDone = false;
+    std::deque<std::function<void()>> mRunnables;
+    std::mutex mMutex;
+    std::condition_variable mCv;
+
+    void run();
+    void execute(std::deque<std::function<void()>>& runnables);
 };
-
-ShmemImageInfo toShmemImageInfo(const SkImageInfo& info);
-SkImageInfo fromShmemImageInfo(const ShmemImageInfo& info);
-
-} // namespace android

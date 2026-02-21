@@ -299,6 +299,7 @@ filegroup {
         ":inputconstants_aidl",
         ":libgui_bufferqueue_sources",
         ":rendercommandbuffer_sources",
+        "AsyncWorker.cpp",
         "BitTube.cpp",
         "BLASTBufferQueue.cpp",
         "BufferItemConsumer.cpp",
@@ -338,6 +339,7 @@ filegroup {
         "bufferqueue/1.0/H2BGraphicBufferProducer.cpp",
         "bufferqueue/2.0/B2HProducerListener.cpp",
         "bufferqueue/2.0/H2BGraphicBufferProducer.cpp",
+        "bufferqueue/2.0/Surface2HGraphicBufferProducer.cpp",
     ],
 }
 
@@ -628,3 +630,9 @@ cc_library_static {
 }
 
 subdirs = ["tests"]
+
+cc_library_headers {
+    name: "liblocklessqueue_headers",
+    host_supported: true,
+    export_include_dirs: ["include"],
+}

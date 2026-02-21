@@ -1436,14 +1436,21 @@ void SkiaRenderEngine::drawLayersInternal(
             canvas->clipRRect(roundRectClip, enableAntiAlias);
         }
 
-        if (layer.renderCommandBufferConsumer) {
+        if (layer.renderCommandBuffer) {
+            SFTRACE_NAME("RenderCommandBuffer");
             if (layer.renderResourceCache) {
                 for (auto& [id, bitmap] : layer.renderResourceCache->bitmaps) {
-                    auto imageTextureRef = getOrCreateBackendTexture(bitmap.buffer, false);
+                    bool isRenderTarget =
+                            bitmap.buffer->getUsage() & GraphicBuffer::USAGE_HW_RENDER;
+                    auto imageTextureRef = getOrCreateBackendTexture(bitmap.buffer, isRenderTarget);
 
                     if (!bitmap.image) {
                         bitmap.image =
                                 imageTextureRef->makeImage(layerDataspace, kUnpremul_SkAlphaType);
+                    }
+
+                    if (isRenderTarget && !bitmap.surface) {
+                        bitmap.surface = imageTextureRef->getOrCreateSurface(layerDataspace);
                     }
                 }
             }
@@ -1453,8 +1460,7 @@ void SkiaRenderEngine::drawLayersInternal(
                 canvas->clipRRect(bounds);
             }
             renderCommandBufferToCanvas(layer.renderResourceCache.get(),
-                                        layer.renderCommandBufferConsumer.get(), canvas,
-                                        [&](int) {});
+                                        layer.renderCommandBuffer.get(), canvas, [&](int) {});
         } else if (!bounds.isRect()) {
             paint.setAntiAlias(true);
             canvas->drawRRect(bounds, paint);
@@ -1588,8 +1594,7 @@ void SkiaRenderEngine::drawShadow(SkCanvas* canvas,
     // DrawShadow expects the light pos in device space.
     // Shadow settings is in layer space (which is our current canvas transform).
     SkMatrix deviceFromLayer = canvas->getTotalMatrix();
-    SkPoint lightPos = {settings.lightPos.x, settings.lightPos.y}; // lightPos is in layer space
-    deviceFromLayer.mapPoints(&lightPos, 1);                       // lightPos is in device space
+    SkPoint lightPos = deviceFromLayer.mapPoint({settings.lightPos.x, settings.lightPos.y});
 
     SkShadowUtils::DrawShadow(canvas, SkPath::RRect(casterRRect), SkPoint3::Make(0, 0, casterZ),
                               SkPoint3{lightPos.fX, lightPos.fY, settings.lightPos.z},

@@ -32,6 +32,7 @@
 #pragma clang diagnostic pop
 #include <SkColor.h>
 #include <SkDrawable.h>
+#include <SkSurface.h>
 // #include <SkGainmapInfo.h>
 #include <SkBitmap.h>
 #include <SkImage.h>
@@ -64,8 +65,6 @@
 
 #include <android/ipcrenderbuffer/RenderBufferDebugUtils.h>
 #include <android/ipcrenderbuffer/RenderBufferOpTypes.h>
-#include <android/ipcrenderbuffer/RenderBufferShmemImageInfo.h>
-#include <android/ipcrenderbuffer/RenderBufferShmemPaint.h>
 
 #define IPCRENDERBUFFER_UNIMPLEMENTED_IS_FATAL 0
 #ifdef IPCRENDERRBUFFER_UNIMPLEMENTED_IS_FATAL
@@ -89,11 +88,16 @@ struct IPCClientResourceCache {
 struct IPCServerBitmap {
     sp<GraphicBuffer> buffer;
     sk_sp<SkImage> image;
+    sk_sp<SkSurface> surface;
 };
 
 struct IPCServerResourceCache {
     sk_sp<SkFontMgr> fontManager;
     std::map<uint64_t, IPCServerBitmap> bitmaps;
+};
+
+struct ShmemPaint {
+    RSpan<uint8_t> data;
 };
 
 // Derived from RecordingCanvas.cpp
@@ -478,4 +482,22 @@ struct DrawProxySurfaceControlOp final : IPCRenderBufferOp {
     void draw(SkCanvas* c, const SkMatrix&);
     std::string toString() const;
 };
+
+struct BeginRenderTargetOp final : IPCRenderBufferOp {
+    static const auto kType = TYPE_BEGINRENDERTARGET;
+    uint64_t bufferId;
+
+    static BeginRenderTargetOp* Create(RenderCommandBuffer* commandBuffer, uint64_t bufferId);
+    void draw(SkCanvas* c, const SkMatrix&);
+    std::string toString() const;
+};
+
+struct EndRenderTargetOp final : IPCRenderBufferOp {
+    static const auto kType = TYPE_ENDRENDERTARGET;
+
+    static EndRenderTargetOp* Create(RenderCommandBuffer* commandBuffer);
+    void draw(SkCanvas* c, const SkMatrix&);
+    std::string toString() const;
+};
+
 } // namespace android

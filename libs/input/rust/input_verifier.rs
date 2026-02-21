@@ -239,13 +239,14 @@ impl InputVerifier {
 
     /// Process a pointer movement event from an InputDevice.
     /// If the event is not valid, we return an error string that describes the issue.
-    pub fn process_movement(&mut self, event: NotifyMotionArgs<'_>) -> Result<(), String> {
+    /// On success, returns true if the verifier is now empty (no pointers touching or hovering).
+    pub fn process_movement(&mut self, event: NotifyMotionArgs<'_>) -> Result<bool, String> {
         let is_captured_source = self.verify_captured_events
             && (event.source.is_from_class(SourceClass::Position)
                 || event.source == Source::MouseRelative);
         if !(event.source.is_from_class(SourceClass::Pointer) || is_captured_source) {
             // Skip unsupported source types.
-            return Ok(());
+            return Ok(self.is_empty());
         }
         if self.should_log {
             info!(
@@ -267,7 +268,16 @@ impl InputVerifier {
                 .process_event(event)?;
         }
 
-        if self.verify_down_time {
+        // We currently only verify down times when the pointer is down or going down, since
+        // the Autoclick accessibility feature currently injects down events into the real mouse's
+        // event stream, causing the down time to go backwards the next time that mouse moves in a
+        // hover.
+        // TODO(b/479982869): once accessibility migrates to injecting events through a separate
+        //   event stream, always verify down times.
+        let verify_down_time = self.verify_down_time
+            && (event.action == MotionAction::Down
+                || self.touching_pointer_ids_by_device.contains_key(&event.device_id));
+        if verify_down_time {
             let old_down_time_nanos =
                 *(self.down_time_by_device.get(&event.device_id).unwrap_or(&0));
             if event.down_time_nanos < old_down_time_nanos {
@@ -275,8 +285,6 @@ impl InputVerifier {
                     "{}: Down time went backwards for device {:?} - new time {}ns < old time {}ns",
                     self.name, event.device_id, event.down_time_nanos, old_down_time_nanos
                 ));
-            } else if event.down_time_nanos > old_down_time_nanos {
-                self.down_time_by_device.insert(event.device_id, event.down_time_nanos);
             }
         }
 
@@ -318,10 +326,10 @@ impl InputVerifier {
                 }
                 it.insert(pointer_id);
             }
-            MotionAction::Move => {
+            MotionAction::Move => 'move_match: {
                 if event.source == Source::MouseRelative {
                     // MOUSE_RELATIVE motion always uses move actions, even with no buttons pressed.
-                    return Ok(());
+                    break 'move_match;
                 }
                 if !self.ensure_touching_pointers_match(event.device_id, event.pointer_properties) {
                     return Err(format!(
@@ -430,9 +438,19 @@ impl InputVerifier {
                 }
                 self.hovering_pointer_ids_by_device.remove(&event.device_id);
             }
-            _ => return Ok(()),
+            _ => {}
         }
-        Ok(())
+        // Now that we know the event is valid, we can update down time state.
+        if verify_down_time {
+            self.down_time_by_device.insert(event.device_id, event.down_time_nanos);
+        }
+        Ok(self.is_empty())
+    }
+
+    /// Returns true if there are no touching pointers and no hovering pointers for any device.
+    pub fn is_empty(&self) -> bool {
+        self.touching_pointer_ids_by_device.is_empty()
+            && self.hovering_pointer_ids_by_device.is_empty()
     }
 
     /// Notify the verifier that the device has been reset, which will cause the verifier to erase
@@ -512,6 +530,53 @@ mod tests {
             "Test", /*should_log*/ false, /*verify_buttons*/ true,
             /*verify_down_times*/ true, /*verify_captured_events*/ true,
         )
+    }
+
+    #[test]
+    /**
+     * The function is_empty() should return false if there is currently a touching or a hovering
+     * pointer, and return true if there aren't any active gestures.
+     */
+    fn is_empty() {
+        let mut verifier = make_test_verifier();
+        assert!(verifier.is_empty());
+
+        let pointer_properties = Vec::from([RustPointerProperties { id: 0 }]);
+        let result = verifier.process_movement(NotifyMotionArgs {
+            action: MotionAction::Down,
+            pointer_properties: &pointer_properties,
+            ..BASE_EVENT
+        });
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
+        assert!(!verifier.is_empty());
+
+        let result = verifier.process_movement(NotifyMotionArgs {
+            action: MotionAction::Up,
+            pointer_properties: &pointer_properties,
+            ..BASE_EVENT
+        });
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+        assert!(verifier.is_empty());
+
+        let result = verifier.process_movement(NotifyMotionArgs {
+            action: MotionAction::HoverEnter,
+            pointer_properties: &pointer_properties,
+            ..BASE_EVENT
+        });
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
+        assert!(!verifier.is_empty());
+
+        let result = verifier.process_movement(NotifyMotionArgs {
+            action: MotionAction::HoverExit,
+            pointer_properties: &pointer_properties,
+            ..BASE_EVENT
+        });
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+        assert!(verifier.is_empty());
     }
 
     #[test]
@@ -895,7 +960,7 @@ mod tests {
     }
 
     #[test]
-    fn down_time_goes_backwards() {
+    fn down_time_goes_backwards_during_down() {
         // Check that the down time verification would have caught b/447603159, where the button
         // press event after a down on a touchpad had the old down time.
         let mut verifier = make_test_verifier();
@@ -917,6 +982,90 @@ mod tests {
                 ..BASE_MOUSE_EVENT
             })
             .is_err());
+    }
+
+    #[test]
+    // TODO(b/479982869): remove this test once accessibility migrates to injecting events through
+    //   a separate event stream.
+    fn down_time_goes_backwards_during_hover() {
+        let mut verifier = make_test_verifier();
+        assert!(verifier
+            .process_movement(NotifyMotionArgs {
+                event_time_nanos: 100,
+                action: MotionAction::Down,
+                down_time_nanos: 100,
+                ..BASE_MOUSE_EVENT
+            })
+            .is_ok());
+        assert!(verifier
+            .process_movement(NotifyMotionArgs {
+                event_time_nanos: 100,
+                action: MotionAction::Up,
+                down_time_nanos: 100,
+                ..BASE_MOUSE_EVENT
+            })
+            .is_ok());
+        assert!(verifier
+            .process_movement(NotifyMotionArgs {
+                event_time_nanos: 100,
+                action: MotionAction::HoverEnter,
+                down_time_nanos: 100,
+                ..BASE_MOUSE_EVENT
+            })
+            .is_ok());
+        // Down time going backwards during hovering should be OK.
+        assert!(verifier
+            .process_movement(NotifyMotionArgs {
+                event_time_nanos: 100,
+                action: MotionAction::HoverMove,
+                down_time_nanos: 0,
+                ..BASE_MOUSE_EVENT
+            })
+            .is_ok());
+        assert!(verifier
+            .process_movement(NotifyMotionArgs {
+                event_time_nanos: 100,
+                action: MotionAction::HoverExit,
+                down_time_nanos: 0,
+                ..BASE_MOUSE_EVENT
+            })
+            .is_ok());
+        // But the next event with the pointer down should still be rejected if it has a down time
+        // earlier than the last one we saw with the pointer down.
+        assert!(verifier
+            .process_movement(NotifyMotionArgs {
+                event_time_nanos: 100,
+                action: MotionAction::Down,
+                down_time_nanos: 50,
+                ..BASE_MOUSE_EVENT
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn down_time_not_updated_by_invalid_event() {
+        let mut verifier = make_test_verifier();
+
+        // Send an invalid CANCEL (because it's missing the CANCELED flag) with a down time set.
+        assert!(verifier
+            .process_movement(NotifyMotionArgs {
+                event_time_nanos: 100,
+                action: MotionAction::Cancel,
+                flags: MotionFlags::CANCELED,
+                down_time_nanos: 100,
+                ..BASE_EVENT
+            })
+            .is_err());
+
+        // The next event should be accepted even though it has an earlier down time.
+        assert!(verifier
+            .process_movement(NotifyMotionArgs {
+                event_time_nanos: 50,
+                action: MotionAction::Down,
+                down_time_nanos: 50,
+                ..BASE_EVENT
+            })
+            .is_ok());
     }
 
     #[test]

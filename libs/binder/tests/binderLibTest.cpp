@@ -463,7 +463,10 @@ class BinderLibTestEvent
             : m_eventTriggered(false)
         {
             pthread_mutex_init(&m_waitMutex, nullptr);
-            pthread_cond_init(&m_waitCond, nullptr);
+            pthread_condattr_t attr;
+            pthread_condattr_init(&attr);
+            pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+            pthread_cond_init(&m_waitCond, &attr);
         }
         void reset() { m_eventTriggered = false; }
         int waitEvent(int timeout_s)
@@ -472,7 +475,7 @@ class BinderLibTestEvent
             pthread_mutex_lock(&m_waitMutex);
             if (!m_eventTriggered) {
                 struct timespec ts;
-                clock_gettime(CLOCK_REALTIME, &ts);
+                clock_gettime(CLOCK_MONOTONIC, &ts);
                 ts.tv_sec += timeout_s;
                 pthread_cond_timedwait(&m_waitCond, &m_waitMutex, &ts);
             }
@@ -1323,8 +1326,6 @@ TEST_F(BinderLibTest, RecvOwnedFileDescriptors) {
 
 // Used to trigger fdsan error (b/239222407).
 TEST_F(BinderLibTest, RecvOwnedFileDescriptorsAndWriteInt) {
-    GTEST_SKIP() << "triggers fdsan false positive: b/370824489";
-
     FdLeakDetector fd_leak_detector;
 
     Parcel data;
@@ -1342,8 +1343,6 @@ TEST_F(BinderLibTest, RecvOwnedFileDescriptorsAndWriteInt) {
 
 // Used to trigger fdsan error (b/239222407).
 TEST_F(BinderLibTest, RecvOwnedFileDescriptorsAndTruncate) {
-    GTEST_SKIP() << "triggers fdsan false positive: b/370824489";
-
     FdLeakDetector fd_leak_detector;
 
     Parcel data;
@@ -2218,7 +2217,7 @@ TEST_F(BinderLibTest, BinderNetlinkMonitor) {
     }
 
     binderNetlink.start();
-    binderNetlink.waitEvent(5);
+    binderNetlink.waitEvent(10);
     EXPECT_EQ(TestBinderNetlink::STARTED, binderNetlink.getResult());
     binderNetlink.stop();
 }
@@ -2230,7 +2229,7 @@ TEST_F(BinderLibTest, BinderNetlinkFailedReply) {
     }
 
     binderNetlink.start();
-    binderNetlink.waitEvent(5);
+    binderNetlink.waitEvent(10);
     EXPECT_EQ(TestBinderNetlink::STARTED, binderNetlink.getResult());
 
     Parcel data, reply, replypid;
@@ -2241,7 +2240,7 @@ TEST_F(BinderLibTest, BinderNetlinkFailedReply) {
     data.writeUint64Vector(testValue);
     binderNetlink.expect(getpid(), pid, BINDER_LIB_TEST_ECHO_VECTOR, BR_FAILED_REPLY);
     EXPECT_EQ(FAILED_TRANSACTION, m_server->transact(BINDER_LIB_TEST_ECHO_VECTOR, data, &reply));
-    binderNetlink.waitEvent(5);
+    binderNetlink.waitEvent(10);
     EXPECT_EQ(TestBinderNetlink::FOUND, binderNetlink.getResult());
 
     bindernetlink::Statistics stats = binderNetlink.getStatistics();
@@ -2262,7 +2261,7 @@ TEST_F(BinderLibTest, BinderNetlinkFrozenReply) {
     }
 
     binderNetlink.start();
-    binderNetlink.waitEvent(5);
+    binderNetlink.waitEvent(10);
     EXPECT_EQ(TestBinderNetlink::STARTED, binderNetlink.getResult());
 
     Parcel data, reply, replypid;
@@ -2273,7 +2272,7 @@ TEST_F(BinderLibTest, BinderNetlinkFrozenReply) {
     binderNetlink.expect(getpid(), pid, BINDER_LIB_TEST_NOP_TRANSACTION, BR_FROZEN_REPLY);
     EXPECT_EQ(FAILED_TRANSACTION,
               m_server->transact(BINDER_LIB_TEST_NOP_TRANSACTION, data, &reply));
-    binderNetlink.waitEvent(5);
+    binderNetlink.waitEvent(10);
     EXPECT_EQ(TestBinderNetlink::FOUND, binderNetlink.getResult());
     EXPECT_EQ(NO_ERROR, IPCThreadState::self()->freeze(pid, false, 0));
 
@@ -2295,7 +2294,7 @@ TEST_F(BinderLibTest, BinderNetlinkPendingReply) {
     }
 
     binderNetlink.start();
-    binderNetlink.waitEvent(5);
+    binderNetlink.waitEvent(10);
     EXPECT_EQ(TestBinderNetlink::STARTED, binderNetlink.getResult());
 
     Parcel data, reply, replypid;
@@ -2307,7 +2306,7 @@ TEST_F(BinderLibTest, BinderNetlinkPendingReply) {
                          BR_TRANSACTION_PENDING_FROZEN);
     EXPECT_EQ(NO_ERROR,
               m_server->transact(BINDER_LIB_TEST_NOP_TRANSACTION, data, &reply, TF_ONE_WAY));
-    binderNetlink.waitEvent(5);
+    binderNetlink.waitEvent(10);
     EXPECT_EQ(TestBinderNetlink::FOUND, binderNetlink.getResult());
     EXPECT_EQ(NO_ERROR, IPCThreadState::self()->freeze(pid, false, 0));
 
@@ -2329,7 +2328,7 @@ TEST_F(BinderLibTest, BinderNetlinkSpamReply) {
     }
 
     binderNetlink.start();
-    binderNetlink.waitEvent(5);
+    binderNetlink.waitEvent(10);
     EXPECT_EQ(TestBinderNetlink::STARTED, binderNetlink.getResult());
 
     Parcel data, reply, replypid;
@@ -2341,7 +2340,7 @@ TEST_F(BinderLibTest, BinderNetlinkSpamReply) {
     EXPECT_EQ(NO_ERROR, IPCThreadState::self()->freeze(pid, true, 1000));
     binderNetlink.expect(getpid(), pid, BINDER_LIB_TEST_ECHO_VECTOR, BR_ONEWAY_SPAM_SUSPECT);
     EXPECT_EQ(NO_ERROR, m_server->transact(BINDER_LIB_TEST_ECHO_VECTOR, data, &reply, TF_ONE_WAY));
-    binderNetlink.waitEvent(5);
+    binderNetlink.waitEvent(10);
     EXPECT_EQ(TestBinderNetlink::FOUND, binderNetlink.getResult());
     EXPECT_EQ(NO_ERROR, IPCThreadState::self()->freeze(pid, false, 0));
 
@@ -2558,7 +2557,10 @@ public:
             m_callback(nullptr),
             m_exitOnDestroy(exitOnDestroy) {
         pthread_mutex_init(&m_serverWaitMutex, nullptr);
-        pthread_cond_init(&m_serverWaitCond, nullptr);
+        pthread_condattr_t attr;
+        pthread_condattr_init(&attr);
+        pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+        pthread_cond_init(&m_serverWaitCond, &attr);
     }
     ~BinderLibTestService() {
         if (m_exitOnDestroy) exit(EXIT_SUCCESS);
@@ -2625,7 +2627,7 @@ public:
                 if (ret > 0) {
                     if (m_serverStartRequested) {
                         struct timespec ts;
-                        clock_gettime(CLOCK_REALTIME, &ts);
+                        clock_gettime(CLOCK_MONOTONIC, &ts);
                         ts.tv_sec += 5;
                         ret = pthread_cond_timedwait(&m_serverWaitCond, &m_serverWaitMutex, &ts);
                     }

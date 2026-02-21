@@ -26,8 +26,6 @@
 #include <SurfaceFlingerProperties.h>
 #include <android-base/properties.h>
 #include <android/dlext.h>
-#include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
-#include <configstore/Utils.h>
 #include <graphicsenv/GraphicsEnv.h>
 #include <log/log.h>
 #include <sys/prctl.h>
@@ -44,8 +42,6 @@
 #include <com_android_graphics_libvulkan_flags.h>
 #include "stubhal.h"
 
-using namespace android::hardware::configstore;
-using namespace android::hardware::configstore::V1_0;
 using namespace com::android::graphics::libvulkan;
 
 extern "C" android_namespace_t* android_get_exported_namespace(const char*);
@@ -1187,7 +1183,7 @@ VkResult EnumerateDeviceExtensionProperties(
             {VK_KHR_PRESENT_ID_2_EXTENSION_NAME, VK_KHR_PRESENT_ID_2_SPEC_VERSION});
     }
 
-    if (flags::vk_khr_present_wait2()) {
+    if (flags::vk_khr_present_wait2_gpu()) {
         loader_extensions.push_back({VK_KHR_PRESENT_WAIT_2_EXTENSION_NAME,
                                      VK_KHR_PRESENT_WAIT_2_SPEC_VERSION});
     }
@@ -1814,7 +1810,7 @@ static void PopulateLoaderImplementedFeatures(VkPhysicalDevice physicalDevice,
             }
 
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_2_FEATURES_KHR: {
-                if (!flags::vk_khr_present_wait2()) {
+                if (!flags::vk_khr_present_wait2_gpu()) {
                     break;
                 }
                 auto features =
