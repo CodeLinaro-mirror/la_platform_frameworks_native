@@ -4,13 +4,11 @@
  */
 #define LOG_NDEBUG 0
 #include "QtiAidlComposerHalExtension.h"
-#if 0
 #include <aidl/vendor/qti/hardware/display/composer3/QtiLayerCommand.h>
 
 using aidl::vendor::qti::hardware::display::composer3::QtiDisplayDeviceConfig;
 using aidl::vendor::qti::hardware::display::composer3::QtiDisplayProjectionMatrix;
 using aidl::vendor::qti::hardware::display::composer3::QtiLayerOrientation;
-#endif
 
 namespace android::surfaceflingerextension {
 
@@ -213,7 +211,6 @@ Error QtiAidlComposerHalExtension::qtiTryDrawMethod(Display display,
 Error QtiAidlComposerHalExtension::qtiSetDisplayConfig(
         Display display, const gui::DisplayDeviceConfig& displayDeviceConfig) {
     Error ret = Error::NONE;
-#if 0
 #ifdef QTI_COMPOSER3_EXTENSIONS
     mQtiAidlComposer->mMutex.lock_shared();
     if (mQtiAidlComposer->qtiComposer3Client) {
@@ -240,7 +237,6 @@ Error QtiAidlComposerHalExtension::qtiSetDisplayConfig(
         }
     }
     mQtiAidlComposer->mMutex.unlock_shared();
-#endif
 #endif
     return ret;
 }

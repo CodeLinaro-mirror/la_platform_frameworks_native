@@ -19,21 +19,18 @@ using ::aidl::android::hardware::graphics::composer3::ComposerClientWriter;
 #include <android/gui/Pose.h>
 #include <android/gui/Position.h>
 #include <android/gui/RenderLayerReferenceSpaceType.h>
-#if 0 // TODO: enable compilation once intf change finalized
+
 #include <aidl/vendor/qti/hardware/display/composer3/QtiLayerCommand.h>
-#endif
 
 using aidl::vendor::qti::hardware::display::composer3::IQtiComposer3Client;
+using aidl::vendor::qti::hardware::display::composer3::QtiCompositionLayerType;
 using aidl::vendor::qti::hardware::display::composer3::QtiDisplayCommand;
 using aidl::vendor::qti::hardware::display::composer3::QtiDrawMethod;
 using aidl::vendor::qti::hardware::display::composer3::QtiLayerCommand;
 using aidl::vendor::qti::hardware::display::composer3::QtiLayerFlags;
 using aidl::vendor::qti::hardware::display::composer3::QtiLayerType;
-#if 0
-using aidl::vendor::qti::hardware::display::composer3::QtiCompositionLayerType;
 using aidl::vendor::qti::hardware::display::composer3::QtiLayerVisibilityType;
 using aidl::vendor::qti::hardware::display::composer3::QtiRenderLayerReferenceSpaceType;
-#endif
 
 namespace android::Hwc2 {
 
@@ -58,42 +55,35 @@ public:
 
     void qtiSetCompositionLayerType(int64_t display, int64_t layer,
                                     gui::CompositionLayerType compositionLayerType) {
-#if 0
         auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
         if (qtiLayerCommand) {
             qtiLayerCommand->qtiCompositionLayerType.emplace();
             qtiLayerCommand->qtiCompositionLayerType->compositionLayerType =
                     static_cast<QtiCompositionLayerType>(compositionLayerType);
         }
-#endif
     }
 
     void qtiSetLayerVisibilityType(int64_t display, int64_t layer,
                                    gui::LayerVisibilityType layerVisibilityType) {
-#if 0
         auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
         if (qtiLayerCommand) {
             qtiLayerCommand->qtiLayerVisibilityType.emplace();
             qtiLayerCommand->qtiLayerVisibilityType->layerVisibilityType =
                     static_cast<QtiLayerVisibilityType>(layerVisibilityType);
         }
-#endif
     }
 
     void qtiSetReferenceSpaceType(int64_t display, int64_t layer,
                                   gui::RenderLayerReferenceSpaceType referenceSpaceType) {
-#if 0
         auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
         if (qtiLayerCommand) {
             qtiLayerCommand->qtiRenderLayerReferenceSpaceType.emplace();
             qtiLayerCommand->qtiRenderLayerReferenceSpaceType->renderLayerReferenceSpaceType =
                     static_cast<QtiRenderLayerReferenceSpaceType>(referenceSpaceType);
         }
-#endif
     }
 
     void qtiSetFrustum(int64_t display, int64_t layer, gui::Frustum frustum) {
-#if 0
         auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
         if (qtiLayerCommand) {
             qtiLayerCommand->qtiLayerFrustum.emplace();
@@ -102,11 +92,9 @@ public:
             qtiLayerCommand->qtiLayerFrustum->angleUp = frustum.angleUp;
             qtiLayerCommand->qtiLayerFrustum->angleDown = frustum.angleDown;
         }
-#endif
     }
 
     void qtiSetPose(int64_t display, int64_t layer, gui::Pose pose) {
-#if 0
         auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
         if (qtiLayerCommand) {
             qtiLayerCommand->qtiLayerPose.emplace();
@@ -120,11 +108,9 @@ public:
             orientation.z = pose.orientation.z;
             orientation.w = pose.orientation.w;
         }
-#endif
     }
 
     void qtiSetPlaneEquation(int64_t display, int64_t layer, gui::PlaneEquation planeEquation) {
-#if 0
         auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
         if (qtiLayerCommand) {
             qtiLayerCommand->qtiLayerPlaneEquation.emplace();
@@ -133,18 +119,15 @@ public:
             qtiLayerCommand->qtiLayerPlaneEquation->c = planeEquation.c;
             qtiLayerCommand->qtiLayerPlaneEquation->d = planeEquation.d;
         }
-#endif
     }
 
     void qtiSetQuadSize(int64_t display, int64_t layer, float quadWidth, float quadHeight) {
-#if 0
         auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
         if (qtiLayerCommand) {
             qtiLayerCommand->qtiLayerQuadSize.emplace();
             qtiLayerCommand->qtiLayerQuadSize->width = quadWidth;
             qtiLayerCommand->qtiLayerQuadSize->height = quadHeight;
         }
-#endif
     }
 
     void qtiSetDisplayElapseTime(int64_t display, uint64_t time) {
