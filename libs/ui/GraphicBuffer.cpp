@@ -17,6 +17,7 @@
 #define LOG_TAG "GraphicBuffer"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
+#include <fstream>
 #include <ui/GraphicBuffer.h>
 
 #include <cutils/atomic.h>
@@ -26,6 +27,8 @@
 #include <ui/GraphicBufferAllocator.h>
 #include <ui/GraphicBufferMapper.h>
 #include <utils/Trace.h>
+
+using std::fstream;
 
 namespace android {
 
@@ -84,6 +87,19 @@ GraphicBuffer::GraphicBuffer(uint32_t inWidth, uint32_t inHeight,
 GraphicBuffer::GraphicBuffer(uint32_t inWidth, uint32_t inHeight, PixelFormat inFormat,
                              uint32_t inLayerCount, uint64_t inUsage, std::string requestorName)
       : GraphicBuffer() {
+
+    // On No-GPU SKUs (SwiftShader only), IMPLEMENTATION_DEFINED cannot be
+    // resolved automatically. Map camera-write IMPLEMENTATION_DEFINED to
+    // a concrete YUV 420 format when no GPU device is present to avoid
+    // breaking existing clients.
+    if (HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED == inFormat &&
+        (inUsage & GRALLOC_USAGE_HW_CAMERA_WRITE)) {
+        fstream fs("/dev/kgsl-3d0", fstream::in);
+        if (!fs.is_open()) {
+            inFormat = AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420;
+        }
+    }
+
     mInitCheck = initWithSize(inWidth, inHeight, inFormat, inLayerCount, inUsage,
                               std::move(requestorName));
 }
