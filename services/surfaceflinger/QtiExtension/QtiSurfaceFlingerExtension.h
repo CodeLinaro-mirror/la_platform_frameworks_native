@@ -184,9 +184,10 @@ public:
     void qtiSetPowerMode(const sp<IBinder>& displayToken, int mode) override;
     void qtiSetPowerModeOverrideConfig(sp<DisplayDevice> display) override;
     void qtiSetLayerAsMask(uint32_t hwcDisplayId, uint64_t layerId) override;
+#ifdef QTI_LSR_ENABLED
     void qtiSetDisplayConfig(const sp<IBinder>& displayToken,
                              const gui::DisplayDeviceConfig& displayDeviceConfig) override;
-
+#endif
     /*
      * Methods for Virtual, WiFi, and Secure Displays
      */

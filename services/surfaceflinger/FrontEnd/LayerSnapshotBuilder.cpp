@@ -374,6 +374,7 @@ LayerSnapshot LayerSnapshotBuilder::getRootSnapshot() {
     snapshot.fixedTransformHint = ui::Transform::ROT_INVALID;
     snapshot.ignoreLocalTransform = false;
     // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
     snapshot.qtiCompositionLayerType = gui::CompositionLayerType::COMPOSITION_LAYER_NONE;
     snapshot.qtiLayerVisibilityType = gui::LayerVisibilityType::LAYER_VISIBILITY_NONE;
     snapshot.qtiReferenceSpaceType =
@@ -383,6 +384,7 @@ LayerSnapshot LayerSnapshotBuilder::getRootSnapshot() {
     snapshot.qtiPlaneEquation = gui::PlaneEquation();
     snapshot.qtiQuadWidth = 0.0;
     snapshot.qtiQuadHeight = 0.0;
+#endif
     // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
     return snapshot;
 }
@@ -981,6 +983,7 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
             snapshot.color.a == 1.f;
     snapshot.blendMode = getBlendMode(snapshot, requested);
     // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
     snapshot.qtiCompositionLayerType = requested.compositionLayerType;
     snapshot.qtiLayerVisibilityType = requested.layerVisibilityType;
     snapshot.qtiReferenceSpaceType = requested.referenceSpaceType;
@@ -989,6 +992,7 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
     snapshot.qtiPlaneEquation = requested.planeEquation;
     snapshot.qtiQuadWidth = requested.quadWidth;
     snapshot.qtiQuadHeight = requested.quadHeight;
+#endif
     // QTI_END: 2026-01-26: Display: sf: Add reprojection API
     LLOGV(snapshot.sequence,
           "%supdated %s changes:%s parent:%s requested:%s requested:%s from parent %s",

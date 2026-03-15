@@ -552,6 +552,7 @@ qtidisplayextension_cc_library_static {
             cflags: [
                 "-DQTI_DISPLAY_EXTENSION",
             ],
+
 // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
 // QTI_BEGIN: 2023-04-02: Performance: gui: Introduce QTI Extensions in AOSP
             srcs: [
@@ -560,6 +561,11 @@ qtidisplayextension_cc_library_static {
 // QTI_END: 2023-04-02: Performance: gui: Introduce QTI Extensions in AOSP
 // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
        },
+        qtilsrenabled: {
+            cflags: [
+                "-DQTI_LSR_ENABLED",
+            ],
+        },
     },
     srcs: [
         "QtiExtension/QtiBLASTBufferQueueExtension.cpp",
@@ -594,7 +600,12 @@ qtidisplayextension_cc_defaults {
             cflags: [
                 "-DQTI_DISPLAY_EXTENSION",
             ],
-        }
+        },
+        qtilsrenabled: {
+            cflags: [
+                "-DQTI_LSR_ENABLED",
+            ],
+        },
 // QTI_END: 2023-04-02: Performance: gui: Introduce QTI Extensions in AOSP
 // QTI_BEGIN: 2024-02-29: Display: gui: set buffer dequeue duration in buffer private meta data
     },

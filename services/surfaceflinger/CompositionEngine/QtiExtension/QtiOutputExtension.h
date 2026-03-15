@@ -3,6 +3,7 @@
  */
 #pragma once
 
+#ifdef QTI_LSR_ENABLED
 #include <android/gui/CompositionLayerType.h>
 #include <android/gui/Frustum.h>
 #include <android/gui/LayerVisibilityType.h>
@@ -11,6 +12,8 @@
 #include <android/gui/Pose.h>
 #include <android/gui/Position.h>
 #include <android/gui/RenderLayerReferenceSpaceType.h>
+#endif
+
 #include "DisplayHardware/HWC2.h"
 #include "compositionengine/impl/Output.h"
 
@@ -31,6 +34,7 @@ public:
     static void qtiSetLayerType(HWC2::Layer* layerId, uint32_t type, const char* debugName);
     static bool qtiUseSpecFence(void);
     static void qtiGetVisibleLayerInfo(const Output* output);
+#ifdef QTI_LSR_ENABLED
     static void qtiSetCompositionLayerType(HWC2::Layer* layer,
                                            gui::CompositionLayerType compositionLayerType,
                                            const char* debugName);
@@ -46,6 +50,7 @@ public:
                                     const char* debugName);
     static void qtiSetQuadSize(HWC2::Layer* layer, float quadWidth, float quadHeight,
                                const char* debugName);
+#endif
 };
 
 } // namespace android::compositionengineextension

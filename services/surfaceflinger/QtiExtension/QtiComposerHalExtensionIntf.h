@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#ifdef QTI_LSR_ENABLED
 #include <android/gui/CompositionLayerType.h>
 #include <android/gui/DisplayDeviceConfig.h>
 #include <android/gui/Frustum.h>
@@ -13,6 +14,7 @@
 #include <android/gui/Pose.h>
 #include <android/gui/Position.h>
 #include <android/gui/RenderLayerReferenceSpaceType.h>
+#endif
 #include <android/hardware/graphics/composer/2.4/IComposerClient.h>
 
 namespace android {
@@ -40,6 +42,7 @@ public:
                                          uint32_t dataspace) = 0;
     virtual Error qtiSetLayerFlag(Display display, V2_1_Layer layer,
                                   uint32_t layerFlag) = 0;
+#ifdef QTI_LSR_ENABLED
     virtual Error qtiSetCompositionLayerType(Display display, V2_1_Layer layer,
                                              gui::CompositionLayerType compositionLayerType) = 0;
     virtual Error qtiSetLayerVisibilityType(Display display, V2_1_Layer layer,
@@ -55,6 +58,7 @@ public:
                                  float quadHeight) = 0;
     virtual Error qtiSetDisplayConfig(Display display,
                                       const gui::DisplayDeviceConfig& displayDeviceConfig) = 0;
+#endif
 };
 
 } // namespace surfaceflingerextension

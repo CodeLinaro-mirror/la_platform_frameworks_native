@@ -11,6 +11,8 @@ using ::aidl::android::hardware::graphics::composer3::ComposerClientWriter;
 #define QtiAidlCommandWriter ComposerClientWriter
 #else
 #include <aidl/vendor/qti/hardware/display/composer3/IQtiComposer3Client.h>
+
+#ifdef QTI_LSR_ENABLED
 #include <android/gui/CompositionLayerType.h>
 #include <android/gui/Frustum.h>
 #include <android/gui/LayerVisibilityType.h>
@@ -19,18 +21,21 @@ using ::aidl::android::hardware::graphics::composer3::ComposerClientWriter;
 #include <android/gui/Pose.h>
 #include <android/gui/Position.h>
 #include <android/gui/RenderLayerReferenceSpaceType.h>
+#endif
 
 #include <aidl/vendor/qti/hardware/display/composer3/QtiLayerCommand.h>
 
 using aidl::vendor::qti::hardware::display::composer3::IQtiComposer3Client;
-using aidl::vendor::qti::hardware::display::composer3::QtiCompositionLayerType;
 using aidl::vendor::qti::hardware::display::composer3::QtiDisplayCommand;
 using aidl::vendor::qti::hardware::display::composer3::QtiDrawMethod;
 using aidl::vendor::qti::hardware::display::composer3::QtiLayerCommand;
 using aidl::vendor::qti::hardware::display::composer3::QtiLayerFlags;
 using aidl::vendor::qti::hardware::display::composer3::QtiLayerType;
+#ifdef QTI_LSR_ENABLED
+using aidl::vendor::qti::hardware::display::composer3::QtiCompositionLayerType;
 using aidl::vendor::qti::hardware::display::composer3::QtiLayerVisibilityType;
 using aidl::vendor::qti::hardware::display::composer3::QtiRenderLayerReferenceSpaceType;
+#endif
 
 namespace android::Hwc2 {
 
@@ -53,6 +58,7 @@ public:
         }
     }
 
+#ifdef QTI_LSR_ENABLED
     void qtiSetCompositionLayerType(int64_t display, int64_t layer,
                                     gui::CompositionLayerType compositionLayerType) {
         auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
@@ -129,6 +135,7 @@ public:
             qtiLayerCommand->qtiLayerQuadSize->height = quadHeight;
         }
     }
+#endif
 
     void qtiSetDisplayElapseTime(int64_t display, uint64_t time) {
         auto qtiDisplayCommand = qtiGetDisplayCommand(display);

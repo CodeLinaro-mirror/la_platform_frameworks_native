@@ -34,6 +34,7 @@ public:
 
     V2_1::Error qtiSetDisplayElapseTime(Display display, uint64_t timeStamp) override;
     V2_1::Error qtiSetLayerType(Display display, V2_1_Layer layer, uint32_t type) override;
+#ifdef QTI_LSR_ENABLED
     V2_1::Error qtiSetCompositionLayerType(
             Display display, V2_1_Layer layer,
             gui::CompositionLayerType compositionLayerType) override {
@@ -66,6 +67,7 @@ public:
                                     const gui::DisplayDeviceConfig& displayDeviceConfig) {
         return Error::NONE;
     }
+#endif
     V2_1::Error qtiSetLayerFlag(Display display, V2_1_Layer layer,
                           uint32_t layerFlag) override;
     V2_1::Error qtiSetClientTarget_3_1(Display display, int32_t slot, int acquireFence,

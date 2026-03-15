@@ -1000,6 +1000,7 @@ void QtiSurfaceFlingerExtension::qtiSetPowerMode(const sp<IBinder>& displayToken
     }
 }
 
+#ifdef QTI_LSR_ENABLED
 void QtiSurfaceFlingerExtension::qtiSetDisplayConfig(
         const sp<IBinder>& displayToken, const gui::DisplayDeviceConfig& displayDeviceConfig) {
     sp<DisplayDevice> display = nullptr;
@@ -1024,6 +1025,8 @@ void QtiSurfaceFlingerExtension::qtiSetDisplayConfig(
 
     mQtiHWComposerExtnIntf->qtiSetDisplayConfig(*displayId, displayDeviceConfig);
 }
+#endif
+
 void QtiSurfaceFlingerExtension::qtiSetPowerModeOverrideConfig(sp<DisplayDevice> display) {
     bool supported = false;
     const auto physicalDisplayId = asPhysicalDisplayId(display->getDisplayIdVariant());

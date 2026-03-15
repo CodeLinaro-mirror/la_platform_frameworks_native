@@ -7,8 +7,11 @@
 #include "QtiAidlComposerHalExtension.h"
 #include "QtiHWComposerExtensionIntf.h"
 #include "QtiHidlComposerHalExtension.h"
-#include "QtiLayerExtension.h"
 #include "utils/Errors.h"
+
+#ifdef QTI_LSR_ENABLED
+#include "QtiLayerExtension.h"
+#endif
 
 #define LOG_DISPLAY_ERROR(displayId, msg) \
     ALOGE("%s failed for display %s: %s", __FUNCTION__, to_string(displayId).c_str(), msg)
@@ -93,6 +96,7 @@ status_t QtiHWComposerExtension::qtiSetLayerType(HWC2::Layer* layer, uint32_t ty
     return NO_ERROR;
 }
 
+#ifdef QTI_LSR_ENABLED
 status_t QtiHWComposerExtension::qtiSetCompositionLayerType(
         HWC2::Layer* layer, gui::CompositionLayerType compositionLayerType) {
     if (!mQtiComposerHalExtn) {
@@ -117,7 +121,6 @@ status_t QtiHWComposerExtension::qtiSetCompositionLayerType(
         ALOGW("Failed to send SET_LAYER_COMPOSITION_TYPE command to HWC");
         return BAD_VALUE;
     }
-
     return NO_ERROR;
 }
 
@@ -145,7 +148,6 @@ status_t QtiHWComposerExtension::qtiSetLayerVisibilityType(
         ALOGW("Failed to send Set Layer Visibility Type command to HWC");
         return BAD_VALUE;
     }
-
     return NO_ERROR;
 }
 
@@ -173,7 +175,6 @@ status_t QtiHWComposerExtension::qtiSetReferenceSpaceType(
         ALOGW("Failed to send Set ReferenceSpace Type command to HWC");
         return BAD_VALUE;
     }
-
     return NO_ERROR;
 }
 
@@ -199,7 +200,6 @@ status_t QtiHWComposerExtension::qtiSetFrustum(HWC2::Layer* layer, gui::Frustum 
         ALOGW("Failed to send Set Frustum command to HWC");
         return BAD_VALUE;
     }
-
     return NO_ERROR;
 }
 
@@ -225,7 +225,6 @@ status_t QtiHWComposerExtension::qtiSetPose(HWC2::Layer* layer, gui::Pose pose) 
         ALOGW("Failed to send Set Pose command to HWC");
         return BAD_VALUE;
     }
-
     return NO_ERROR;
 }
 
@@ -252,7 +251,6 @@ status_t QtiHWComposerExtension::qtiSetPlaneEquation(HWC2::Layer* layer,
         ALOGW("Failed to send SET_PLANE_EQUATION command to HWC");
         return BAD_VALUE;
     }
-
     return NO_ERROR;
 }
 
@@ -279,9 +277,9 @@ status_t QtiHWComposerExtension::qtiSetQuadSize(HWC2::Layer* layer, float quadWi
         ALOGW("Failed to send SET_QUAD_SIZE command to HWC");
         return BAD_VALUE;
     }
-
     return NO_ERROR;
 }
+#endif
 
 status_t QtiHWComposerExtension::qtiSetLayerFlag(HWC2::Layer* layer, uint32_t flags) {
     if (!mQtiComposerHalExtn) {
@@ -355,6 +353,7 @@ status_t QtiHWComposerExtension::qtiTryDrawMethod(HalDisplayId displayId, uint32
     return NO_ERROR;
 }
 
+#ifdef QTI_LSR_ENABLED
 status_t QtiHWComposerExtension::qtiSetDisplayConfig(
         HalDisplayId displayId, const gui::DisplayDeviceConfig& displayDeviceConfig) {
     if (!mQtiComposerHalExtn) {
@@ -377,8 +376,8 @@ status_t QtiHWComposerExtension::qtiSetDisplayConfig(
     if (error != Error::NONE) {
         return BAD_VALUE;
     }
-
     return NO_ERROR;
 }
+#endif
 
 } // namespace android::surfaceflingerextension
