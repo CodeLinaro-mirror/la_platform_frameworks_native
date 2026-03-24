@@ -21,12 +21,21 @@ aconfig_declarations {
 
 cc_aconfig_library {
     name: "libsurfaceflingerflags",
+    host_supported: true,
     aconfig_declarations: "surfaceflinger_flags",
     vendor_available: true,
+    target: {
+        windows: {
+            enabled: true,
+        },
+    },
 }
 
 cc_defaults {
     name: "surfaceflinger_defaults",
+    defaults: [
+        "no_bti",
+    ],
     tidy: true,
     tidy_flags: [
         // Only check our headers
@@ -303,6 +312,7 @@ filegroup {
         "Scheduler/VsyncModulator.cpp",
         "Scheduler/VsyncSchedule.cpp",
         "ScreenCaptureOutput.cpp",
+        "ShaderRegistry.cpp",
         "SurfaceFlinger.cpp",
         "SurfaceFlingerDefaultFactory.cpp",
         "Tracing/LayerDataSource.cpp",
@@ -339,8 +349,6 @@ cc_defaults {
         "libutils",
     ],
     static_libs: [
-        "android.frameworks.displayservice@1.0",
-        "libdisplayservicehidl",
         "libserviceutils",
     ],
 }
@@ -355,7 +363,9 @@ filegroup {
 
 cc_binary {
     name: "surfaceflinger",
-    defaults: ["libsurfaceflinger_binary"],
+    defaults: [
+        "libsurfaceflinger_binary",
+    ],
     init_rc: ["surfaceflinger.rc"],
     srcs: [
         ":surfaceflinger_binary_sources",

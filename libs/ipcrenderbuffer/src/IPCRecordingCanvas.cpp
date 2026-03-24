@@ -46,6 +46,7 @@ IPCRecordingCanvas::IPCRecordingCanvas(IPCClientResourceCache& resourceCache)
 }
 
 sk_sp<SkSurface> IPCRecordingCanvas::onNewSurface(const SkImageInfo&, const SkSurfaceProps&) {
+    ALOGE("onNewSurface Not implemented");
     return nullptr;
 }
 
@@ -75,6 +76,7 @@ void IPCRecordingCanvas::willSave() {
     mCurrentRenderCommandBuffer->pushOp(op);
 }
 SkCanvas::SaveLayerStrategy IPCRecordingCanvas::getSaveLayerStrategy(const SaveLayerRec&) {
+    ALOGE("getSaveLayerStrategy Not implemented");
     return SkCanvas::kNoLayer_SaveLayerStrategy;
 }
 void IPCRecordingCanvas::willRestore() {
@@ -296,7 +298,8 @@ void IPCRecordingCanvas::onDrawAnnotation(const SkRect&, const char[], SkData*) 
 void IPCRecordingCanvas::onDrawTextBlob(const SkTextBlob* blob, SkScalar x, SkScalar y,
                                         const SkPaint& paint) {
     IPC_CANVAS_TRACE_CALL;
-    auto op = DrawTextBlobOp::Create(mCurrentRenderCommandBuffer, blob, x, y, paint);
+    auto op =
+            DrawTextBlobOp::Create(mCurrentRenderCommandBuffer, blob, x, y, paint, &mResourceCache);
     LOG_ALWAYS_FATAL_IF(op == nullptr, "%s : Failed to alloc op", __func__);
     mCurrentRenderCommandBuffer->pushOp(op);
 }
@@ -307,9 +310,7 @@ void IPCRecordingCanvas::onDrawImage2(const SkImage* image, SkScalar x, SkScalar
     LOG_ALWAYS_FATAL_IF(mCurrentRenderCommandBuffer == nullptr, "Not recording");
     auto it = mResourceCache.bitmaps.find(image->uniqueID());
     if (it == mResourceCache.bitmaps.end()) {
-        // This currently only happens when a process shuts down.
-        // There may be a frame remaining that references bitmaps which were destroyed.
-        ALOGE("Bitmap not found in cache");
+        ALOGE("Bitmap not found in cache uniqueID = %u", image->uniqueID());
         return;
     }
     auto op = DrawImageOp::Create(mCurrentRenderCommandBuffer, it->second.id, x, y, sampling, paint);
@@ -328,7 +329,10 @@ void IPCRecordingCanvas::onDrawImageRect2(const SkImage* image, const SkRect& sr
     IPC_CANVAS_TRACE_CALL;
     LOG_ALWAYS_FATAL_IF(mCurrentRenderCommandBuffer == nullptr, "Not recording");
     auto it = mResourceCache.bitmaps.find(image->uniqueID());
-    LOG_ALWAYS_FATAL_IF(it == mResourceCache.bitmaps.end(), "Bitmap not found in cache");
+    if (it == mResourceCache.bitmaps.end()) {
+        ALOGE("Bitmap not found in cache uniqueID = %u", image->uniqueID());
+        return;
+    }
     auto op = DrawImageRectOp::Create(mCurrentRenderCommandBuffer, it->second.id, src, dst,
                                       sampling, paint, constraint);
     LOG_ALWAYS_FATAL_IF(op == nullptr, "%s : Failed to alloc op", __func__);

@@ -48,6 +48,7 @@
 #include <SkSerialProcs.h>
 #include <SkTextBlob.h>
 #include <SkVertices.h>
+#include <unordered_set>
 
 #include <SkStream.h>
 #include <sys/stat.h>
@@ -62,6 +63,7 @@
 
 #include <functional>
 #include <map>
+#include <mutex>
 
 #include <android/ipcrenderbuffer/RenderBufferDebugUtils.h>
 #include <android/ipcrenderbuffer/RenderBufferOpTypes.h>
@@ -77,11 +79,14 @@ namespace android {
 
 struct IPCClientBitmap {
     uint64_t id = 0;
-    bool registeredWithServer = false;
     sp<GraphicBuffer> buffer;
+
+    // If this image is backed by a heap bitmap then this will be set.
+    SkBitmap bitmap;
 };
 
 struct IPCClientResourceCache {
+    std::unordered_set<uint32_t> typefaces;
     std::map<uint64_t, IPCClientBitmap> bitmaps;
 };
 
@@ -92,8 +97,8 @@ struct IPCServerBitmap {
 };
 
 struct IPCServerResourceCache {
-    sk_sp<SkFontMgr> fontManager;
     std::map<uint64_t, IPCServerBitmap> bitmaps;
+    std::map<uint32_t, sk_sp<SkTypeface>> typefaces;
 };
 
 struct ShmemPaint {
@@ -236,7 +241,7 @@ struct ResetClipOp final : IPCRenderBufferOp {
     static const auto kType = TYPE_RESETCLIP;
 
     static ResetClipOp* Create(RenderCommandBuffer* commandBuffer);
-    void draw(SkCanvas* c, const SkMatrix&);
+    void draw(SkCanvas* c, const SkMatrix&, const SkRect& initialClip);
     std::string toString() const;
 };
 
@@ -403,8 +408,9 @@ struct DrawTextBlobOp final : IPCRenderBufferOp {
     RSpan<uint8_t> blobData;
 
     static DrawTextBlobOp* Create(RenderCommandBuffer* commandBuffer, const SkTextBlob* blob,
-                                  SkScalar x_in, SkScalar y_in, const SkPaint& p);
-    void draw(SkCanvas* c, const SkMatrix&, sk_sp<SkFontMgr> fontMgr);
+                                  SkScalar x_in, SkScalar y_in, const SkPaint& p,
+                                  IPCClientResourceCache* cache);
+    void draw(SkCanvas* c, const SkMatrix&, IPCServerResourceCache* cache);
     std::string toString() const;
 };
 
@@ -497,6 +503,42 @@ struct EndRenderTargetOp final : IPCRenderBufferOp {
 
     static EndRenderTargetOp* Create(RenderCommandBuffer* commandBuffer);
     void draw(SkCanvas* c, const SkMatrix&);
+    std::string toString() const;
+};
+
+// Structs are defined in RenderCommandBuffer.h in libgui.
+
+struct UploadBitmap final : IPCRenderBufferOp {
+    static const auto kType = TYPE_UPLOADBITMAP;
+    uint64_t imageId;
+    int32_t width;
+    int32_t height;
+    int32_t colorType;
+    int32_t alphaType;
+    size_t rowBytes;
+    RSpan<uint8_t> pixels;
+
+    static UploadBitmap* Create(IpcRenderRegion* region, uint64_t imageId, const SkBitmap& bitmap);
+    void execute(IPCServerResourceCache& resourceCache);
+    std::string toString() const;
+};
+
+struct FreeBitmap final : IPCRenderBufferOp {
+    static const auto kType = TYPE_FREEBITMAP;
+    uint64_t imageId;
+
+    static FreeBitmap* Create(IpcRenderRegion* region, uint64_t imageId);
+    void execute(IPCServerResourceCache& resourceCache);
+    std::string toString() const;
+};
+
+struct UploadTypeface final : IPCRenderBufferOp {
+    static const auto kType = TYPE_UPLOADTYPEFACE;
+    uint32_t fontId;
+    RSpan<uint8_t> data;
+
+    static UploadTypeface* Create(IpcRenderRegion* region, uint32_t fontId, const SkData* data);
+    void execute(IPCServerResourceCache& resourceCache);
     std::string toString() const;
 };
 

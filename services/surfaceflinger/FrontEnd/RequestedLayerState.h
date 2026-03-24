@@ -60,6 +60,7 @@ struct RequestedLayerState : layer_state_t {
         BufferSize = 1u << 18,
         GameMode = 1u << 19,
         BufferUsageFlags = 1u << 20,
+        PostProcess = 1u << 21,
     };
 
     static constexpr ftl::Flags<Changes> kMustComposite = Changes::Created | Changes::Destroyed |
@@ -67,7 +68,7 @@ struct RequestedLayerState : layer_state_t {
             Changes::Z | Changes::Mirror | Changes::Parent | Changes::RelativeParent |
             Changes::Metadata | Changes::Visibility | Changes::VisibleRegion | Changes::Buffer |
             Changes::SidebandStream | Changes::Animation | Changes::BufferSize | Changes::GameMode |
-            Changes::BufferUsageFlags;
+            Changes::BufferUsageFlags | Changes::PostProcess;
     static Rect reduce(const Rect& win, const Region& exclude);
     RequestedLayerState(const LayerCreationArgs&);
     void merge(const ResolvedComposerState&);
@@ -140,6 +141,7 @@ struct RequestedLayerState : layer_state_t {
     uint32_t barrierProducerId = 0;
     std::string debugName;
     std::atomic<int32_t>* pendingBuffers = 0;
+    uintptr_t debugCookie = 0;
 
     // book keeping states
     bool handleAlive = true;

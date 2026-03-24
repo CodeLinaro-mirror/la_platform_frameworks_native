@@ -244,6 +244,15 @@ binder::Status checkArgumentAppId(int32_t appId) {
                      StringPrintf("appId %d is outside of the range", appId));
 }
 
+binder::Status checkArgumentAppIdsPccIds(const std::vector<int32_t>& appIds,
+                                         const std::vector<int32_t>& pccIds) {
+    if (appIds.size() != pccIds.size()) {
+        return exception(binder::Status::EX_ILLEGAL_ARGUMENT,
+                         "appIds and pccIds are not of the same length");
+    }
+    return ok();
+}
+
 #define ENFORCE_UID(uid) {                                  \
     binder::Status status = checkUid((uid));                \
     if (!status.isOk()) {                                   \
@@ -310,6 +319,14 @@ binder::Status checkArgumentAppId(int32_t appId) {
         if (!status.isOk()) {                                \
             return status;                                   \
         }                                                    \
+    }
+
+#define CHECK_ARGUMENT_APP_IDS_PCC_IDS(appIds, pccIds)                     \
+    {                                                                      \
+        binder::Status status = checkArgumentAppIdsPccIds(appIds, pccIds); \
+        if (!status.isOk()) {                                              \
+            return status;                                                 \
+        }                                                                  \
     }
 
 #ifdef GRANULAR_LOCKS
@@ -878,8 +895,7 @@ binder::Status InstalldNativeService::createAppDataLocked(
 
         // Prepare the PCC sibling directory.
         status = createOrDeletePccDirectoryLocked(uuid_, userId, pkgname, pccId, previousPccId,
-                                                  cacheGid, seInfo, targetMode, projectIdApp,
-                                                  projectIdCache, /* isCeStorage */ true,
+                                                  seInfo, targetMode, /* isCeStorage */ true,
                                                   pccCeDataInode);
 
         if (!status.isOk()) {
@@ -909,8 +925,7 @@ binder::Status InstalldNativeService::createAppDataLocked(
         }
 
         status = createOrDeletePccDirectoryLocked(uuid_, userId, pkgname, pccId, previousPccId,
-                                                  cacheGid, seInfo, targetMode, projectIdApp,
-                                                  projectIdCache, /* isCeStorage */ false,
+                                                  seInfo, targetMode, /* isCeStorage */ false,
                                                   pccDeDataInode);
         if (!status.isOk()) {
             return status;
@@ -2585,8 +2600,40 @@ static void deductDoubleSpaceIfNeeded(stats* stats, int64_t doubleSpaceToBeDelet
     }
 }
 
-static void collectQuotaStats(const std::string& uuid, int32_t userId,
-        int32_t appId, struct stats* stats, struct stats* extStats) {
+static void collectPccQuotaStats(const std::string& uuid, int32_t userId, int32_t pccId,
+                                 struct stats* stats) {
+    if (stats == nullptr || pccId <= 0) {
+        return;
+    }
+    int64_t space;
+    uid_t uid = multiuser_get_uid(userId, pccId);
+    static const bool supportsProjectId = internal_storage_has_project_id();
+
+    if (!supportsProjectId) {
+        if ((space = GetOccupiedSpaceForUid(uuid, uid)) != -1) {
+            stats->dataSize += space;
+        }
+        int cacheGid = multiuser_get_cache_gid(userId, pccId);
+        if (cacheGid != -1) {
+            if ((space = GetOccupiedSpaceForGid(uuid, cacheGid)) != -1) {
+                stats->cacheSize += space;
+            }
+        }
+    } else {
+        long projectId = get_pcc_project_id(uid, PROJECT_ID_PCC_START);
+        if ((space = GetOccupiedSpaceForProjectId(uuid, projectId)) != -1) {
+            stats->dataSize += space;
+        }
+        projectId = get_pcc_project_id(uid, PROJECT_ID_PCC_CACHE_START);
+        if ((space = GetOccupiedSpaceForProjectId(uuid, projectId)) != -1) {
+            stats->cacheSize += space;
+            stats->dataSize += space;
+        }
+    }
+}
+
+static void collectQuotaStats(const std::string& uuid, int32_t userId, int32_t appId, int32_t pccId,
+                              struct stats* stats, struct stats* extStats) {
     int64_t space, doubleSpaceToBeDeleted = 0;
     uid_t uid = multiuser_get_uid(userId, appId);
     static const bool supportsProjectId = internal_storage_has_project_id();
@@ -2644,6 +2691,8 @@ static void collectQuotaStats(const std::string& uuid, int32_t userId,
             }
         }
     }
+
+    collectPccQuotaStats(uuid, userId, pccId, stats);
 }
 
 static void collectManualStats(const std::string& path, struct stats* stats) {
@@ -2729,7 +2778,10 @@ static void collectManualStatsForUser(const std::string& path, struct stats* sta
             int32_t user_uid = multiuser_get_app_id(s.st_uid);
             if (!strcmp(name, ".") || !strcmp(name, "..")) {
                 continue;
-            } else if (exclude_apps && (user_uid >= AID_APP_START && user_uid <= AID_APP_END)) {
+            } else if (exclude_apps &&
+                       ((user_uid >= AID_APP_START && user_uid <= AID_APP_END) ||
+                        (user_uid >= AID_PCC_COMPONENT_PROCESS_START &&
+                         user_uid <= AID_PCC_COMPONENT_PROCESS_END))) {
                 continue;
             } else if (is_sdk_sandbox_storage) {
                 // In case of sdk sandbox storage (e.g. /data/misc_ce/0/sdksandbox/<package-name>),
@@ -2804,9 +2856,12 @@ static bool ownsExternalStorage(int32_t appId) {
     return false;
 }
 binder::Status InstalldNativeService::getAppSize(const std::optional<std::string>& uuid,
-        const std::vector<std::string>& packageNames, int32_t userId, int32_t flags,
-        int32_t appId, const std::vector<int64_t>& ceDataInodes,
-        const std::vector<std::string>& codePaths, std::vector<int64_t>* _aidl_return) {
+                                                 const std::vector<std::string>& packageNames,
+                                                 int32_t userId, int32_t flags, int32_t appId,
+                                                 int32_t pccId,
+                                                 const std::vector<int64_t>& ceDataInodes,
+                                                 const std::vector<std::string>& codePaths,
+                                                 std::vector<int64_t>* _aidl_return) {
     ENFORCE_UID(AID_SYSTEM);
     CHECK_ARGUMENT_UUID(uuid);
     if (packageNames.size() != ceDataInodes.size()) {
@@ -2873,7 +2928,7 @@ binder::Status InstalldNativeService::getAppSize(const std::optional<std::string
         atrace_pm_end();
 
         atrace_pm_begin("quota");
-        collectQuotaStats(uuidString, userId, appId, &stats, &extStats);
+        collectQuotaStats(uuidString, userId, appId, pccId, &stats, &extStats);
         atrace_pm_end();
     } else {
         atrace_pm_begin("code");
@@ -2891,6 +2946,18 @@ binder::Status InstalldNativeService::getAppSize(const std::optional<std::string
             auto dePath = create_data_user_de_package_path(uuid_, userId, pkgname);
             collectManualStats(dePath, &stats);
             atrace_pm_end();
+
+            if (pccId > 0) {
+                atrace_pm_begin("pcc");
+                const std::string pccPackageName = std::string(pkgname) + kPccDataSuffix;
+                auto pccCePath =
+                        create_data_user_ce_package_path(uuid_, userId, pccPackageName.c_str());
+                collectManualStats(pccCePath, &stats);
+                auto pccDePath =
+                        create_data_user_de_package_path(uuid_, userId, pccPackageName.c_str());
+                collectManualStats(pccDePath, &stats);
+                atrace_pm_end();
+            }
 
             // In case of sdk sandbox storage (e.g. /data/misc_ce/0/sdksandbox/<package-name>),
             // collect individual stats of each subdirectory (shared, storage of each sdk etc.)
@@ -3050,11 +3117,14 @@ static external_sizes getExternalSizesForUserWithQuota(const std::string& uuid, 
 }
 
 binder::Status InstalldNativeService::getUserSize(const std::optional<std::string>& uuid,
-        int32_t userId, int32_t flags, const std::vector<int32_t>& appIds,
-        std::vector<int64_t>* _aidl_return) {
+                                                  int32_t userId, int32_t flags,
+                                                  const std::vector<int32_t>& appIds,
+                                                  const std::vector<int32_t>& pccIds,
+                                                  std::vector<int64_t>* _aidl_return) {
     ENFORCE_UID(AID_SYSTEM);
     ENFORCE_VALID_USER(userId);
     CHECK_ARGUMENT_UUID(uuid);
+    CHECK_ARGUMENT_APP_IDS_PCC_IDS(appIds, pccIds);
     // NOTE: Locking is relaxed on this method, since it's limited to
     // read-only measurements without mutation.
 
@@ -3114,9 +3184,11 @@ binder::Status InstalldNativeService::getUserSize(const std::optional<std::strin
         }
         atrace_pm_begin("quota");
         int64_t dataSize = extStats.dataSize;
-        for (auto appId : appIds) {
+        for (size_t i = 0; i < appIds.size(); i++) {
+            int32_t appId = appIds[i];
+            int32_t pccId = pccIds[i];
             if (appId >= AID_APP_START) {
-                collectQuotaStats(uuidString, userId, appId, &stats, &extStats);
+                collectQuotaStats(uuidString, userId, appId, pccId, &stats, &extStats);
 #if MEASURE_DEBUG
                 // Sleep to make sure we don't lose logs
                 usleep(1);
@@ -3230,7 +3302,8 @@ binder::Status InstalldNativeService::getExternalSize(const std::optional<std::s
         memset(&extStats, 0, sizeof(extStats));
         for (auto appId : appIds) {
             if (appId >= AID_APP_START) {
-                collectQuotaStats(uuidString, userId, appId, nullptr, &extStats);
+                // PCC does not support external storage, so pccId is ignored here.
+                collectQuotaStats(uuidString, userId, appId, /*pccId=*/0, nullptr, &extStats);
             }
         }
         appSize = extStats.dataSize;
@@ -3722,8 +3795,8 @@ binder::Status InstalldNativeService::restoreconSdkDataLocked(
 
 binder::Status InstalldNativeService::createOrDeletePccDirectoryLocked(
         const char* volumeUuid, userid_t userId, const char* packageName, int32_t pccId,
-        int32_t previousPccId, int32_t cacheGid, const std::string& seInfo, mode_t targetMode,
-        long projectIdApp, long projectIdCache, bool isCeStorage, int64_t* pccDataInode) {
+        int32_t previousPccId, const std::string& seInfo, mode_t targetMode, bool isCeStorage,
+        int64_t* pccDataInode) {
     binder::Status res = ok();
 
     const std::string pccPackageName = std::string(packageName) + kPccDataSuffix;
@@ -3735,9 +3808,17 @@ binder::Status InstalldNativeService::createOrDeletePccDirectoryLocked(
         int32_t pccUid = multiuser_get_uid(userId, pccId);
         int32_t previousPccUid =
                 previousPccId > 0 ? (int32_t)multiuser_get_uid(userId, previousPccId) : -1;
+        long pccProjectIdApp = get_pcc_project_id(pccUid, PROJECT_ID_PCC_START);
+        long pccProjectIdCache = get_pcc_project_id(pccUid, PROJECT_ID_PCC_CACHE_START);
+        int32_t pccCacheGid = multiuser_get_cache_gid(userId, pccId);
+        if (pccCacheGid == -1) {
+            return exception(binder::Status::EX_ILLEGAL_STATE,
+                             StringPrintf("cacheGid cannot be -1 for pcc data"));
+        }
+
         // Create the PCC directory and its subdirectories (cache, code_cache).
-        res = createAppDataDirs(pccPath, pccId, pccUid, previousPccUid, cacheGid, seInfo,
-                                targetMode, projectIdApp, projectIdCache);
+        res = createAppDataDirs(pccPath, pccUid, pccUid, previousPccUid, pccCacheGid, seInfo,
+                                targetMode, pccProjectIdApp, pccProjectIdCache);
         if (!res.isOk()) {
             return res;
         }
@@ -4425,7 +4506,8 @@ binder::Status InstalldNativeService::enableFsverity(const sp<IFsveritySetupAuth
 }
 
 // PinnedPath holds an opened file descriptor to the parent directory of a path
-// that has been verified to not contain any symlinks. This allows users of this
+// that has been verified to not contain any symlinks and has had its entire
+// tree recursively verified for ownership. This allows users of this
 // structure to safely perform operations on the full path, by only having to verify
 // that the basename itself is not a symlink.
 //
@@ -4440,9 +4522,101 @@ struct PinnedPath {
     std::string appDataPath;
 };
 
+/**
+ * Recursively verifies that all files and directories under a given path are owned by the
+ * specified callerUid. This is a critical security check to prevent applications from
+ * manipulating or adopting data they do not own through privileged installd operations.
+ *
+ * @param dfd File descriptor to the parent directory.
+ * @param name Basename of the item to verify.
+ * @param callerUid The UID that must own all items in the tree.
+ * @param absolute_path Full path for error reporting.
+ * @param notifyError Callback to report failure status and messages.
+ * @return true if the entire tree is owned by callerUid, false otherwise.
+ */
+static bool verify_app_data_recursive(int dfd, const char* name, uid_t callerUid,
+                                      const std::string& absolute_path,
+                                      std::function<void(int, const std::string&)> notifyError) {
+    struct stat st;
+    if (fstatat(dfd, name, &st, AT_SYMLINK_NOFOLLOW) != 0) {
+        notifyError(IAppDataOperationCallback::STATUS_FAILURE, "Failed to stat " + absolute_path);
+        return false;
+    }
+
+    if (st.st_uid != callerUid) {
+        notifyError(IAppDataOperationCallback::STATUS_FAILURE,
+                    "PERMISSION_DENIED: Source " + absolute_path + " does not belong to caller");
+        return false;
+    }
+
+    if (S_ISLNK(st.st_mode)) return true;
+
+    if (S_ISDIR(st.st_mode)) {
+        android::base::unique_fd sub_dfd(
+                openat(dfd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+        if (sub_dfd.get() < 0) {
+            notifyError(IAppDataOperationCallback::STATUS_FAILURE,
+                        "Failed to open " + absolute_path);
+            return false;
+        }
+
+        DIR* d = Fdopendir(std::move(sub_dfd));
+        if (d == nullptr) {
+            notifyError(IAppDataOperationCallback::STATUS_FAILURE,
+                        "Failed to open " + absolute_path);
+            return false;
+        }
+
+        struct dirent* de;
+        for (;;) {
+            // Reset errno before reading the next file
+            errno = 0;
+            de = readdir(d);
+
+            // if readdir returns nullptr, either there is no next file, or we hit an error.
+            // in the event there is an error, treat this verification as a failure and return.
+            if (de == nullptr) {
+                if (errno != 0) {
+                    notifyError(IAppDataOperationCallback::STATUS_FAILURE,
+                                "Failed to read directory " + absolute_path);
+                    closedir(d);
+                    return false;
+                }
+                break;
+            }
+
+            const char* child_name = de->d_name;
+
+            // Don't follow the self or parent links, just move to the next file.
+            if (strcmp(child_name, ".") == 0 || strcmp(child_name, "..") == 0) continue;
+
+            std::string child_absolute_path = absolute_path + "/" + child_name;
+            if (!verify_app_data_recursive(dirfd(d), child_name, callerUid, child_absolute_path,
+                                           notifyError)) {
+                closedir(d);
+                return false;
+            }
+        }
+        closedir(d);
+    }
+    return true;
+}
+
+/**
+ * Validates the source path for an app data operation and performs a deep ownership check.
+ * It ensures the path is valid for the given user, pins the parent directory to prevent
+ * TOCTOU attacks, and recursively verifies that the entire source tree is owned by the caller.
+ *
+ * @param uuid Volume UUID.
+ * @param from The absolute source path.
+ * @param userId The user ID the operation is for.
+ * @param callerUid The UID of the application that initiated the request.
+ * @param notifyError Callback for error reporting.
+ * @return A PinnedPath object if verification succeeds, std::nullopt otherwise.
+ */
 static std::optional<PinnedPath> verify_app_data_source(
         const std::optional<std::string>& uuid, const std::string& from, int userId,
-        std::function<void(int, const std::string&)> notifyError) {
+        int32_t callerUid, std::function<void(int, const std::string&)> notifyError) {
     const char* uuid_ptr = uuid ? uuid->c_str() : nullptr;
     auto [root, suffix] = split_app_data_path(uuid_ptr, userId, from);
     if (root.empty() || suffix.empty()) {
@@ -4481,17 +4655,8 @@ static std::optional<PinnedPath> verify_app_data_source(
     }
 
     // Final check for the last component
-    if (fstatat(dfd.get(), baseName.c_str(), &st, AT_SYMLINK_NOFOLLOW) != 0) {
-        if (errno == ENOENT) {
-            notifyError(IAppDataOperationCallback::STATUS_FAILURE, "Source does not exist");
-        } else {
-            notifyError(IAppDataOperationCallback::STATUS_FAILURE, "Failed to stat source");
-        }
-        return std::nullopt;
-    }
-
-    if (S_ISLNK(st.st_mode)) {
-        notifyError(IAppDataOperationCallback::STATUS_FAILURE, "Source is a symbolic link");
+    if (!verify_app_data_recursive(dfd.get(), baseName.c_str(), static_cast<uid_t>(callerUid), from,
+                                   notifyError)) {
         return std::nullopt;
     }
 
@@ -4620,7 +4785,7 @@ static void copy_app_data_recursive(int src_dfd, int dst_dfd, const char* name,
 
 static void copy_app_data(const std::optional<std::string>& uuid, const std::string& from,
                           const std::string& to, int32_t userId, int32_t appId,
-                          const std::string& seInfo, int32_t flags,
+                          const std::string& seInfo, int32_t flags, int32_t callerUid,
                           android::sp<IAppDataOperationCallback> callback) {
     (void)flags;
 
@@ -4640,8 +4805,8 @@ static void copy_app_data(const std::optional<std::string>& uuid, const std::str
 
     notifyStatus(IAppDataOperationCallback::STATUS_RUNNING, "", {});
 
-    // See comments on move_app_data below for security considerations
-    auto source = verify_app_data_source(uuid, from, userId, notifyError);
+    // Verify the source (recursively)
+    auto source = verify_app_data_source(uuid, from, userId, callerUid, notifyError);
     if (!source) return;
 
     auto target = setup_app_data_target(uuid, from, to, userId, uid, notifyError);
@@ -4664,7 +4829,7 @@ static void copy_app_data(const std::optional<std::string>& uuid, const std::str
 
 static void move_app_data(const std::optional<std::string>& uuid, const std::string& from,
                           const std::string& to, int32_t userId, int32_t appId,
-                          const std::string& seInfo, int32_t flags,
+                          const std::string& seInfo, int32_t flags, int32_t callerUid,
                           android::sp<IAppDataOperationCallback> callback) {
     (void)flags;
 
@@ -4709,8 +4874,8 @@ static void move_app_data(const std::optional<std::string>& uuid, const std::str
     // Note that we do fully trust the passed in paths and appId parameters, as this is only
     // callable from system UIDs. The thing we cannot trust is the files under those paths.
 
-    // Verify the source
-    auto source = verify_app_data_source(uuid, from, userId, notifyError);
+    // Verify the source (recursively)
+    auto source = verify_app_data_source(uuid, from, userId, callerUid, notifyError);
     if (!source) return;
 
     // Setup the target
@@ -4752,12 +4917,13 @@ static void move_app_data(const std::optional<std::string>& uuid, const std::str
 binder::Status InstalldNativeService::copyAppDataPath(
         const std::optional<std::string>& uuid, const std::string& fromPath,
         const std::string& toPath, int32_t userId, int32_t appId, const std::string& seInfo,
-        int32_t flags, const android::sp<IAppDataOperationCallback>& callback) {
+        int32_t flags, int32_t callerUid, const android::sp<IAppDataOperationCallback>& callback) {
     ENFORCE_UID(AID_SYSTEM);
     CHECK_ARGUMENT_UUID(uuid);
     CHECK_ARGUMENT_PATH(fromPath);
     CHECK_ARGUMENT_PATH(toPath);
-    std::thread t(copy_app_data, uuid, fromPath, toPath, userId, appId, seInfo, flags, callback);
+    std::thread t(copy_app_data, uuid, fromPath, toPath, userId, appId, seInfo, flags, callerUid,
+                  callback);
     t.detach();
     return ok();
 }
@@ -4765,12 +4931,13 @@ binder::Status InstalldNativeService::copyAppDataPath(
 binder::Status InstalldNativeService::moveAppDataPath(
         const std::optional<std::string>& uuid, const std::string& fromPath,
         const std::string& toPath, int32_t userId, int32_t appId, const std::string& seInfo,
-        int32_t flags, const android::sp<IAppDataOperationCallback>& callback) {
+        int32_t flags, int32_t callerUid, const android::sp<IAppDataOperationCallback>& callback) {
     ENFORCE_UID(AID_SYSTEM);
     CHECK_ARGUMENT_UUID(uuid);
     CHECK_ARGUMENT_PATH(fromPath);
     CHECK_ARGUMENT_PATH(toPath);
-    std::thread t(move_app_data, uuid, fromPath, toPath, userId, appId, seInfo, flags, callback);
+    std::thread t(move_app_data, uuid, fromPath, toPath, userId, appId, seInfo, flags, callerUid,
+                  callback);
     t.detach();
     return ok();
 }

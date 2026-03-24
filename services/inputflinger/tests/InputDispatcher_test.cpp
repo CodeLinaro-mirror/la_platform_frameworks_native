@@ -128,6 +128,10 @@ static constexpr ftl::Flags<MotionFlag>
         EXPECTED_WALLPAPER_FLAGS{MotionFlag::WINDOW_IS_OBSCURED,
                                  MotionFlag::WINDOW_IS_PARTIALLY_OBSCURED};
 
+static const std::chrono::milliseconds DEFAULT_PRE_ANR_TIMEOUT_WINDOW = std::chrono::milliseconds(
+        android::os::IInputConstants::UNMULTIPLIED_DEFAULT_PRE_ANR_TIMEOUT_WINDOW_MILLIS *
+        base::HwTimeoutMultiplier());
+
 using ReservedInputDeviceId::VIRTUAL_KEYBOARD_ID;
 
 /**
@@ -7927,6 +7931,83 @@ TEST_F(InputDispatcherTest, TransferTouchOnDisplay_CloneSurface) {
     secondWindowInSecondary->consumeMotionUp(SECOND_DISPLAY_ID, MotionFlag::NO_FOCUS_CHANGE);
 }
 
+/**
+ * When a focused window is moved from one display to another, it should either maintain focus,
+ * or it should lose it and then gain it again.
+ * This test reproduces a bug in the dispatcher - currently, even though dispatcher still thinks
+ * that the window has focus after it's been moved, the last event that's written to the window's
+ * input channel is focusEvent(hasFocus=false).
+ */
+TEST_F(InputDispatcherTest, Focus_WindowMovedToAnotherDisplay_LosesFocus) {
+    static constexpr auto DEFAULT = ui::LogicalDisplayId::DEFAULT;
+    static constexpr auto EXTERNAL = ui::LogicalDisplayId{7};
+
+    std::shared_ptr<FakeApplicationHandle> application = std::make_shared<FakeApplicationHandle>();
+    sp<FakeWindowHandle> window =
+            sp<FakeWindowHandle>::make(application, mDispatcher, "Window", EXTERNAL);
+    window->setFocusable(true);
+
+    // Add another focusable window onto DEFAULT display
+    sp<FakeWindowHandle> unrelatedWindow =
+            sp<FakeWindowHandle>::make(application, mDispatcher, "Unrelated Window", DEFAULT);
+
+    mDispatcher->setFocusedApplication(EXTERNAL, application);
+    mDispatcher->setFocusedDisplay(EXTERNAL);
+    mDispatcher->onWindowInfosChanged(
+            {{*unrelatedWindow->getInfo(), *window->getInfo()}, {}, 0, 0});
+
+    // Window initially gets focus on the external display.
+    setFocusedWindow(window);
+    ASSERT_NO_FATAL_FAILURE(window->consumeFocusEvent(true));
+
+    // Display-unspecified keys are sent to this window
+    mDispatcher->notifyKey(KeyArgsBuilder(AKEY_EVENT_ACTION_DOWN, AINPUT_SOURCE_KEYBOARD)
+                                   .displayId(ui::LogicalDisplayId::INVALID)
+                                   .build());
+    mDispatcher->notifyKey(KeyArgsBuilder(AKEY_EVENT_ACTION_UP, AINPUT_SOURCE_KEYBOARD)
+                                   .displayId(ui::LogicalDisplayId::INVALID)
+                                   .build());
+    window->consumeKeyEvent(AllOf(WithKeyAction(AKEY_EVENT_ACTION_DOWN),
+                                  WithDisplayId(ui::LogicalDisplayId::INVALID)));
+    window->consumeKeyEvent(AllOf(WithKeyAction(AKEY_EVENT_ACTION_UP),
+                                  WithDisplayId(ui::LogicalDisplayId::INVALID)));
+
+    // Now move window to another display. This won't actually happen until "onWindowInfosChanged"
+    // is fired.
+    window->editInfo()->displayId = DEFAULT;
+
+    mDispatcher->setFocusedApplication(ui::LogicalDisplayId::DEFAULT, application);
+
+    // Request focus on the default display.
+    mDispatcher->setFocusedDisplay(ui::LogicalDisplayId::DEFAULT);
+    setFocusedWindow(window);
+
+    // Not sure how this next call is ordered relative to the setFocusedWindow in practice.
+    mDispatcher->onWindowInfosChanged(
+            {{*unrelatedWindow->getInfo(), *window->getInfo()}, {}, 0, 0});
+
+    // Window gains focus on the new display.
+    ASSERT_NO_FATAL_FAILURE(window->consumeFocusEvent(true));
+
+    // TODO(b/438569310)
+    // BUG: the last event that is written to the window is FocusEvent(hasFocus=false)
+    ASSERT_NO_FATAL_FAILURE(window->consumeFocusEvent(false));
+
+    // The key is still delivered to the window correctly.
+    mDispatcher->notifyKey(KeyArgsBuilder(AKEY_EVENT_ACTION_DOWN, AINPUT_SOURCE_KEYBOARD)
+                                   .displayId(ui::LogicalDisplayId::INVALID)
+                                   .build());
+    mDispatcher->notifyKey(KeyArgsBuilder(AKEY_EVENT_ACTION_UP, AINPUT_SOURCE_KEYBOARD)
+                                   .displayId(ui::LogicalDisplayId::INVALID)
+                                   .build());
+    window->consumeKeyEvent(AllOf(WithKeyAction(AKEY_EVENT_ACTION_DOWN),
+                                  WithDisplayId(ui::LogicalDisplayId::INVALID)));
+    window->consumeKeyEvent(AllOf(WithKeyAction(AKEY_EVENT_ACTION_UP),
+                                  WithDisplayId(ui::LogicalDisplayId::INVALID)));
+
+    window->assertNoEvents();
+}
+
 TEST_F(InputDispatcherTest, FocusedWindow_ReceivesFocusEventAndKeyEvent) {
     std::shared_ptr<FakeApplicationHandle> application = std::make_shared<FakeApplicationHandle>();
     sp<FakeWindowHandle> window =
@@ -10401,19 +10482,20 @@ class InputDispatcherMultiWindowSameTokenTests : public InputDispatcherTest {
 
         std::shared_ptr<FakeApplicationHandle> application =
                 std::make_shared<FakeApplicationHandle>();
-        mWindow1 = sp<FakeWindowHandle>::make(application, mDispatcher, "Fake Window 1",
-                                              ui::LogicalDisplayId::DEFAULT);
-        mWindow1->setFrame(Rect(0, 0, 100, 100));
+        mWindow = sp<FakeWindowHandle>::make(application, mDispatcher, "Fake Window",
+                                             ui::LogicalDisplayId::DEFAULT);
+        mWindow->setFrame(Rect(0, 0, 100, 100));
 
-        mWindow2 = mWindow1->clone(ui::LogicalDisplayId::DEFAULT);
-        mWindow2->setFrame(Rect(100, 100, 200, 200));
+        mWindowClone = mWindow->clone(ui::LogicalDisplayId::DEFAULT);
+        mWindowClone->setFrame(Rect(100, 100, 200, 200));
 
-        mDispatcher->onWindowInfosChanged({{*mWindow1->getInfo(), *mWindow2->getInfo()}, {}, 0, 0});
+        mDispatcher->onWindowInfosChanged(
+                {{*mWindow->getInfo(), *mWindowClone->getInfo()}, {}, 0, 0});
     }
 
 protected:
-    sp<FakeWindowHandle> mWindow1;
-    sp<FakeWindowHandle> mWindow2;
+    sp<FakeWindowHandle> mWindow;
+    sp<FakeWindowHandle> mWindowClone;
 
     // Helper function to convert the point from screen coordinates into the window's space
     static PointF getPointInWindow(const WindowInfo* windowInfo, const PointF& point) {
@@ -10442,7 +10524,7 @@ protected:
         }
     }
 
-    void touchAndAssertPositions(sp<FakeWindowHandle> touchedWindow, int32_t action,
+    void touchAndAssertPositions(const sp<FakeWindowHandle>& touchedWindow, int32_t action,
                                  const std::vector<PointF>& touchedPoints,
                                  std::vector<PointF> expectedPoints) {
         mDispatcher->notifyMotion(generateMotionArgs(action, AINPUT_SOURCE_TOUCHSCREEN,
@@ -10453,134 +10535,137 @@ protected:
 };
 
 TEST_F(InputDispatcherMultiWindowSameTokenTests, SingleTouchSameScale) {
-    // Touch Window 1
+    // Touch mWindow
     PointF touchedPoint = {10, 10};
-    PointF expectedPoint = getPointInWindow(mWindow1->getInfo(), touchedPoint);
-    touchAndAssertPositions(mWindow1, AMOTION_EVENT_ACTION_DOWN, {touchedPoint}, {expectedPoint});
+    PointF expectedPoint = getPointInWindow(mWindow->getInfo(), touchedPoint);
+    touchAndAssertPositions(mWindow, AMOTION_EVENT_ACTION_DOWN, {touchedPoint}, {expectedPoint});
 
-    // Release touch on Window 1
-    touchAndAssertPositions(mWindow1, AMOTION_EVENT_ACTION_UP, {touchedPoint}, {expectedPoint});
+    // Release touch on mWindow
+    touchAndAssertPositions(mWindow, AMOTION_EVENT_ACTION_UP, {touchedPoint}, {expectedPoint});
 
-    // Touch Window 2
+    // Touch mWindowClone
     touchedPoint = {150, 150};
-    expectedPoint = getPointInWindow(mWindow2->getInfo(), touchedPoint);
-    touchAndAssertPositions(mWindow2, AMOTION_EVENT_ACTION_DOWN, {touchedPoint}, {expectedPoint});
+    expectedPoint = getPointInWindow(mWindowClone->getInfo(), touchedPoint);
+    touchAndAssertPositions(mWindowClone, AMOTION_EVENT_ACTION_DOWN, {touchedPoint},
+                            {expectedPoint});
 }
 
 TEST_F(InputDispatcherMultiWindowSameTokenTests, SingleTouchDifferentTransform) {
-    // Set scale value for window2
-    mWindow2->setWindowScale(0.5f, 0.5f);
-    mDispatcher->onWindowInfosChanged({{*mWindow1->getInfo(), *mWindow2->getInfo()}, {}, 0, 0});
+    // Set scale value for cloned window
+    mWindowClone->setWindowScale(0.5f, 0.5f);
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo(), *mWindowClone->getInfo()}, {}, 0, 0});
 
-    // Touch Window 1
+    // Touch Window
     PointF touchedPoint = {10, 10};
-    PointF expectedPoint = getPointInWindow(mWindow1->getInfo(), touchedPoint);
-    touchAndAssertPositions(mWindow1, AMOTION_EVENT_ACTION_DOWN, {touchedPoint}, {expectedPoint});
+    PointF expectedPoint = getPointInWindow(mWindow->getInfo(), touchedPoint);
+    touchAndAssertPositions(mWindow, AMOTION_EVENT_ACTION_DOWN, {touchedPoint}, {expectedPoint});
     // Release touch on Window 1
-    touchAndAssertPositions(mWindow1, AMOTION_EVENT_ACTION_UP, {touchedPoint}, {expectedPoint});
+    touchAndAssertPositions(mWindow, AMOTION_EVENT_ACTION_UP, {touchedPoint}, {expectedPoint});
 
-    // Touch Window 2
+    // Touch cloned Window
     touchedPoint = {150, 150};
-    expectedPoint = getPointInWindow(mWindow2->getInfo(), touchedPoint);
-    touchAndAssertPositions(mWindow2, AMOTION_EVENT_ACTION_DOWN, {touchedPoint}, {expectedPoint});
-    touchAndAssertPositions(mWindow2, AMOTION_EVENT_ACTION_UP, {touchedPoint}, {expectedPoint});
+    expectedPoint = getPointInWindow(mWindowClone->getInfo(), touchedPoint);
+    touchAndAssertPositions(mWindowClone, AMOTION_EVENT_ACTION_DOWN, {touchedPoint},
+                            {expectedPoint});
+    touchAndAssertPositions(mWindowClone, AMOTION_EVENT_ACTION_UP, {touchedPoint}, {expectedPoint});
 
     // Update the transform so rotation is set
-    mWindow2->setWindowTransform(0, -1, 1, 0);
-    mDispatcher->onWindowInfosChanged({{*mWindow1->getInfo(), *mWindow2->getInfo()}, {}, 0, 0});
-    expectedPoint = getPointInWindow(mWindow2->getInfo(), touchedPoint);
-    touchAndAssertPositions(mWindow2, AMOTION_EVENT_ACTION_DOWN, {touchedPoint}, {expectedPoint});
+    mWindowClone->setWindowTransform(0, -1, 1, 0);
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo(), *mWindowClone->getInfo()}, {}, 0, 0});
+    expectedPoint = getPointInWindow(mWindowClone->getInfo(), touchedPoint);
+    touchAndAssertPositions(mWindowClone, AMOTION_EVENT_ACTION_DOWN, {touchedPoint},
+                            {expectedPoint});
 }
 
 TEST_F(InputDispatcherMultiWindowSameTokenTests, MultipleTouchDifferentTransform) {
-    mWindow2->setWindowScale(0.5f, 0.5f);
-    mDispatcher->onWindowInfosChanged({{*mWindow1->getInfo(), *mWindow2->getInfo()}, {}, 0, 0});
+    mWindowClone->setWindowScale(0.5f, 0.5f);
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo(), *mWindowClone->getInfo()}, {}, 0, 0});
 
-    // Touch Window 1
+    // Touch mWindow
     std::vector<PointF> touchedPoints = {PointF{10, 10}};
-    std::vector<PointF> expectedPoints = {getPointInWindow(mWindow1->getInfo(), touchedPoints[0])};
-    touchAndAssertPositions(mWindow1, AMOTION_EVENT_ACTION_DOWN, touchedPoints, expectedPoints);
+    std::vector<PointF> expectedPoints = {getPointInWindow(mWindow->getInfo(), touchedPoints[0])};
+    touchAndAssertPositions(mWindow, AMOTION_EVENT_ACTION_DOWN, touchedPoints, expectedPoints);
 
-    // Touch Window 2
-    // Since this is part of the same touch gesture that has already been dispatched to Window 1,
-    // the touch stream from Window 2 will be merged with the stream in Window 1. The merged stream
-    // will continue to be dispatched through Window 1.
+    // Touch mWindowClone
+    // Since this is part of the same touch gesture that has already been dispatched to mWindow,
+    // the touch stream from mWindowClone will be merged with the stream in mWindow. The merged
+    // stream will continue to be dispatched through mWindow.
     touchedPoints.push_back(PointF{150, 150});
-    expectedPoints.push_back(getPointInWindow(mWindow2->getInfo(), touchedPoints[1]));
-    touchAndAssertPositions(mWindow1, POINTER_1_DOWN, touchedPoints, expectedPoints);
+    expectedPoints.push_back(getPointInWindow(mWindowClone->getInfo(), touchedPoints[1]));
+    touchAndAssertPositions(mWindow, POINTER_1_DOWN, touchedPoints, expectedPoints);
 
-    // Release Window 2
-    touchAndAssertPositions(mWindow1, POINTER_1_UP, touchedPoints, expectedPoints);
+    // Release mWindowClone
+    touchAndAssertPositions(mWindow, POINTER_1_UP, touchedPoints, expectedPoints);
     expectedPoints.pop_back();
 
-    // Update the transform so rotation is set for Window 2
-    mWindow2->setWindowTransform(0, -1, 1, 0);
-    mDispatcher->onWindowInfosChanged({{*mWindow1->getInfo(), *mWindow2->getInfo()}, {}, 0, 0});
-    expectedPoints.push_back(getPointInWindow(mWindow2->getInfo(), touchedPoints[1]));
-    touchAndAssertPositions(mWindow1, POINTER_1_DOWN, touchedPoints, expectedPoints);
+    // Update the transform so rotation is set for mWindowClone
+    mWindowClone->setWindowTransform(0, -1, 1, 0);
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo(), *mWindowClone->getInfo()}, {}, 0, 0});
+    expectedPoints.push_back(getPointInWindow(mWindowClone->getInfo(), touchedPoints[1]));
+    touchAndAssertPositions(mWindow, POINTER_1_DOWN, touchedPoints, expectedPoints);
 }
 
 TEST_F(InputDispatcherMultiWindowSameTokenTests, MultipleTouchMoveDifferentTransform) {
-    mWindow2->setWindowScale(0.5f, 0.5f);
-    mDispatcher->onWindowInfosChanged({{*mWindow1->getInfo(), *mWindow2->getInfo()}, {}, 0, 0});
+    mWindowClone->setWindowScale(0.5f, 0.5f);
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo(), *mWindowClone->getInfo()}, {}, 0, 0});
 
-    // Touch Window 1
+    // Touch mWindow
     std::vector<PointF> touchedPoints = {PointF{10, 10}};
-    std::vector<PointF> expectedPoints = {getPointInWindow(mWindow1->getInfo(), touchedPoints[0])};
-    touchAndAssertPositions(mWindow1, AMOTION_EVENT_ACTION_DOWN, touchedPoints, expectedPoints);
+    std::vector<PointF> expectedPoints = {getPointInWindow(mWindow->getInfo(), touchedPoints[0])};
+    touchAndAssertPositions(mWindow, AMOTION_EVENT_ACTION_DOWN, touchedPoints, expectedPoints);
 
-    // Touch Window 2
+    // Touch mWindowClone
     touchedPoints.push_back(PointF{150, 150});
-    expectedPoints.push_back(getPointInWindow(mWindow2->getInfo(), touchedPoints[1]));
+    expectedPoints.push_back(getPointInWindow(mWindowClone->getInfo(), touchedPoints[1]));
 
-    touchAndAssertPositions(mWindow1, POINTER_1_DOWN, touchedPoints, expectedPoints);
+    touchAndAssertPositions(mWindow, POINTER_1_DOWN, touchedPoints, expectedPoints);
 
     // Move both windows
     touchedPoints = {{20, 20}, {175, 175}};
-    expectedPoints = {getPointInWindow(mWindow1->getInfo(), touchedPoints[0]),
-                      getPointInWindow(mWindow2->getInfo(), touchedPoints[1])};
+    expectedPoints = {getPointInWindow(mWindow->getInfo(), touchedPoints[0]),
+                      getPointInWindow(mWindowClone->getInfo(), touchedPoints[1])};
 
-    touchAndAssertPositions(mWindow1, AMOTION_EVENT_ACTION_MOVE, touchedPoints, expectedPoints);
+    touchAndAssertPositions(mWindow, AMOTION_EVENT_ACTION_MOVE, touchedPoints, expectedPoints);
 
-    // Release Window 2
-    touchAndAssertPositions(mWindow1, POINTER_1_UP, touchedPoints, expectedPoints);
+    // Release mWindowClone
+    touchAndAssertPositions(mWindow, POINTER_1_UP, touchedPoints, expectedPoints);
     expectedPoints.pop_back();
 
-    // Touch Window 2
-    mWindow2->setWindowTransform(0, -1, 1, 0);
-    mDispatcher->onWindowInfosChanged({{*mWindow1->getInfo(), *mWindow2->getInfo()}, {}, 0, 0});
-    expectedPoints.push_back(getPointInWindow(mWindow2->getInfo(), touchedPoints[1]));
-    touchAndAssertPositions(mWindow1, POINTER_1_DOWN, touchedPoints, expectedPoints);
+    // Touch mWindowClone
+    mWindowClone->setWindowTransform(0, -1, 1, 0);
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo(), *mWindowClone->getInfo()}, {}, 0, 0});
+    expectedPoints.push_back(getPointInWindow(mWindowClone->getInfo(), touchedPoints[1]));
+    touchAndAssertPositions(mWindow, POINTER_1_DOWN, touchedPoints, expectedPoints);
 
     // Move both windows
     touchedPoints = {{20, 20}, {175, 175}};
-    expectedPoints = {getPointInWindow(mWindow1->getInfo(), touchedPoints[0]),
-                      getPointInWindow(mWindow2->getInfo(), touchedPoints[1])};
+    expectedPoints = {getPointInWindow(mWindow->getInfo(), touchedPoints[0]),
+                      getPointInWindow(mWindowClone->getInfo(), touchedPoints[1])};
 
-    touchAndAssertPositions(mWindow1, AMOTION_EVENT_ACTION_MOVE, touchedPoints, expectedPoints);
+    touchAndAssertPositions(mWindow, AMOTION_EVENT_ACTION_MOVE, touchedPoints, expectedPoints);
 }
 
 TEST_F(InputDispatcherMultiWindowSameTokenTests, MultipleWindowsFirstTouchWithScale) {
-    mWindow1->setWindowScale(0.5f, 0.5f);
-    mDispatcher->onWindowInfosChanged({{*mWindow1->getInfo(), *mWindow2->getInfo()}, {}, 0, 0});
+    mWindow->setWindowScale(0.5f, 0.5f);
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo(), *mWindowClone->getInfo()}, {}, 0, 0});
 
-    // Touch Window 1
+    // Touch mWindow
     std::vector<PointF> touchedPoints = {PointF{10, 10}};
-    std::vector<PointF> expectedPoints = {getPointInWindow(mWindow1->getInfo(), touchedPoints[0])};
-    touchAndAssertPositions(mWindow1, AMOTION_EVENT_ACTION_DOWN, touchedPoints, expectedPoints);
+    std::vector<PointF> expectedPoints = {getPointInWindow(mWindow->getInfo(), touchedPoints[0])};
+    touchAndAssertPositions(mWindow, AMOTION_EVENT_ACTION_DOWN, touchedPoints, expectedPoints);
 
-    // Touch Window 2
+    // Touch mWindowClone
     touchedPoints.push_back(PointF{150, 150});
-    expectedPoints.push_back(getPointInWindow(mWindow2->getInfo(), touchedPoints[1]));
+    expectedPoints.push_back(getPointInWindow(mWindowClone->getInfo(), touchedPoints[1]));
 
-    touchAndAssertPositions(mWindow1, POINTER_1_DOWN, touchedPoints, expectedPoints);
+    touchAndAssertPositions(mWindow, POINTER_1_DOWN, touchedPoints, expectedPoints);
 
     // Move both windows
     touchedPoints = {{20, 20}, {175, 175}};
-    expectedPoints = {getPointInWindow(mWindow1->getInfo(), touchedPoints[0]),
-                      getPointInWindow(mWindow2->getInfo(), touchedPoints[1])};
+    expectedPoints = {getPointInWindow(mWindow->getInfo(), touchedPoints[0]),
+                      getPointInWindow(mWindowClone->getInfo(), touchedPoints[1])};
 
-    touchAndAssertPositions(mWindow1, AMOTION_EVENT_ACTION_MOVE, touchedPoints, expectedPoints);
+    touchAndAssertPositions(mWindow, AMOTION_EVENT_ACTION_MOVE, touchedPoints, expectedPoints);
 }
 
 /**
@@ -10588,21 +10673,21 @@ TEST_F(InputDispatcherMultiWindowSameTokenTests, MultipleWindowsFirstTouchWithSc
  * same input channel.
  */
 TEST_F(InputDispatcherMultiWindowSameTokenTests, TouchDoesNotSlipEvenIfSlippery) {
-    mWindow1->setSlippery(true);
-    mDispatcher->onWindowInfosChanged({{*mWindow1->getInfo(), *mWindow2->getInfo()}, {}, 0, 0});
+    mWindow->setSlippery(true);
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo(), *mWindowClone->getInfo()}, {}, 0, 0});
 
-    // Touch down in window 1
+    // Touch down in mWindow
     mDispatcher->notifyMotion(generateMotionArgs(ACTION_DOWN, AINPUT_SOURCE_TOUCHSCREEN,
                                                  ui::LogicalDisplayId::DEFAULT, {{50, 50}}));
-    consumeMotionEvent(mWindow1, ACTION_DOWN, {{50, 50}});
+    consumeMotionEvent(mWindow, ACTION_DOWN, {{50, 50}});
 
-    // Move touch to be above window 2. Even though window 1 is slippery, touch should not slip.
+    // Move touch to be above mWindowClone. Even though mWindow is slippery, touch should not slip.
     // That means the gesture should continue normally, without any ACTION_CANCEL or ACTION_DOWN
     // getting generated.
     mDispatcher->notifyMotion(generateMotionArgs(ACTION_MOVE, AINPUT_SOURCE_TOUCHSCREEN,
                                                  ui::LogicalDisplayId::DEFAULT, {{150, 150}}));
 
-    consumeMotionEvent(mWindow1, ACTION_MOVE, {{150, 150}});
+    consumeMotionEvent(mWindow, ACTION_MOVE, {{150, 150}});
 }
 
 /**
@@ -10611,21 +10696,148 @@ TEST_F(InputDispatcherMultiWindowSameTokenTests, TouchDoesNotSlipEvenIfSlippery)
  * that the pointer is hovering over may have a different transform.
  */
 TEST_F(InputDispatcherMultiWindowSameTokenTests, HoverIntoClone) {
-    mDispatcher->onWindowInfosChanged({{*mWindow1->getInfo(), *mWindow2->getInfo()}, {}, 0, 0});
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo(), *mWindowClone->getInfo()}, {}, 0, 0});
 
-    // Start hover in window 1
+    // Start hover in mWindow
     mDispatcher->notifyMotion(MotionArgsBuilder(ACTION_HOVER_ENTER, AINPUT_SOURCE_TOUCHSCREEN)
                                       .pointer(PointerBuilder(0, ToolType::FINGER).x(50).y(50))
                                       .build());
-    consumeMotionEvent(mWindow1, ACTION_HOVER_ENTER,
-                       {getPointInWindow(mWindow1->getInfo(), PointF{50, 50})});
-    // Move hover to window 2.
+    consumeMotionEvent(mWindow, ACTION_HOVER_ENTER,
+                       {getPointInWindow(mWindow->getInfo(), PointF{50, 50})});
+    // Move hover to mWindowClone.
     mDispatcher->notifyMotion(MotionArgsBuilder(ACTION_HOVER_MOVE, AINPUT_SOURCE_TOUCHSCREEN)
                                       .pointer(PointerBuilder(0, ToolType::FINGER).x(150).y(150))
                                       .build());
-    consumeMotionEvent(mWindow1, ACTION_HOVER_EXIT, {{50, 50}});
-    consumeMotionEvent(mWindow2, ACTION_HOVER_ENTER,
-                       {getPointInWindow(mWindow2->getInfo(), PointF{150, 150})});
+    consumeMotionEvent(mWindow, ACTION_HOVER_EXIT, {{50, 50}});
+    consumeMotionEvent(mWindowClone, ACTION_HOVER_ENTER,
+                       {getPointInWindow(mWindowClone->getInfo(), PointF{150, 150})});
+}
+
+/**
+ * Set up a SPY window with a clone, and place a regular window underneath. Tap an area that goes
+ * through all 3 windows. Ensure that SPY and REGULAR window correctly receive the event. This test
+ * reproduces a crash in InputDispatcher.
+ *                                                     \/
+ * SPY CLONE (mWindowClone)                     ------------------------
+ *
+ * SPY (ORIGINAL) (mWindow)                          -------------------
+ *
+ * REGULAR WINDOW                                    ------------------------------
+ */
+TEST_F(InputDispatcherMultiWindowSameTokenTests, TapClonedSpyAndSpyWindow) {
+    // Make mWindow and mWindowClone SPY windows with overlapping touchable regions.
+    mWindow->setSpy(true);
+    mWindow->setTrustedOverlay(true);
+    mWindow->setFrame(Rect(0, 0, 50, 50));
+
+    mWindowClone->setSpy(true);
+    mWindowClone->setTrustedOverlay(true);
+    mWindowClone->setFrame(Rect(10, 10, 50, 50));
+    mDispatcher->onWindowInfosChanged({{*mWindowClone->getInfo(), *mWindow->getInfo()}, {}, 0, 0});
+
+    // Test tap on Spy window.
+    // Since mWindowClone is a clone of mWindow, either one can be used to consume the event.
+    // However, due to input event tracing attribution checks, we must use the actual touched window
+    NotifyMotionArgs down1 = MotionArgsBuilder(ACTION_DOWN, AINPUT_SOURCE_TOUCHSCREEN)
+                                     .pointer(PointerBuilder(0, ToolType::FINGER).x(20).y(20))
+                                     .build();
+
+    mDispatcher->notifyMotion(down1);
+    mWindowClone->consumeMotionEvent(WithMotionAction(ACTION_DOWN));
+
+    mDispatcher->notifyMotion(MotionArgsBuilder(ACTION_UP, AINPUT_SOURCE_TOUCHSCREEN)
+                                      .pointer(PointerBuilder(0, ToolType::FINGER).x(20).y(20))
+                                      .downTime(down1.downTime)
+                                      .build());
+    mWindowClone->consumeMotionEvent(WithMotionAction(ACTION_UP));
+
+    // Add another, regular window underneath both SPY windows.
+    std::shared_ptr<FakeApplicationHandle> application = std::make_shared<FakeApplicationHandle>();
+    sp<FakeWindowHandle> regular = sp<FakeWindowHandle>::make(application, mDispatcher, "regular",
+                                                              ui::LogicalDisplayId::DEFAULT);
+    regular->setFrame(Rect(10, 10, 70, 70));
+
+    mDispatcher->onWindowInfosChanged(
+            {{*mWindowClone->getInfo(), *mWindow->getInfo(), *regular->getInfo()}, {}, 0, 0});
+
+    // Test tap on Spy window and normal window.
+    NotifyMotionArgs down2 = MotionArgsBuilder(ACTION_DOWN, AINPUT_SOURCE_TOUCHSCREEN)
+                                     .pointer(PointerBuilder(0, ToolType::FINGER).x(30).y(30))
+                                     .build();
+
+    mDispatcher->notifyMotion(down2);
+    mWindowClone->consumeMotionEvent(WithMotionAction(ACTION_DOWN));
+    regular->consumeMotionEvent(WithMotionAction(ACTION_DOWN));
+
+    mDispatcher->notifyMotion(MotionArgsBuilder(ACTION_UP, AINPUT_SOURCE_TOUCHSCREEN)
+                                      .pointer(PointerBuilder(0, ToolType::FINGER).x(30).y(30))
+                                      .downTime(down2.downTime)
+                                      .build());
+    mWindowClone->consumeMotionEvent(WithMotionAction(ACTION_UP));
+    regular->consumeMotionEvent(WithMotionAction(ACTION_UP));
+
+    // Test tap on outside of Spy window.
+    NotifyMotionArgs down3 = MotionArgsBuilder(ACTION_DOWN, AINPUT_SOURCE_TOUCHSCREEN)
+                                     .pointer(PointerBuilder(0, ToolType::FINGER).x(60).y(60))
+                                     .build();
+
+    mDispatcher->notifyMotion(down3);
+    regular->consumeMotionEvent(WithMotionAction(ACTION_DOWN));
+
+    mDispatcher->notifyMotion(MotionArgsBuilder(ACTION_UP, AINPUT_SOURCE_TOUCHSCREEN)
+                                      .pointer(PointerBuilder(0, ToolType::FINGER).x(60).y(60))
+                                      .downTime(down3.downTime)
+                                      .build());
+    mWindowClone->assertNoEvents();
+    regular->consumeMotionEvent(WithMotionAction(ACTION_UP));
+}
+
+/**
+ * Set up a SPY window with a clone, and place a regular window underneath. Tap an area that goes
+ * through SPY CLONE and the regular window, but not the original spy. Ensure that SPY and REGULAR
+ * windows correctly receive the event. This test ensures that the InputDispatcher isn't treating
+ * cloned SPY in a special manner.
+ *                                      \/
+ * SPY CLONE (mWindowClone)           ------------------------
+ *
+ * SPY (ORIGINAL) (mWindow)                               -------------------
+ *
+ * REGULAR WINDOW              -------------------------------
+ */
+TEST_F(InputDispatcherMultiWindowSameTokenTests, TapOnlyClonedSpyWindow) {
+    // Make mWindow and mWindowClone SPY windows with overlapping touchable regions.
+    mWindow->setSpy(true);
+    mWindow->setTrustedOverlay(true);
+    mWindow->setFrame(Rect(40, 40, 80, 80));
+
+    mWindowClone->setSpy(true);
+    mWindowClone->setTrustedOverlay(true);
+    mWindowClone->setFrame(Rect(10, 10, 50, 50));
+
+    // Add another, regular window underneath both SPY windows.
+    std::shared_ptr<FakeApplicationHandle> application = std::make_shared<FakeApplicationHandle>();
+    sp<FakeWindowHandle> regular = sp<FakeWindowHandle>::make(application, mDispatcher, "regular",
+                                                              ui::LogicalDisplayId::DEFAULT);
+    regular->setFrame(Rect(0, 0, 50, 50));
+
+    mDispatcher->onWindowInfosChanged(
+            {{*mWindowClone->getInfo(), *mWindow->getInfo(), *regular->getInfo()}, {}, 0, 0});
+
+    // Test tap on Spy window and normal window.
+    NotifyMotionArgs down = MotionArgsBuilder(ACTION_DOWN, AINPUT_SOURCE_TOUCHSCREEN)
+                                    .pointer(PointerBuilder(0, ToolType::FINGER).x(15).y(15))
+                                    .build();
+
+    mDispatcher->notifyMotion(down);
+    mWindowClone->consumeMotionEvent(WithMotionAction(ACTION_DOWN));
+    regular->consumeMotionEvent(WithMotionAction(ACTION_DOWN));
+
+    mDispatcher->notifyMotion(MotionArgsBuilder(ACTION_UP, AINPUT_SOURCE_TOUCHSCREEN)
+                                      .pointer(PointerBuilder(0, ToolType::FINGER).x(15).y(15))
+                                      .downTime(down.downTime)
+                                      .build());
+    mWindowClone->consumeMotionEvent(WithMotionAction(ACTION_UP));
+    regular->consumeMotionEvent(WithMotionAction(ACTION_UP));
 }
 
 class InputDispatcherSingleWindowAnr : public InputDispatcherTest {
@@ -10654,6 +10866,7 @@ class InputDispatcherSingleWindowAnr : public InputDispatcherTest {
     }
 
 protected:
+    FIXTURE_FLAG_OVERRIDE(enable_anr_warning_callback_input_dispatcher, true);
     static constexpr std::chrono::duration SPY_TIMEOUT = 200ms;
     std::shared_ptr<FakeApplicationHandle> mApplication;
     sp<FakeWindowHandle> mWindow;
@@ -10780,38 +10993,8 @@ TEST_F(InputDispatcherSingleWindowAnr, FocusedApplication_NoFocusedWindow) {
     ASSERT_TRUE(mDispatcher->waitForIdle());
 }
 
-// We have a focused application, but no focused window, ANR warning flag is disabled.
-TEST_F(InputDispatcherSingleWindowAnr, FocusedApplication_NoFocusedWindow_AnrWarningDisabled) {
-    SCOPED_FLAG_OVERRIDE(enable_anr_warning_callback_input_dispatcher, false);
-
-    mWindow->setFocusable(false);
-    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo()}, {}, 0, 0});
-    mWindow->consumeFocusEvent(false);
-
-    // taps on the window work as normal
-    const auto touchingPointer =
-            PointerBuilder(/*id=*/0, ToolType::FINGER).x(WINDOW_LOCATION.x).y(WINDOW_LOCATION.y);
-    mDispatcher->notifyMotion(MotionArgsBuilder(ACTION_DOWN, AINPUT_SOURCE_TOUCHSCREEN)
-                                      .pointer(touchingPointer)
-                                      .build());
-    ASSERT_NO_FATAL_FAILURE(mWindow->consumeMotionDown());
-    mDispatcher->waitForIdle();
-    mFakePolicy->assertNotifyAnrWasNotCalled();
-
-    // Once a focused event arrives, we get an ANR for this application
-    // Send the key event but the event would not be processed as there is no focused window
-    // triggering ANR.
-    mDispatcher->notifyKey(generateKeyArgs(AKEY_EVENT_ACTION_DOWN, ui::LogicalDisplayId::DEFAULT));
-
-    const std::chrono::duration timeout = mApplication->getDispatchingTimeout(DISPATCHING_TIMEOUT);
-    mFakePolicy->assertNotifyNoFocusedWindowAnrWasCalled(timeout, mApplication);
-    mFakePolicy->assertWarnNoFocusedWindowAnrWasNotCalled();
-}
-
 // We have a focused application, but no focused window, ANR warning flag is enabled
 TEST_F(InputDispatcherSingleWindowAnr, FocusedApplication_NoFocusedWindow_AnrWarningTriggered) {
-    SCOPED_FLAG_OVERRIDE(enable_anr_warning_callback_input_dispatcher, true);
-
     mWindow->setFocusable(false);
     mDispatcher->onWindowInfosChanged({{*mWindow->getInfo()}, {}, 0, 0});
     mWindow->consumeFocusEvent(false);
@@ -10836,15 +11019,92 @@ TEST_F(InputDispatcherSingleWindowAnr, FocusedApplication_NoFocusedWindow_AnrWar
             mApplication->getDispatchingTimeout(DISPATCHING_TIMEOUT);
     const std::chrono::milliseconds timeoutMillis =
             std::chrono::duration_cast<std::chrono::milliseconds>(timeout);
+    mFakePolicy->assertNotifyPreNoFocusedWindowAnrWasCalled(timeout, timeoutMillis, mApplication);
     mFakePolicy->assertNotifyNoFocusedWindowAnrWasCalled(timeout, mApplication);
-    mFakePolicy->assertWarnNoFocusedWindowAnrWasCalled(timeout, timeoutMillis, mApplication);
+}
+
+TEST_F(InputDispatcherSingleWindowAnr,
+       NoFocusedWindow_PreAnrFiresAtHalfTimeout_WhenHalfGreaterThanDefaultWindow) {
+    SCOPED_FLAG_OVERRIDE(enable_anr_warning_callback_input_dispatcher, true);
+
+    // Pick a timeout where half clearly exceeds the default pre-ANR window.
+    const auto anrTimeout = DEFAULT_PRE_ANR_TIMEOUT_WINDOW * 4;
+    mApplication->setDispatchingTimeout(anrTimeout);
+
+    // half > defaultPreAnrWindow, so the half-timeout path wins.
+    const auto preAnrWindow = anrTimeout / 2;
+    const auto preAnrDelay = anrTimeout - preAnrWindow;
+
+    mWindow->setFocusable(false);
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo()}, {}, 0, 0});
+    mWindow->consumeFocusEvent(false);
+
+    mDispatcher->notifyKey(generateKeyArgs(AKEY_EVENT_ACTION_DOWN, ui::LogicalDisplayId::DEFAULT));
+
+    // Before pre-ANR point: must NOT fire.
+    mFakePolicy->assertNotifyPreNoFocusedWindowAnrWasNotCalled(preAnrDelay - 100ms);
+
+    // Shortly after: must fire.
+    mFakePolicy->assertNotifyPreNoFocusedWindowAnrWasCalled(200ms, anrTimeout, mApplication);
+
+    // Full ANR after the remaining time.
+    mFakePolicy->assertNotifyNoFocusedWindowAnrWasCalled(preAnrWindow, mApplication);
+}
+
+TEST_F(InputDispatcherSingleWindowAnr,
+       NoFocusedWindow_PreAnrUsesDefaultMinimumWindow_WhenHalfLessThanDefaultWindow) {
+    SCOPED_FLAG_OVERRIDE(enable_anr_warning_callback_input_dispatcher, true);
+
+    // Pick a timeout where half is clearly less than the default pre-ANR window.
+    const auto anrTimeout = DEFAULT_PRE_ANR_TIMEOUT_WINDOW + 500ms;
+    mApplication->setDispatchingTimeout(anrTimeout);
+
+    // half < defaultPreAnrWindow, so the default window wins.
+    const auto preAnrWindow = DEFAULT_PRE_ANR_TIMEOUT_WINDOW;
+    const auto preAnrDelay = anrTimeout - preAnrWindow;
+
+    mWindow->setFocusable(false);
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo()}, {}, 0, 0});
+    mWindow->consumeFocusEvent(false);
+
+    mDispatcher->notifyKey(generateKeyArgs(AKEY_EVENT_ACTION_DOWN, ui::LogicalDisplayId::DEFAULT));
+
+    // Before pre-ANR point: must NOT fire.
+    mFakePolicy->assertNotifyPreNoFocusedWindowAnrWasNotCalled(preAnrDelay - 100ms);
+
+    // Shortly after: must fire.
+    mFakePolicy->assertNotifyPreNoFocusedWindowAnrWasCalled(200ms, anrTimeout, mApplication);
+
+    // Full ANR after the remaining time.
+    mFakePolicy->assertNotifyNoFocusedWindowAnrWasCalled(DEFAULT_PRE_ANR_TIMEOUT_WINDOW,
+                                                         mApplication);
+}
+
+TEST_F(InputDispatcherSingleWindowAnr,
+       NoFocusedWindow_PreAnrCancelledWhenWindowBecomesFocusableBeforePreWindow) {
+    SCOPED_FLAG_OVERRIDE(enable_anr_warning_callback_input_dispatcher, true);
+
+    const auto anrTimeout = DEFAULT_PRE_ANR_TIMEOUT_WINDOW * 4;
+    mApplication->setDispatchingTimeout(anrTimeout);
+
+    mWindow->setFocusable(false);
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo()}, {}, 0, 0});
+    mWindow->consumeFocusEvent(false);
+
+    mDispatcher->notifyKey(generateKeyArgs(AKEY_EVENT_ACTION_DOWN, ui::LogicalDisplayId::DEFAULT));
+    // Resolve focus immediately.
+    mWindow->setFocusable(true);
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo()}, {}, 0, 0});
+    mWindow->consumeFocusEvent(true);
+
+    // Wait past the would-have-been pre-ANR time, confirm no pre-ANR.
+    const auto preAnrWindow = anrTimeout / 2;
+    mFakePolicy->assertNotifyPreNoFocusedWindowAnrWasNotCalled(preAnrWindow + 300ms);
 }
 
 // We have a focused application, but no focused window
 // Make sure that we don't notify policy twice about the same ANR.
 TEST_F(InputDispatcherSingleWindowAnr, NoFocusedWindow_DoesNotSendDuplicateAnr_AnrWarningEnabled) {
-    SCOPED_FLAG_OVERRIDE(enable_anr_warning_callback_input_dispatcher, true);
-
     const std::chrono::duration appTimeout = 400ms;
     mApplication->setDispatchingTimeout(appTimeout);
     mDispatcher->setFocusedApplication(ui::LogicalDisplayId::DEFAULT, mApplication);
@@ -10881,8 +11141,6 @@ TEST_F(InputDispatcherSingleWindowAnr, NoFocusedWindow_DoesNotSendDuplicateAnr_A
 
 // We have a focused application, but no focused window
 TEST_F(InputDispatcherSingleWindowAnr, NoFocusedWindow_DropsFocusedEvents_AnrWarningEnabled) {
-    SCOPED_FLAG_OVERRIDE(enable_anr_warning_callback_input_dispatcher, true);
-
     mWindow->setFocusable(false);
     mDispatcher->onWindowInfosChanged({{*mWindow->getInfo()}, {}, 0, 0});
     mWindow->consumeFocusEvent(false);
@@ -11349,6 +11607,90 @@ TEST_F(InputDispatcherSingleWindowAnr, AnrFollowedByWindowRemoval) {
     // Since the window was removed, Dispatcher does not know the PID associated with the window
     // becoming responsive, so the policy is notified without the PID.
     mFakePolicy->assertNotifyWindowResponsiveWasCalled(mWindow->getToken(), /*pid=*/std::nullopt);
+}
+
+// Test fixture used to confirm the behavior of flags when they are disabled.
+class InputDispatcherSingleWindowAnrFlagsDisabled : public InputDispatcherTest {
+    virtual void SetUp() override {
+        InputDispatcherTest::SetUp();
+
+        mApplication = std::make_shared<FakeApplicationHandle>();
+        mApplication->setDispatchingTimeout(100ms);
+        mWindow = sp<FakeWindowHandle>::make(mApplication, mDispatcher, "TestWindow",
+                                             ui::LogicalDisplayId::DEFAULT);
+        mWindow->setFrame(Rect(0, 0, 30, 30));
+        mWindow->setDispatchingTimeout(100ms);
+        mWindow->setFocusable(true);
+
+        // Set focused application.
+        mDispatcher->setFocusedApplication(ui::LogicalDisplayId::DEFAULT, mApplication);
+
+        mDispatcher->onWindowInfosChanged({{*mWindow->getInfo()}, {}, 0, 0});
+        setFocusedWindow(mWindow);
+        mWindow->consumeFocusEvent(true);
+    }
+
+    virtual void TearDown() override {
+        InputDispatcherTest::TearDown();
+        mWindow.clear();
+    }
+
+protected:
+    FIXTURE_FLAG_OVERRIDE(enable_anr_warning_callback_input_dispatcher, false);
+    static constexpr std::chrono::duration SPY_TIMEOUT = 200ms;
+    std::shared_ptr<FakeApplicationHandle> mApplication;
+    sp<FakeWindowHandle> mWindow;
+    static constexpr PointF WINDOW_LOCATION = {20, 20};
+
+    void tapOnWindow() {
+        const auto touchingPointer = PointerBuilder(/*id=*/0, ToolType::FINGER)
+                                             .x(WINDOW_LOCATION.x)
+                                             .y(WINDOW_LOCATION.y);
+        mDispatcher->notifyMotion(MotionArgsBuilder(ACTION_DOWN, AINPUT_SOURCE_TOUCHSCREEN)
+                                          .pointer(touchingPointer)
+                                          .build());
+        mDispatcher->notifyMotion(MotionArgsBuilder(ACTION_UP, AINPUT_SOURCE_TOUCHSCREEN)
+                                          .pointer(touchingPointer)
+                                          .build());
+    }
+
+    sp<FakeWindowHandle> addSpyWindow() {
+        sp<FakeWindowHandle> spy = sp<FakeWindowHandle>::make(mApplication, mDispatcher, "Spy",
+                                                              ui::LogicalDisplayId::DEFAULT);
+        spy->setTrustedOverlay(true);
+        spy->setFocusable(false);
+        spy->setSpy(true);
+        spy->setDispatchingTimeout(SPY_TIMEOUT);
+        mDispatcher->onWindowInfosChanged({{*spy->getInfo(), *mWindow->getInfo()}, {}, 0, 0});
+        return spy;
+    }
+};
+
+// We have a focused application, but no focused window, ANR warning flag is disabled.
+TEST_F(InputDispatcherSingleWindowAnrFlagsDisabled,
+       FocusedApplication_NoFocusedWindow_AnrWarningDisabled) {
+    mWindow->setFocusable(false);
+    mDispatcher->onWindowInfosChanged({{*mWindow->getInfo()}, {}, 0, 0});
+    mWindow->consumeFocusEvent(false);
+
+    // taps on the window work as normal
+    const auto touchingPointer =
+            PointerBuilder(/*id=*/0, ToolType::FINGER).x(WINDOW_LOCATION.x).y(WINDOW_LOCATION.y);
+    mDispatcher->notifyMotion(MotionArgsBuilder(ACTION_DOWN, AINPUT_SOURCE_TOUCHSCREEN)
+                                      .pointer(touchingPointer)
+                                      .build());
+    ASSERT_NO_FATAL_FAILURE(mWindow->consumeMotionDown());
+    mDispatcher->waitForIdle();
+    mFakePolicy->assertNotifyAnrWasNotCalled();
+
+    // Once a focused event arrives, we get an ANR for this application
+    // Send the key event but the event would not be processed as there is no focused window
+    // triggering ANR.
+    mDispatcher->notifyKey(generateKeyArgs(AKEY_EVENT_ACTION_DOWN, ui::LogicalDisplayId::DEFAULT));
+
+    const std::chrono::duration timeout = mApplication->getDispatchingTimeout(DISPATCHING_TIMEOUT);
+    mFakePolicy->assertNotifyNoFocusedWindowAnrWasCalled(timeout, mApplication);
+    mFakePolicy->assertNotifyPreNoFocusedWindowAnrWasNotCalled(timeout);
 }
 
 class InputDispatcherMultiWindowAnr : public InputDispatcherTest {

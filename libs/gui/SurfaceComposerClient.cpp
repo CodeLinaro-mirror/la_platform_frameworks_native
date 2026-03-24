@@ -2583,6 +2583,22 @@ SurfaceComposerClient::Transaction::setRenderCommandBufferFrameId(const sp<Surfa
     }
     s->what |= layer_state_t::eRenderCommandBufferFrameIdChanged;
     s->renderCommandBufferFrameId = frameId;
+    s->renderCommandBufferFrameIdQueueTime = systemTime();
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setPostProcess(
+        const sp<SurfaceControl>& sc, const sp<IBinder>& shader,
+        const std::shared_ptr<std::vector<uint8_t>>& uniforms, layer_state_t::SampleTarget target) {
+    layer_state_t* s = getLayerState(sc);
+    if (!s) {
+        mStatus = BAD_INDEX;
+        return *this;
+    }
+    s->what |= layer_state_t::ePostProcessChanged;
+    s->postProcessShader = shader;
+    s->postProcessUniforms = uniforms;
+    s->postProcessTarget = target;
     return *this;
 }
 
@@ -2957,9 +2973,10 @@ status_t SurfaceComposerClient::getActiveDisplayMode(const sp<IBinder>& display,
 }
 
 status_t SurfaceComposerClient::setDesiredDisplayModeSpecs(
-        const std::vector<gui::DisplayModeSpecs>& specs) {
+        const sp<IBinder>& applyToken, const std::vector<gui::DisplayModeSpecs>& specs) {
     binder::Status status =
-            ComposerServiceAIDL::getComposerService()->setDesiredDisplayModeSpecs(specs);
+            ComposerServiceAIDL::getComposerService()->setDesiredDisplayModeSpecs(applyToken,
+                                                                                  specs);
     return statusTFromBinderStatus(status);
 }
 
@@ -3359,6 +3376,22 @@ status_t SurfaceComposerClient::removeActivePictureListener(
     binder::Status status =
             ComposerServiceAIDL::getComposerService()->removeActivePictureListener(listener);
     return statusTFromBinderStatus(status);
+}
+
+sp<IBinder> SurfaceComposerClient::registerShader(const std::string& uniqueShaderName,
+                                                  const std::string& shaderString) {
+    if (!com_android_graphics_libgui_flags_composition_shaders()) {
+        return nullptr;
+    }
+    sp<IBinder> token = sp<BBinder>::make();
+    binder::Status status =
+            ComposerServiceAIDL::getComposerService()->registerShader(token, uniqueShaderName,
+                                                                      shaderString);
+    return status.isOk() ? token : nullptr;
+}
+
+void SurfaceComposerClient::unregisterShader(const sp<IBinder> shader) {
+    ComposerServiceAIDL::getComposerService()->unregisterShader(shader);
 }
 
 status_t SurfaceComposerClient::notifyPowerBoost(int32_t boostId) {

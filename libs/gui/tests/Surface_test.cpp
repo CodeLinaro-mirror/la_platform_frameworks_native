@@ -99,7 +99,7 @@ public:
     virtual void onBuffersDiscarded(const std::vector<sp<GraphicBuffer>>& buffers) {
         mDiscardedBuffers.insert(mDiscardedBuffers.end(), buffers.begin(), buffers.end());
     }
-    virtual void onBufferDetached(int /*slot*/) {}
+    virtual void onBufferDetached(uint64_t /*bufferId*/) {}
     int getReleaseNotifyCount() const {
         return mBuffersReleased;
     }
@@ -729,6 +729,14 @@ public:
         return NO_ERROR;
     }
 
+    status_t registerGraphicBuffers(const gui::GraphicBuffersRegisterInfo&) override {
+        return NO_ERROR;
+    }
+
+    status_t unregisterGraphicBuffers(const gui::GraphicBuffersUnregisterInfo&) override {
+        return NO_ERROR;
+    }
+
 protected:
     IBinder* onAsBinder() override { return nullptr; }
 
@@ -743,9 +751,8 @@ public:
     void setSupportsPresent(bool supportsPresent) { mSupportsPresent = supportsPresent; }
 
     binder::Status bootFinished() override { return binder::Status::ok(); }
-
     binder::Status createDisplayEventConnection(
-            VsyncSource /*vsyncSource*/, EventRegistration /*eventRegistration*/,
+            gui::ISurfaceComposer::EventRegistration /*eventRegistration*/,
             const sp<IBinder>& /*layerHandle*/,
             sp<gui::IDisplayEventConnection>* outConnection) override {
         *outConnection = nullptr;
@@ -972,7 +979,9 @@ public:
         return binder::Status::ok();
     }
 
-    binder::Status setDesiredDisplayModeSpecs(const std::vector<gui::DisplayModeSpecs>&) override {
+    binder::Status setDesiredDisplayModeSpecs(
+            const sp<IBinder>& /*applyToken*/,
+            const std::vector<gui::DisplayModeSpecs>&) override {
         return binder::Status::ok();
     }
 
@@ -1112,13 +1121,12 @@ public:
 
     binder::Status resetForcedPacesetter() { return binder::Status::ok(); }
 
-    binder::Status registerGraphicBuffers(
-            const gui::GraphicBuffersRegisterInfo& /*info*/) override {
+    binder::Status registerShader(const sp<IBinder>& shaderToken, const std::string& debugName,
+                                  const std::string& shaderString) override {
         return binder::Status::ok();
     }
 
-    binder::Status unregisterGraphicBuffers(
-            const gui::GraphicBuffersUnregisterInfo& /*info*/) override {
+    binder::Status unregisterShader(const sp<IBinder>& shader) override {
         return binder::Status::ok();
     }
 
@@ -2426,7 +2434,7 @@ TEST_F(SurfaceTest, QueueAcquireReleaseDequeue_CalledInStack_DoesNotDeadlock) {
 
         virtual bool needsReleaseNotify() override { return true; }
         virtual void onBuffersDiscarded(const std::vector<sp<GraphicBuffer>>&) override {}
-        virtual void onBufferDetached(int) override {}
+        virtual void onBufferDetached(uint64_t) override {}
 
         sp<GraphicBuffer> mBuffer;
         sp<Fence> mFence;
@@ -2837,6 +2845,32 @@ TEST_F(SurfaceTest, UnlimitedSlots_SetMaxDequeuedBufferCount_EdgeCase) {
     for (int i = 0; i < kDequeableBufferCount; i++) {
         ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence)) << "Failed to dequeue buffer #" << i;
     }
+}
+
+TEST_F(SurfaceTest, UnlimitedSlots_SecondSurface_UnderstandsExtraSlots) {
+    auto [consumer, surface] = BufferItemConsumer::create(TEST_PRODUCER_USAGE_BITS);
+    ASSERT_NE(nullptr, surface.get());
+
+    // We can set the max dequeued count before connecting.
+    ASSERT_EQ(NO_ERROR, surface->setMaxDequeuedBufferCount(32));
+
+    // 100 is more than the default 64
+    ASSERT_EQ(NO_ERROR, surface->setMaxDequeuedBufferCount(100));
+
+    sp<Surface> surface2 = sp<Surface>::make(surface->getIGraphicBufferProducer());
+    ASSERT_EQ(NO_ERROR, surface2->connect(NATIVE_WINDOW_API_CPU, sp<StubSurfaceListener>::make()));
+
+    sp<GraphicBuffer> buffers[100];
+    for (int i = 0; i < 100; i++) {
+        sp<Fence> fence;
+        ASSERT_EQ(NO_ERROR, surface2->dequeueBuffer(&buffers[i], &fence));
+    }
+
+    for (int i = 0; i < 100; i++) {
+        ASSERT_EQ(NO_ERROR, surface2->cancelBuffer(buffers[i], Fence::NO_FENCE));
+    }
+
+    ASSERT_EQ(NO_ERROR, surface2->disconnect(NATIVE_WINDOW_API_CPU));
 }
 
 TEST_F(SurfaceTest, isBufferOwned) {
