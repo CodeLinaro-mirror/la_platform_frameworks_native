@@ -424,7 +424,6 @@ status_t Parcel::appendFrom(const Parcel *parcel, size_t offset, size_t len)
     const binder_size_t *objects = parcel->mObjects;
     size_t size = parcel->mObjectsSize;
     int startPos = mDataPos;
-    int firstIndex = -1, lastIndex = -2;
 
     if (len == 0) {
         return NO_ERROR;
@@ -444,16 +443,18 @@ status_t Parcel::appendFrom(const Parcel *parcel, size_t offset, size_t len)
     }
 
     // Count objects in range
-    for (int i = 0; i < (int) size; i++) {
-        size_t off = objects[i];
-        if ((off >= offset) && (off + sizeof(flat_binder_object) <= offset + len)) {
-            if (firstIndex == -1) {
-                firstIndex = i;
-            }
-            lastIndex = i;
+    int numObjects = 0;
+    for (int i = 0; i < (int)size; i++) {
+        size_t pos = objects[i];
+        if ((pos >= offset) && (pos + sizeof(flat_binder_object) <= offset + len)) {
+            numObjects++;
         }
     }
-    int numObjects = lastIndex - firstIndex + 1;
+
+    // Make sure we aren't appending over objects.
+    if (status_t status = validateReadData(mDataPos + len); status != OK) {
+        return status;
+    }
 
     if ((mDataSize+len) > mDataCapacity) {
         // grow data
@@ -466,7 +467,7 @@ status_t Parcel::appendFrom(const Parcel *parcel, size_t offset, size_t len)
     // append data
     memcpy(mData + mDataPos, data + offset, len);
     mDataPos += len;
-    mDataSize += len;
+    if (mDataPos > mDataSize) mDataSize = mDataPos;
 
     err = NO_ERROR;
 
@@ -489,8 +490,12 @@ status_t Parcel::appendFrom(const Parcel *parcel, size_t offset, size_t len)
 
         // append and acquire objects
         int idx = mObjectsSize;
-        for (int i = firstIndex; i <= lastIndex; i++) {
-            size_t off = objects[i] - offset + startPos;
+        for (int i = 0; i < (int)size; i++) {
+            size_t pos = objects[i];
+            if (!(pos >= offset) || !(pos + sizeof(flat_binder_object) <= offset + len)) {
+                continue;
+            }
+            size_t off = pos - offset + startPos;
             mObjects[idx++] = off;
             mObjectsSize++;
 
@@ -510,6 +515,9 @@ status_t Parcel::appendFrom(const Parcel *parcel, size_t offset, size_t len)
                 }
             }
         }
+        // Always clear sorted flag. It is tricky to infer if the append
+        // result maintains the sort or not.
+        mObjectsSorted = false;
     }
 
     return err;
@@ -887,6 +895,10 @@ void* Parcel::writeInplace(size_t len)
 restart_write:
         //printf("Writing %ld bytes, padded to %ld\n", len, padded);
         uint8_t* const data = mData+mDataPos;
+
+        if (status_t status = validateReadData(mDataPos + padded); status != OK) {
+            return nullptr; // drops status
+        }
 
         // Need to pad at end?
         if (padded != len) {
@@ -1405,6 +1417,10 @@ status_t Parcel::writeObject(const flat_binder_object& val, bool nullMetaData)
     const bool enoughObjects = mObjectsSize < mObjectsCapacity;
     if (enoughData && enoughObjects) {
 restart_write:
+        if (status_t status = validateReadData(mDataPos + sizeof(val)); status != OK) {
+            return status;
+        }
+
         *reinterpret_cast<flat_binder_object*>(mData+mDataPos) = val;
 
         // remember if it's a file descriptor
@@ -1421,6 +1437,8 @@ restart_write:
             mObjects[mObjectsSize] = mDataPos;
             acquire_object(ProcessState::self(), val, this);
             mObjectsSize++;
+            // Clear sorted flag if we aren't appending to the end.
+            mObjectsSorted &= mDataPos == mDataSize;
         }
 
         return finishWrite(sizeof(flat_binder_object));
@@ -1621,6 +1639,10 @@ status_t Parcel::writeAligned(T val) {
 
     if ((mDataPos+sizeof(val)) <= mDataCapacity) {
 restart_write:
+        if (status_t status = validateReadData(mDataPos + sizeof(val)); status != OK) {
+            return status;
+        }
+
         memcpy(mData + mDataPos, &val, sizeof(val));
         return finishWrite(sizeof(val));
     }
@@ -2193,11 +2215,15 @@ const flat_binder_object* Parcel::readObject(bool nullMetaData) const
 
 void Parcel::closeFileDescriptors()
 {
+    truncateFileDescriptors(0);
+}
+
+void Parcel::truncateFileDescriptors(size_t newObjectsSize) {
     size_t i = mObjectsSize;
     if (i > 0) {
         //ALOGI("Closing file descriptors for %zu objects...", i);
     }
-    while (i > 0) {
+    while (i > newObjectsSize) {
         i--;
         const flat_binder_object* flat
             = reinterpret_cast<flat_binder_object*>(mData+mObjects[i]);
@@ -2345,6 +2371,7 @@ void Parcel::freeDataNoInit()
     if (mOwner) {
         LOG_ALLOC("Parcel %p: freeing other owner data", this);
         //ALOGI("Freeing data ref of %p (pid=%d)", this, getpid());
+        closeFileDescriptors();
         mOwner(this, mData, mDataSize, mObjects, mObjectsSize);
     } else {
         LOG_ALLOC("Parcel %p: freeing allocated data", this);
@@ -2367,6 +2394,14 @@ status_t Parcel::growData(size_t len)
     if (len > INT32_MAX) {
         // don't accept size_t values which may have come from an
         // inadvertent conversion from a negative int.
+        return BAD_VALUE;
+    }
+
+    if (mDataPos > mDataSize) {
+        // b/370831157 - this case used to abort. We also don't expect mDataPos < mDataSize, but
+        // this would only waste a bit of memory, so it's okay.
+        ALOGE("growData only expected at the end of a Parcel. pos: %zu, size: %zu, capacity: %zu",
+              mDataPos, len, mDataCapacity);
         return BAD_VALUE;
     }
 
@@ -2460,8 +2495,9 @@ status_t Parcel::continueWrite(size_t desired)
         if (desired == 0) {
             objectsSize = 0;
         } else {
+            validateReadData(mDataSize); // hack to sort the objects
             while (objectsSize > 0) {
-                if (mObjects[objectsSize-1] < desired)
+                if (mObjects[objectsSize-1] + sizeof(flat_binder_object) <= desired)
                     break;
                 objectsSize--;
             }
@@ -2506,8 +2542,18 @@ status_t Parcel::continueWrite(size_t desired)
         }
         if (objects && mObjects) {
             memcpy(objects, mObjects, objectsSize*sizeof(binder_size_t));
+            // All FDs are owned when `mOwner`, even when `cookie == 0`. When
+            // we switch to `!mOwner`, we need to explicitly mark the FDs as
+            // owned.
+            for (size_t i = 0; i < objectsSize; i++) {
+                flat_binder_object* flat = reinterpret_cast<flat_binder_object*>(data + objects[i]);
+                if (flat->hdr.type == BINDER_TYPE_FD) {
+                    flat->cookie = 1;
+                }
+            }
         }
         //ALOGI("Freeing data ref of %p (pid=%d)", this, getpid());
+        truncateFileDescriptors(objectsSize);
         mOwner(this, mData, mDataSize, mObjects, mObjectsSize);
         mOwner = nullptr;
 
