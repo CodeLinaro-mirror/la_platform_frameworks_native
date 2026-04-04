@@ -38,14 +38,17 @@ public:
     bool isQuadSizeChanged(const float& quadWidth, const float& quadHeight);
 
 private:
-    gui::CompositionLayerType mQtiCompositionLayerType;
-    gui::RenderLayerReferenceSpaceType mQtiReferenceSpaceType;
-    gui::LayerVisibilityType mQtiLayerVisibilityType;
+    gui::CompositionLayerType mQtiCompositionLayerType =
+            gui::CompositionLayerType::COMPOSITION_LAYER_NONE;
+    gui::RenderLayerReferenceSpaceType mQtiReferenceSpaceType =
+            gui::RenderLayerReferenceSpaceType::RENDER_LAYER_REFERENCE_SPACE_NONE;
+    gui::LayerVisibilityType mQtiLayerVisibilityType =
+            gui::LayerVisibilityType::LAYER_VISIBILITY_NONE;
     gui::Frustum mQtiFrustum = gui::Frustum();
     gui::Pose mQtiPose = gui::Pose();
     gui::PlaneEquation mQtiPlaneEquation = gui::PlaneEquation();
-    float mQtiQuadWidth{0.0};
-    float mQtiQuadHeight{0.0};
+    float mQtiQuadWidth{0.f};
+    float mQtiQuadHeight{0.f};
 };
 
 } // namespace layerextension

@@ -270,14 +270,17 @@ struct LayerFECompositionState {
                             // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
                             // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API
 #ifdef QTI_LSR_ENABLED
-    gui::CompositionLayerType qtiCompositionLayerType;
-    gui::RenderLayerReferenceSpaceType qtiReferenceSpaceType;
-    gui::LayerVisibilityType qtiLayerVisibilityType;
-    gui::Frustum qtiFrustum;
-    gui::Pose qtiPose;
-    gui::PlaneEquation qtiPlaneEquation;
-    float qtiQuadWidth;
-    float qtiQuadHeight;
+    gui::CompositionLayerType qtiCompositionLayerType =
+            gui::CompositionLayerType::COMPOSITION_LAYER_NONE;
+    gui::RenderLayerReferenceSpaceType qtiReferenceSpaceType =
+            gui::RenderLayerReferenceSpaceType::RENDER_LAYER_REFERENCE_SPACE_NONE;
+    gui::LayerVisibilityType qtiLayerVisibilityType =
+            gui::LayerVisibilityType::LAYER_VISIBILITY_NONE;
+    gui::Frustum qtiFrustum = gui::Frustum();
+    gui::Pose qtiPose = gui::Pose();
+    gui::PlaneEquation qtiPlaneEquation = gui::PlaneEquation();
+    float qtiQuadWidth = 0.f;
+    float qtiQuadHeight = 0.f;
 #endif
     // QTI_END: 2026-01-26: Display: sf: Add reprojection API
 };
