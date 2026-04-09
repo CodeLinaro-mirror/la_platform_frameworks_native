@@ -2330,5 +2330,8 @@ ndk::ScopedAStatus DisplayConfigAidlCallbackHandler::notifyTUIEventDone(int32_t 
                                                                         TUIEventType in_eventType) {
     return ndk::ScopedAStatus::ok();
 }
+ndk::ScopedAStatus DisplayConfigAidlCallbackHandler::notifyContentFps(const std::string& name, int fps) {
+    return ndk::ScopedAStatus::ok();
+}
 
 } // namespace android::surfaceflingerextension
