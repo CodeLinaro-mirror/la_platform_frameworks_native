@@ -20,6 +20,7 @@
 #include <memory>
 #include <variant>
 
+#include <binder/Binder.h>
 #include <android/gui/EarlyWakeupInfo.h>
 #include <ftl/fake_guard.h>
 #include <ftl/match.h>
@@ -198,7 +199,6 @@ public:
     void setupScheduler(std::unique_ptr<scheduler::VsyncController> vsyncController,
                         std::shared_ptr<scheduler::VSyncTracker> vsyncTracker,
                         std::unique_ptr<EventThread> appEventThread,
-                        std::unique_ptr<EventThread> sfEventThread,
                         DisplayModesVariant modesVariant,
                         SchedulerCallbackImpl callbackImpl = SchedulerCallbackImpl::kNoOp,
                         bool useNiceMock = false) {
@@ -236,8 +236,7 @@ public:
 
         mScheduler->initVsync(*mTokenManager, 0ms);
 
-        mScheduler->setEventThread(scheduler::Cycle::Render, std::move(appEventThread));
-        mScheduler->setEventThread(scheduler::Cycle::LastComposite, std::move(sfEventThread));
+        mScheduler->setEventThread(std::move(appEventThread));
 
         resetScheduler(mScheduler);
     }
@@ -247,7 +246,6 @@ public:
         using testing::Return;
 
         auto eventThread = makeMock<mock::EventThread>(options.useNiceMock);
-        auto sfEventThread = makeMock<mock::EventThread>(options.useNiceMock);
         auto vsyncController = makeMock<mock::VsyncController>(options.useNiceMock);
         auto vsyncTracker = makeSharedMock<mock::VSyncTracker>(options.useNiceMock);
 
@@ -259,8 +257,8 @@ public:
                         Return(Period::fromNs(FakeHwcDisplayInjector::DEFAULT_VSYNC_PERIOD)));
         EXPECT_CALL(*vsyncTracker, nextAnticipatedVSyncTimeFrom(_, _)).WillRepeatedly(Return(0));
         setupScheduler(std::move(vsyncController), std::move(vsyncTracker), std::move(eventThread),
-                       std::move(sfEventThread), DefaultDisplayMode{options.displayId},
-                       SchedulerCallbackImpl::kNoOp, options.useNiceMock);
+                       DefaultDisplayMode{options.displayId}, SchedulerCallbackImpl::kNoOp,
+                       options.useNiceMock);
     }
 
     void resetScheduler(scheduler::Scheduler* scheduler) { mFlinger->mScheduler.reset(scheduler); }
@@ -359,6 +357,11 @@ public:
     void commitAndComposite() {
         constexpr bool kComposite = true;
         commit(kComposite);
+    }
+
+    auto applyOptimizationPolicy(const char* where) {
+        ftl::FakeGuard guard(kMainThreadContext);
+        return mFlinger->applyOptimizationPolicy(where);
     }
 
     auto createVirtualDisplay(const std::string& displayName, bool isSecure,
@@ -526,7 +529,8 @@ public:
     }
 
     auto setDesiredDisplayModeSpecs(const gui::DisplayModeSpecs& specs) {
-        return mFlinger->setDesiredDisplayModeSpecs({specs});
+        sp<IBinder> applyToken = sp<BBinder>::make();
+        return mFlinger->setDesiredDisplayModeSpecs(applyToken, {specs});
     }
 
     void onNewFrontInternalDisplay(const DisplayDevice* oldFrontInternalDisplayPtr,
@@ -663,9 +667,6 @@ public:
 
     const auto& hwcPhysicalDisplayIdMap() const { return getHwComposer().mPhysicalDisplayIdMap; }
     const auto& hwcDisplayData() const { return getHwComposer().mDisplayData; }
-
-    using BootStage = SurfaceFlinger::BootStage;
-    auto& mutableBootStage() { return mFlinger->mBootStage; }
 
     auto& mutableSupportsWideColor() { return mFlinger->mSupportsWideColor; }
 

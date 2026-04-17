@@ -142,4 +142,30 @@ flag {
   metadata {
       purpose: PURPOSE_BUGFIX
   }
-} # allocate_buffer_priority_inheritance
+}
+
+flag {
+  name: "composition_shaders"
+  namespace: "core_graphics"
+  description: "Enable composition shaders"
+  bug: "321775340"
+  metadata {
+      purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "wb_aaos"
+  namespace: "core_graphics"
+  description: "Remove usage of IGBPs in Android Automotive OS."
+  bug: "340933948"
+  is_fixed_read_only: true
+} # wb_aaos
+
+flag {
+  name: "wb_biometrics"
+  namespace: "biometrics_framework"
+  description: "Remove usage of IGBPs in Biometrics."
+  bug: "340933948"
+  is_fixed_read_only: true
+} # wb_biometrics

@@ -98,6 +98,7 @@
 #include "Scheduler/ISchedulerCallback.h"
 #include "Scheduler/RefreshRateSelector.h"
 #include "Scheduler/Scheduler.h"
+#include "ShaderRegistry.h"
 #include "SurfaceFlingerFactory.h"
 #include "ThreadContext.h"
 #include "Tracing/LayerTracing.h"
@@ -537,11 +538,11 @@ private:
 
     sp<IBinder> getPhysicalDisplayToken(PhysicalDisplayId displayId) const;
     status_t setTransactionState(TransactionState&& state, const sp<IBinder>& applyToken) override;
+    status_t registerGraphicBuffers(const gui::GraphicBuffersRegisterInfo& info) override;
+    status_t unregisterGraphicBuffers(const gui::GraphicBuffersUnregisterInfo& info) override;
     void bootFinished();
     status_t getSupportedFrameTimestamps(std::vector<FrameEvent>* outSupported) const;
     sp<IDisplayEventConnection> createDisplayEventConnection(
-            gui::ISurfaceComposer::VsyncSource vsyncSource =
-                    gui::ISurfaceComposer::VsyncSource::eVsyncSourceApp,
             EventRegistrationFlags eventRegistration = {},
             const sp<IBinder>& layerHandle = nullptr);
 
@@ -603,7 +604,8 @@ private:
     status_t removeFpsListener(const sp<gui::IFpsListener>& listener);
     status_t addTunnelModeEnabledListener(const sp<gui::ITunnelModeEnabledListener>& listener);
     status_t removeTunnelModeEnabledListener(const sp<gui::ITunnelModeEnabledListener>& listener);
-    status_t setDesiredDisplayModeSpecs(const std::vector<gui::DisplayModeSpecs>&);
+    status_t setDesiredDisplayModeSpecs(const sp<IBinder>& applyToken,
+                                        const std::vector<gui::DisplayModeSpecs>&);
     status_t getDesiredDisplayModeSpecs(const sp<IBinder>& displayToken, gui::DisplayModeSpecs*);
     status_t getDisplayBrightnessSupport(const sp<IBinder>& displayToken, bool* outSupport) const;
     status_t setDisplayBrightness(const sp<IBinder>& displayToken,
@@ -651,10 +653,20 @@ private:
 
     void removeActivePictureListener(const sp<gui::IActivePictureListener>& listener);
 
+    bool registerShader(const sp<IBinder>& shaderToken, const std::string& uniqueShaderName,
+                        const std::string& shaderString);
+    void unregisterShader(const sp<IBinder>& shaderToken);
+
     // IBinder::DeathRecipient overrides:
     void binderDied(const wp<IBinder>& who) override;
 
     // HWC2::ComposerCallback overrides:
+    //
+    // Callbacks that access mScheduler must check for nullptr under mSchedulerLock, because they
+    // could be invoked before initScheduler.
+    //
+    // TODO: b/241285191 - Reorder Scheduler initialization before HWComposer::setCallback.
+    //
     void onComposerHalVsync(hal::HWDisplayId, nsecs_t timestamp,
                             std::optional<hal::VsyncPeriodNanos>) override;
     void onComposerHalHotplugEvent(hal::HWDisplayId, DisplayHotplugEvent) override;
@@ -673,6 +685,8 @@ private:
     CompositeResultsPerDisplay composite(PhysicalDisplayId pacesetterId,
                                          const scheduler::FrameTargeters&) override
             REQUIRES(kMainThreadContext);
+
+    void traceCompositionSummary(const std::vector<std::pair<Layer*, LayerFE*>>& layers);
 
     void sample() override;
 
@@ -1514,6 +1528,11 @@ private:
     display::DisplayModeController mDisplayModeController;
     std::mutex mModeTransitionMutex;
 
+    bool shouldSyncResolutionSwitch() const {
+        return FlagManager::getInstance().synced_resolution_switch() &&
+                mBootStage == BootStage::FINISHED;
+    }
+
     struct {
         std::unique_ptr<DisplayIdGenerator<GpuVirtualDisplayId>> gpu =
                 std::make_unique<DisplayIdGenerator<GpuVirtualDisplayId>>();
@@ -1589,6 +1608,9 @@ private:
     const std::string mHwcServiceName;
 
     std::unique_ptr<scheduler::Scheduler> mScheduler;
+
+    // Used during boot. See HWC2::ComposerCallback overrides.
+    std::mutex mSchedulerLock;
 
     scheduler::PresentLatencyTracker mPresentLatencyTracker GUARDED_BY(kMainThreadContext);
 
@@ -1694,6 +1716,8 @@ private:
     // used to resolve resources during layer snapshotting.
     sp<RenderResourceCache> mIpcCache = sp<RenderResourceCache>::make();
 
+    sp<ShaderRegistry> mShaderRegistry = sp<ShaderRegistry>::make();
+
     // NotifyExpectedPresentHint
     enum class NotifyExpectedPresentHintStatus {
         // Represents that framework can start sending hint if required.
@@ -1757,8 +1781,7 @@ public:
 
     binder::Status bootFinished() override;
     binder::Status createDisplayEventConnection(
-            VsyncSource vsyncSource, EventRegistration eventRegistration,
-            const sp<IBinder>& layerHandle,
+            EventRegistration eventRegistration, const sp<IBinder>& layerHandle,
             sp<gui::IDisplayEventConnection>* outConnection) override;
     binder::Status createConnection(sp<gui::ISurfaceComposerClient>* outClient) override;
     binder::Status createVirtualDisplay(
@@ -1843,7 +1866,9 @@ public:
             const sp<gui::ITunnelModeEnabledListener>& listener) override;
     binder::Status removeTunnelModeEnabledListener(
             const sp<gui::ITunnelModeEnabledListener>& listener) override;
-    binder::Status setDesiredDisplayModeSpecs(const std::vector<gui::DisplayModeSpecs>&) override;
+    binder::Status setDesiredDisplayModeSpecs(
+            const sp<IBinder>& applyToken,
+            const std::vector<gui::DisplayModeSpecs>&) override;
     binder::Status getDesiredDisplayModeSpecs(const sp<IBinder>& displayToken,
                                               gui::DisplayModeSpecs* outSpecs) override;
     binder::Status getDisplayBrightnessSupport(const sp<IBinder>& displayToken,
@@ -1892,8 +1917,10 @@ public:
     binder::Status removeActivePictureListener(const sp<gui::IActivePictureListener>& listener);
     binder::Status forcePacesetter(int64_t displayId) override;
     binder::Status resetForcedPacesetter() override;
-    binder::Status registerGraphicBuffers(const gui::GraphicBuffersRegisterInfo& info) override;
-    binder::Status unregisterGraphicBuffers(const gui::GraphicBuffersUnregisterInfo& info) override;
+    binder::Status registerShader(const sp<IBinder>& shaderToken,
+                                  const std::string& uniqueShaderName,
+                                  const std::string& shaderString) override;
+    binder::Status unregisterShader(const sp<IBinder>& shader) override;
 
 private:
     static const constexpr bool kUsePermissionCache = true;

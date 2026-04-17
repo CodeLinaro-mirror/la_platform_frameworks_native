@@ -96,6 +96,19 @@ BufferQueueProducer::BufferQueueProducer(const sp<BufferQueueCore>& core,
 
 BufferQueueProducer::~BufferQueueProducer() {}
 
+status_t BufferQueueProducer::getConfigForSurface(SurfaceConfig* outConfig) {
+    ATRACE_CALL();
+    if (outConfig == nullptr) {
+        return BAD_VALUE;
+    }
+
+    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    outConfig->consumerName = mCore->mConsumerName;
+    outConfig->slotCount = mSlots.size();
+    outConfig->isSlotExpansionAllowed = mCore->mAllowExtendedSlotCount;
+    return NO_ERROR;
+}
+
 status_t BufferQueueProducer::requestBuffer(int slot, sp<GraphicBuffer>* buf) {
     ATRACE_CALL();
     BQ_LOGV("requestBuffer: slot %d", slot);
@@ -481,6 +494,7 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
     bool attachedByConsumer = false;
 
     sp<IConsumerListener> listener;
+    bool wasBufferReleased = false;
     bool callOnFrameDequeued = false;
     uint64_t bufferId = 0; // Only used if callOnFrameDequeued == true
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
@@ -591,6 +605,9 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
                                           buffer->getLayerCount(), buffer->getUsage());
                 }
             }
+
+            wasBufferReleased = mSlots[found].mGraphicBuffer != nullptr;
+
             mSlots[found].mAcquireCalled = false;
             mSlots[found].mGraphicBuffer = nullptr;
             mSlots[found].mRequestBufferCalled = false;
@@ -653,6 +670,9 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
     } // Autolock scope
 
     if (returnFlags & BUFFER_NEEDS_REALLOCATION) {
+        if (listener != nullptr && wasBufferReleased) {
+            listener->onBuffersReleased();
+        }
         BQ_LOGV("dequeueBuffer: allocating a new buffer for slot %d", *outSlot);
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)

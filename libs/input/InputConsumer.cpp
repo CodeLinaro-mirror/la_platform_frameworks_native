@@ -36,6 +36,7 @@
 #include <cutils/properties.h>
 #include <ftl/enum.h>
 #include <log/log.h>
+#include <statslog_input.h>
 #include <utils/Trace.h>
 
 #include <input/InputConsumer.h>
@@ -56,12 +57,7 @@ namespace {
 const bool DEBUG_TRANSPORT_CONSUMER =
         __android_log_is_loggable(ANDROID_LOG_DEBUG, LOG_TAG "Consumer", ANDROID_LOG_INFO);
 
-const bool IS_DEBUGGABLE_BUILD =
-#if defined(__ANDROID__)
-        android::base::GetBoolProperty("ro.debuggable", false);
-#else
-        true;
-#endif
+const bool IS_DEBUGGABLE_BUILD = android::base::GetBoolProperty("ro.debuggable", false);
 
 /**
  * Log debug messages about touch event resampling.
@@ -311,12 +307,15 @@ InputConsumer::ConsumeResult InputConsumer::consume(InputEventFactoryInterface* 
                         for (size_t i = 0; i < count; i++) {
                             const InputMessage& msg = batch.samples[i];
                             status_t status = sendFinishedSignal(msg.header.seq, false);
-                            if (input_flags::fix_input_anr_by_send_message_exception()) {
-                                if (status != OK) {
-                                    // Failed to finish the input message, so adding to
-                                    // unfinishedInputMessages vector to be retried by the caller.
-                                    unfinishedInputMessages.push_back(msg);
-                                }
+                            if (status != OK) {
+                                // Failed to finish the input message, so adding to
+                                // unfinishedInputMessages vector to be retried by the caller.
+                                unfinishedInputMessages.push_back(msg);
+                                android::input::
+                                        stats_write(android::input::
+                                                            INPUT_UNFINISHED_MOTION_EVENT_REPORTED,
+                                                    mMsg.body.motion.source,
+                                                    mMsg.body.motion.action, status);
                             }
                         }
                         batch.samples.erase(batch.samples.begin(), batch.samples.begin() + count);

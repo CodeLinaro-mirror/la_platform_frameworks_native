@@ -451,7 +451,7 @@ ftl::Future<std::monostate> Output::present(
         const compositionengine::CompositionRefreshArgs& refreshArgs) {
     std::optional<panopticon::ExclusiveToken> exclusive;
     if (auto displayId = getDisplayId(); displayId) {
-        *exclusive = panopticon::exclusive(std::to_string(displayId->value));
+        exclusive.emplace(panopticon::exclusive(std::to_string(displayId->value)));
     }
 
     if (CC_UNLIKELY(SFTRACE_ENABLED())) {
@@ -1022,7 +1022,8 @@ compositionengine::OutputLayer* Output::findLayerRequestingBackgroundComposition
         if (compState->isOpaque) {
             continue;
         }
-        if (compState->backgroundBlurRadius > 0 || compState->blurRegions.size() > 0) {
+        if (compState->backgroundBlurRadius > 0 || compState->blurRegions.size() > 0 ||
+            compState->isTextureSamplingBehind) {
             layerRequestingBgComposition = layer;
         }
     }
@@ -1619,6 +1620,8 @@ std::vector<LayerFE::LayerSettings> Output::generateClientCompositionRequests(
 
                 if (layerFEState->luts) {
                     luts = layerFEState->luts;
+                } else if (layerState.generatedLuts) {
+                    luts = layerState.generatedLuts;
                 } else {
                     bool hasSmpte2094_50 = false;
 

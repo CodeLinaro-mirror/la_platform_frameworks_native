@@ -60,11 +60,6 @@ import android.gui.WindowInfosListenerInfo;
 /** @hide */
 interface ISurfaceComposer {
 
-    enum VsyncSource {
-        eVsyncSourceApp = 0,
-        eVsyncSourceSurfaceFlinger = 1
-    }
-
     enum EventRegistration {
         modeChanged = 1 << 0,
         frameRateOverride = 1 << 1,
@@ -91,7 +86,7 @@ interface ISurfaceComposer {
      *     surface creation, see ISurfaceComposerClient::createSurface. Set to null if no layer
      *     association should be made.
      */
-    @nullable IDisplayEventConnection createDisplayEventConnection(VsyncSource vsyncSource,
+    @nullable IDisplayEventConnection createDisplayEventConnection(
             EventRegistration eventRegistration, @nullable IBinder layerHandle);
 
     /**
@@ -425,11 +420,19 @@ interface ISurfaceComposer {
     void removeTunnelModeEnabledListener(ITunnelModeEnabledListener listener);
 
     /**
-     * Sets the mode specifications for multiple displays, to be applied atomically.
+     * Specifies the desired display mode(s) that should be applied atomically.
+     * To change modes, the client must first request the `DisplayModeSpecs#defaultMode`
+     * for the new modes, then commit a display transaction with the same `applyToken`. The
+     * `DisplayModeSpecs` and transaction will then be applied atomically. To atomically change
+     * modes for multiple displays, the client must pass multiple `DesiredDisplayModeSpecs` and
+     * pass the same `applyToken` in the subsequent display transaction that commits all displays.
      *
-     * @see DisplayModeSpecs.aidl for details.
+     * applyToken
+     *     The mode apply token with which the specs should apply.
+     * desiredDisplayModeSpecs
+     *     The new desired display mode specs.
      */
-    void setDesiredDisplayModeSpecs(in DisplayModeSpecs[] specs);
+    void setDesiredDisplayModeSpecs(IBinder applyToken, in DisplayModeSpecs[] specs);
 
     DisplayModeSpecs getDesiredDisplayModeSpecs(IBinder displayToken);
 
@@ -479,6 +482,17 @@ interface ISurfaceComposer {
      *
      */
     void removeHdrLayerInfoListener(IBinder displayToken, IHdrLayerInfoListener listener);
+
+    /**
+     * Associates the given IBinder token with the AGSL shaderString. After registration the
+     * IBinder token can be used to apply shader effects to layers.
+     */
+    void registerShader(IBinder token, @utf8InCpp String uniqueShaderName, @utf8InCpp String shaderString);
+
+    /**
+     * Removes the association between the given IBinder token and the AGSL shaderString.
+     */
+    void unregisterShader(IBinder token);
 
     /**
      * Sends a power boost to the composer. This function is asynchronous.
@@ -669,20 +683,4 @@ interface ISurfaceComposer {
      * Requires root
      */
      void resetForcedPacesetter();
-
-    /**
-     * Registers a list of graphic buffers with SurfaceFlinger.
-     * This is used to notify SurfaceFlinger about buffers that will be used
-     * in the future, so that it can prepare them for use by out-of-process
-     * rendering.
-     */
-    oneway void registerGraphicBuffers(in GraphicBuffersRegisterInfo info);
-
-    /**
-     * Unregisters a list of graphic buffers from SurfaceFlinger.
-     * This is used to notify SurfaceFlinger that the buffers are no longer
-     * needed, so that it can release any resources associated with them for
-     * out-of-process rendering.
-     */
-    oneway void unregisterGraphicBuffers(in GraphicBuffersUnregisterInfo info);
 }

@@ -73,7 +73,7 @@ public:
     virtual bool needsReleaseNotify() = 0;
 
     virtual void onBuffersDiscarded(const std::vector<sp<GraphicBuffer>>& buffers) = 0;
-    virtual void onBufferDetached(int slot) = 0;
+    virtual void onBufferDetached(uint64_t bufferId) = 0;
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_CONSUMER_ATTACH_CALLBACK)
     virtual void onBufferAttached() {}
     virtual bool needsAttachNotify() { return false; }
@@ -94,7 +94,7 @@ public:
     virtual void onBufferReleased() override {}
     virtual bool needsReleaseNotify() { return false; }
     virtual void onBuffersDiscarded(const std::vector<sp<GraphicBuffer>>& /*buffers*/) override {}
-    virtual void onBufferDetached(int /*slot*/) override {}
+    virtual void onBufferDetached(uint64_t /*bufferId*/) override {}
 };
 
 struct SurfaceQueueBufferInput {
@@ -205,6 +205,15 @@ public:
     static sp<Surface> fromHidl(
             const sp<hardware::graphics::bufferqueue::V2_0::IGraphicBufferProducer>& token);
 #endif
+
+    /**
+     * This function should be avoided at all costs.
+     *
+     * It creates a new Surface that shares the same underlying IGraphicBufferProducer
+     * as this Surface. This can lead to unexpected behavior, as both surfaces will
+     * be connected to the same producer.
+     */
+    sp<Surface> createEvilTwin();
 
     /*
      * Null-safe check of whether two surfaces represent the same underlying object. Roughly
@@ -493,6 +502,8 @@ public:
             IGraphicBufferProducer::DisconnectMode mode =
                     IGraphicBufferProducer::DisconnectMode::Api);
 
+    virtual void setProducerControlledByApp(bool controlledByApp);
+
     virtual int setMaxDequeuedBufferCount(int maxDequeuedBuffers);
     virtual int setAsyncMode(bool async);
     virtual int setSharedBufferMode(bool sharedBufferMode);
@@ -590,8 +601,8 @@ protected:
             return mSurfaceListener->needsReleaseNotify();
         }
 
-        virtual void onBufferDetached(int slot) override {
-            mSurfaceListener->onBufferDetached(slot);
+        virtual void onBufferDetached(int /*slot*/, uint64_t bufferId) override {
+            mSurfaceListener->onBufferDetached(bufferId);
         }
 
         virtual void onBuffersDiscarded(const std::vector<int32_t>& slots) override;

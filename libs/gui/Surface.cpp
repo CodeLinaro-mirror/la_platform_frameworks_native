@@ -175,7 +175,22 @@ Surface::Surface(const sp<IGraphicBufferProducer>& bufferProducer, bool controll
     mProducerControlledByApp = controlledByApp;
     mSwapIntervalZero = false;
     mMaxBufferCount = NUM_BUFFER_SLOTS;
+    mIsSlotExpansionAllowed = false;
     mSurfaceControlHandle = surfaceControlHandle;
+
+    IGraphicBufferProducer::SurfaceConfig config;
+    status_t status = mGraphicBufferProducer->getConfigForSurface(&config);
+    if (status == OK) {
+        ALOGI("Creating surface for consumer %s with slotExpansion=%d for %zu slots",
+              config.consumerName.c_str(), config.isSlotExpansionAllowed, config.slotCount);
+        mDebugName = config.consumerName;
+        mIsSlotExpansionAllowed = config.isSlotExpansionAllowed;
+        if (config.slotCount > mSlots.size()) {
+            mSlots.resize(config.slotCount);
+        }
+    } else {
+        ALOGE("Failed to get surface config from BQ. Error: %d", status);
+    }
 }
 
 Surface::~Surface() {
@@ -209,6 +224,18 @@ sp<Surface> Surface::fromHidl(
     return sp<Surface>::make(bufferProducer);
 }
 #endif
+
+sp<Surface> Surface::createEvilTwin() {
+    ATRACE_CALL();
+    std::scoped_lock _l(mMutex);
+
+    SURF_LOGE("Surface::createEvilTwin created. Previous surface %s connected. This operation is "
+              "unsupported and the behavior is undefined.",
+              mConnectedToCpu ? "was" : "was not");
+
+    return sp<Surface>::make(mGraphicBufferProducer, mProducerControlledByApp,
+                             mSurfaceControlHandle);
+}
 
 bool Surface::areSurfacesEquivalent(const sp<Surface>& a, const sp<Surface>& b) {
     if (a == b) {
@@ -2263,6 +2290,7 @@ int Surface::dispatchSetFrameTimelineInfo(va_list args) {
     ftlInfo.skippedFrameStartTimeNanos = nativeWindowFtlInfo.skippedFrameStartTimeNanos;
     ftlInfo.vsyncResyncedJitterNanos = nativeWindowFtlInfo.vsyncResyncedJitterNanos;
     ftlInfo.dequeueBufferDurationNanos = nativeWindowFtlInfo.dequeueBufferDurationNanos;
+    ftlInfo.animationTime = nativeWindowFtlInfo.animationTime;
 
     return setFrameTimelineInfo(nativeWindowFtlInfo.frameNumber, ftlInfo);
 #endif
@@ -2410,6 +2438,11 @@ int Surface::disconnect(int api, IGraphicBufferProducer::DisconnectMode mode) {
 #endif // !defined(NO_BINDER)
 
     return err;
+}
+
+void Surface::setProducerControlledByApp(bool controlledByApp) {
+    Mutex::Autolock lock(mMutex);
+    mProducerControlledByApp = controlledByApp;
 }
 
 int Surface::detachNextBuffer(sp<GraphicBuffer>* outBuffer,
@@ -2585,6 +2618,9 @@ int Surface::setMaxDequeuedBufferCount(int maxDequeuedBuffers) {
     Mutex::Autolock lock(mMutex);
 
     if (maxDequeuedBuffers > BufferQueueDefs::NUM_BUFFER_SLOTS && !mIsSlotExpansionAllowed) {
+        SURF_LOGE("setMaxDequeuedBufferCount: maxDequeuedBuffers (%d) > NUM_BUFFER_SLOTS (%d) and "
+                  "slot expansion is not allowed",
+                  maxDequeuedBuffers, BufferQueueDefs::NUM_BUFFER_SLOTS);
         return BAD_VALUE;
     }
 

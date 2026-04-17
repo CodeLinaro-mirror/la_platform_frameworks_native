@@ -77,7 +77,8 @@ protected:
     class MockEventThreadConnection : public android::EventThreadConnection {
     public:
         explicit MockEventThreadConnection(EventThread* eventThread)
-              : EventThreadConnection(eventThread, /*callingUid*/ static_cast<uid_t>(0)) {}
+              : EventThreadConnection(eventThread, /*callingUid*/ static_cast<uid_t>(0),
+                                      /*callingPid*/ static_cast<pid_t>(0)) {}
         ~MockEventThreadConnection() = default;
 
         MOCK_METHOD1(stealReceiveChannel, binder::Status(gui::BitTube* outChannel));
@@ -139,8 +140,7 @@ SchedulerTest::SchedulerTest() {
     EXPECT_CALL(*mEventThread, createEventConnection(_))
             .WillRepeatedly(Return(mEventThreadConnection));
 
-    mScheduler->setEventThread(Cycle::Render, std::move(eventThread));
-    mScheduler->setEventThread(Cycle::LastComposite, std::make_unique<MockEventThread>());
+    mScheduler->setEventThread(std::move(eventThread));
 
     mFlinger.resetScheduler(mScheduler);
 }
@@ -1592,7 +1592,7 @@ TEST_F(AttachedChoreographerTest, registerSingle) {
 
     EXPECT_CALL(mSchedulerCallback, onChoreographerAttached);
     const sp<IDisplayEventConnection> connection =
-            mScheduler->createDisplayEventConnection(Cycle::Render, {}, layer->getHandle());
+            mScheduler->createDisplayEventConnection({}, layer->getHandle());
 
     EXPECT_EQ(1u, mScheduler->mutableAttachedChoreographers().size());
     ASSERT_EQ(1u, mScheduler->mutableAttachedChoreographers().count(layer->getSequence()));
@@ -1621,9 +1621,9 @@ TEST_F(AttachedChoreographerTest, registerMultipleOnSameLayer) {
             .WillOnce(Return(mockConnection2));
 
     const sp<IDisplayEventConnection> connection1 =
-            mScheduler->createDisplayEventConnection(Cycle::Render, {}, handle);
+            mScheduler->createDisplayEventConnection({}, handle);
     const sp<IDisplayEventConnection> connection2 =
-            mScheduler->createDisplayEventConnection(Cycle::Render, {}, handle);
+            mScheduler->createDisplayEventConnection({}, handle);
 
     EXPECT_EQ(1u, mScheduler->mutableAttachedChoreographers().size());
     ASSERT_EQ(1u, mScheduler->mutableAttachedChoreographers().count(layer->getSequence()));
@@ -1641,9 +1641,9 @@ TEST_F(AttachedChoreographerTest, registerMultipleOnDifferentLayers) {
 
     EXPECT_CALL(mSchedulerCallback, onChoreographerAttached).Times(2);
     const sp<IDisplayEventConnection> connection1 =
-            mScheduler->createDisplayEventConnection(Cycle::Render, {}, layer1->getHandle());
+            mScheduler->createDisplayEventConnection({}, layer1->getHandle());
     const sp<IDisplayEventConnection> connection2 =
-            mScheduler->createDisplayEventConnection(Cycle::Render, {}, layer2->getHandle());
+            mScheduler->createDisplayEventConnection({}, layer2->getHandle());
 
     EXPECT_EQ(2u, mScheduler->mutableAttachedChoreographers().size());
 
@@ -1670,7 +1670,7 @@ TEST_F(AttachedChoreographerTest, removedWhenConnectionIsGone) {
     EXPECT_CALL(mSchedulerCallback, onChoreographerAttached);
 
     sp<IDisplayEventConnection> connection =
-            mScheduler->createDisplayEventConnection(Cycle::Render, {}, layer->getHandle());
+            mScheduler->createDisplayEventConnection({}, layer->getHandle());
 
     ASSERT_EQ(1u, mScheduler->mutableAttachedChoreographers().count(layer->getSequence()));
     EXPECT_EQ(1u,
@@ -1700,7 +1700,7 @@ TEST_F(AttachedChoreographerTest, removedWhenLayerIsGone) {
 
     EXPECT_CALL(mSchedulerCallback, onChoreographerAttached);
     const sp<IDisplayEventConnection> connection =
-            mScheduler->createDisplayEventConnection(Cycle::Render, {}, layer->getHandle());
+            mScheduler->createDisplayEventConnection({}, layer->getHandle());
 
     layer.clear();
     EXPECT_TRUE(mScheduler->mutableAttachedChoreographers().empty());
@@ -1713,7 +1713,7 @@ void AttachedChoreographerTest::frameRateTestScenario(Fps layerFps, int8_t frame
 
     EXPECT_CALL(mSchedulerCallback, onChoreographerAttached);
     sp<IDisplayEventConnection> connection =
-            mScheduler->createDisplayEventConnection(Cycle::Render, {}, layer->getHandle());
+            mScheduler->createDisplayEventConnection({}, layer->getHandle());
 
     RequestedLayerState layerState(LayerCreationArgs(layer->getSequence()));
     LayerHierarchy hierarchy(&layerState);
@@ -1773,7 +1773,7 @@ TEST_F(AttachedChoreographerTest, setsFrameRateParent) {
 
     EXPECT_CALL(mSchedulerCallback, onChoreographerAttached);
     sp<IDisplayEventConnection> connection =
-            mScheduler->createDisplayEventConnection(Cycle::Render, {}, parent->getHandle());
+            mScheduler->createDisplayEventConnection({}, parent->getHandle());
 
     RequestedLayerState parentState(LayerCreationArgs(parent->getSequence()));
     LayerHierarchy parentHierarchy(&parentState);
@@ -1800,7 +1800,7 @@ TEST_F(AttachedChoreographerTest, setsFrameRateParent2Children) {
 
     EXPECT_CALL(mSchedulerCallback, onChoreographerAttached);
     sp<IDisplayEventConnection> connection =
-            mScheduler->createDisplayEventConnection(Cycle::Render, {}, parent->getHandle());
+            mScheduler->createDisplayEventConnection({}, parent->getHandle());
 
     RequestedLayerState parentState(LayerCreationArgs(parent->getSequence()));
     LayerHierarchy parentHierarchy(&parentState);
@@ -1835,7 +1835,7 @@ TEST_F(AttachedChoreographerTest, setsFrameRateParentConflictingChildren) {
 
     EXPECT_CALL(mSchedulerCallback, onChoreographerAttached);
     sp<IDisplayEventConnection> connection =
-            mScheduler->createDisplayEventConnection(Cycle::Render, {}, parent->getHandle());
+            mScheduler->createDisplayEventConnection({}, parent->getHandle());
 
     RequestedLayerState parentState(LayerCreationArgs(parent->getSequence()));
     LayerHierarchy parentHierarchy(&parentState);
@@ -1869,7 +1869,7 @@ TEST_F(AttachedChoreographerTest, setsFrameRateChild) {
 
     EXPECT_CALL(mSchedulerCallback, onChoreographerAttached);
     sp<IDisplayEventConnection> connection =
-            mScheduler->createDisplayEventConnection(Cycle::Render, {}, layer->getHandle());
+            mScheduler->createDisplayEventConnection({}, layer->getHandle());
 
     RequestedLayerState parentState(LayerCreationArgs(parent->getSequence()));
     LayerHierarchy parentHierarchy(&parentState);
@@ -1895,7 +1895,7 @@ TEST_F(AttachedChoreographerTest, setsFrameRateChildNotOverriddenByParent) {
 
     EXPECT_CALL(mSchedulerCallback, onChoreographerAttached);
     sp<IDisplayEventConnection> connection =
-            mScheduler->createDisplayEventConnection(Cycle::Render, {}, layer->getHandle());
+            mScheduler->createDisplayEventConnection({}, layer->getHandle());
 
     RequestedLayerState parentState(LayerCreationArgs(parent->getSequence()));
     LayerHierarchy parentHierarchy(&parentState);

@@ -31,6 +31,7 @@
 #include <android-base/scopeguard.h>
 #include <android-base/stringprintf.h>
 #include <cutils/properties.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <filesystem>
 #include <fstream>
@@ -98,6 +99,7 @@ static constexpr const int FLAG_CLEAR_CODE_CACHE_ONLY =
         InstalldNativeService::FLAG_CLEAR_CODE_CACHE_ONLY;
 static constexpr const uid_t kTestPccAppId = kTestAppId + 20000;
 const uid_t kTestPccAppUid = multiuser_get_uid(kTestUserId, kTestPccAppId);
+const gid_t kTestPccCacheGid = multiuser_get_cache_gid(kTestUserId, kTestPccAppId);
 
 const gid_t kTestAppUid = multiuser_get_uid(kTestUserId, kTestAppId);
 static constexpr const int32_t kSecondaryUserId = 10;
@@ -212,6 +214,33 @@ static bool exists_renamed_deleted_dir(const std::string& rootDirectory) {
 static void unlink_path(const std::string& path) {
     if (unlink(path.c_str()) < 0) {
         PLOG(DEBUG) << "Failed to unlink " + path;
+    }
+}
+
+static void verifyPccStatsIncluded(std::vector<int64_t> sizesBeforePccData,
+                                   std::vector<int64_t> sizesAfterPccData,
+                                   int64_t dataBytesAfterPccData, int64_t cacheBytesAfterPccData) {
+    // Verification: Size should increase because PCC data is included
+    // Data size >= App data size + PCC data size
+    EXPECT_GE(sizesAfterPccData[1], dataBytesAfterPccData);
+    // Data size < Data written + buffer (1MB)
+    EXPECT_LE(sizesAfterPccData[1], dataBytesAfterPccData + 1 * 1024 * 1024);
+    // Data size after PCC data written should definitely be > before
+    EXPECT_GT(sizesAfterPccData[1], sizesBeforePccData[1]);
+
+    // Final cache size >= App data cache size + PCC data cache size
+    EXPECT_GE(sizesAfterPccData[2], cacheBytesAfterPccData);
+    // Data size < Data written + buffer (1MB)
+    EXPECT_LE(sizesAfterPccData[2], cacheBytesAfterPccData + 1 * 1024 * 1024);
+    // Cache data size after PCC data written should definitely be > before
+    EXPECT_GT(sizesAfterPccData[2], sizesBeforePccData[2]);
+
+    // Except for app data and cache, other sizes shouldn't be affected
+    for (size_t i = 0; i < sizesBeforePccData.size(); i++) {
+        if (i == 1 || i == 2) {
+            continue;
+        }
+        EXPECT_EQ(sizesBeforePccData[i], sizesAfterPccData[i]);
     }
 }
 
@@ -549,7 +578,7 @@ TEST_F(ServiceTest, GetAppSizeManualForMedia) {
         service->invalidateMounts();
         // call the getAppSize to get the current size of the external storage owning app
         service->getAppSize(std::nullopt, packageNames, 0, InstalldNativeService::FLAG_USE_QUOTA,
-                            externalStorageAppId, ceDataInodes, codePaths, &externalStorageSize);
+                            externalStorageAppId, 0, ceDataInodes, codePaths, &externalStorageSize);
         // add a file with 20MB size to the external storage
         std::string externalFileLocation =
                 StringPrintf("%s/Pictures/%s", getenv("EXTERNAL_STORAGE"), "External.jpg");
@@ -558,7 +587,7 @@ TEST_F(ServiceTest, GetAppSizeManualForMedia) {
         system(externalFileContentCommand.c_str());
         // call the getAppSize again to get the new size of the external storage owning app
         service->getAppSize(std::nullopt, packageNames, 0, InstalldNativeService::FLAG_USE_QUOTA,
-                            externalStorageAppId, ceDataInodes, codePaths,
+                            externalStorageAppId, 0, ceDataInodes, codePaths,
                             &externalStorageSizeAfterAddingExternalFile);
         // check that the size before adding the file and after should be the same, as the app size
         // is not changed.
@@ -581,8 +610,363 @@ TEST_F(ServiceTest, GetAppSizeWrongSizes) {
 
     EXPECT_BINDER_FAIL(service->getAppSize(std::nullopt, packageNames, 0,
                                            InstalldNativeService::FLAG_USE_QUOTA,
-                                           externalStorageAppId, ceDataInodes, codePaths,
+                                           externalStorageAppId, 0, ceDataInodes, codePaths,
                                            &externalStorageSize));
+}
+
+// TODO: b/479055375 - Write tests for PCC storage stats attribution where device supports Project
+//  IDs
+// PCC Storage Attribution Tests
+TEST_F(ServiceTest, GetAppSize_ExcludesPccWhenPccIdZero) {
+    LOG(INFO) << "GetAppSize_ExcludesPccWhenPccIdZero";
+    android::os::CreateAppDataResult result;
+    android::os::CreateAppDataArgs args;
+    args.packageName = "com.foo";
+    args.uuid = testUuid;
+    args.userId = kTestUserId;
+    args.appId = kTestAppId;
+    args.pccId = kTestPccAppId;
+    args.seInfo = "default";
+    args.flags = FLAG_STORAGE_CE | FLAG_STORAGE_DE;
+
+    ASSERT_BINDER_SUCCESS(service->createAppData(args, &result));
+
+    const std::string cePath = get_full_path("user/0/com.foo");
+    const std::string dePath = get_full_path("user_de/0/com.foo");
+    const std::string pccCePath = get_full_path("user/0/com.foo-pcc");
+    const std::string pccDePath = get_full_path("user_de/0/com.foo-pcc");
+
+    // 1. Write initial app data (1MB each to CE, DE, and cache)
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=1M count=1", cePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=1M count=1", dePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/cache/file.txt bs=1M count=1", cePath.c_str())
+                   .c_str());
+
+    std::vector<int64_t> sizes1, sizes2;
+    std::vector<std::string> packageNames = {"com.foo"};
+    std::vector<int64_t> ceDataInodes = {result.ceDataInode};
+    std::vector<std::string> codePaths = {};
+
+    // Get initial size with pccId = 0 (should only count regular app data)
+    ASSERT_BINDER_SUCCESS(service->getAppSize(testUuid, packageNames, kTestUserId, 0, kTestAppId, 0,
+                                              ceDataInodes, codePaths, &sizes1));
+
+    // 2. Write PCC data (2MB each to PCC CE, DE, and cache)
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=2M count=2", pccCePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=2M count=2", pccDePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/cache/file.txt bs=2M count=2", pccCePath.c_str())
+                   .c_str());
+
+    // Get new size with pccId = 0
+    ASSERT_BINDER_SUCCESS(service->getAppSize(testUuid, packageNames, kTestUserId, 0, kTestAppId, 0,
+                                              ceDataInodes, codePaths, &sizes2));
+
+    // Verification: Sizes should be identical because PCC data is excluded when pccId = 0
+    for (int i = 0; i < sizes1.size(); i++) {
+        EXPECT_EQ(sizes1[i], sizes2[i]);
+    }
+
+    // Cleanup
+    system(StringPrintf("rm -f %s/file.txt", cePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", dePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/cache/file.txt", cePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", pccCePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", pccDePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/cache/file.txt", pccCePath.c_str()).c_str());
+}
+
+TEST_F(ServiceTest, GetAppSize_ExcludesPccWhenPccIdZeroUsingQuota) {
+    LOG(INFO) << "GetAppSize_ExcludesPccWhenPccIdZeroUsingQuota";
+    android::os::CreateAppDataResult result;
+    android::os::CreateAppDataArgs args;
+    args.packageName = "com.foo";
+    args.uuid = testUuid;
+    args.userId = kTestUserId;
+    args.appId = kTestAppId;
+    args.pccId = kTestPccAppId;
+    args.seInfo = "default";
+    args.flags = FLAG_STORAGE_CE | FLAG_STORAGE_DE;
+
+    ASSERT_BINDER_SUCCESS(service->createAppData(args, &result));
+
+    const std::string cePath = get_full_path("user/0/com.foo");
+    const std::string dePath = get_full_path("user_de/0/com.foo");
+    const std::string pccCePath = get_full_path("user/0/com.foo-pcc");
+    const std::string pccDePath = get_full_path("user_de/0/com.foo-pcc");
+
+    // 1. Write initial app data (1MB each to CE, DE, and cache)
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=1M count=1", cePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=1M count=1", dePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/cache/file.txt bs=1M count=1", cePath.c_str())
+                   .c_str());
+
+    std::vector<int64_t> sizes1, sizes2;
+    std::vector<std::string> packageNames = {"com.foo"};
+    std::vector<int64_t> ceDataInodes = {result.ceDataInode};
+    std::vector<std::string> codePaths = {};
+
+    // Get initial size with pccId = 0 (should only count regular app data)
+    ASSERT_BINDER_SUCCESS(service->getAppSize(testUuid, packageNames, kTestUserId,
+                                              InstalldNativeService::FLAG_USE_QUOTA, kTestAppId, 0,
+                                              ceDataInodes, codePaths, &sizes1));
+
+    // 2. Write PCC data (2MB each to PCC CE, DE, and cache)
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=2M count=2", pccCePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=2M count=2", pccDePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/cache/file.txt bs=2M count=2", pccCePath.c_str())
+                   .c_str());
+
+    // Get new size with pccId = 0
+    ASSERT_BINDER_SUCCESS(service->getAppSize(testUuid, packageNames, kTestUserId,
+                                              InstalldNativeService::FLAG_USE_QUOTA, kTestAppId, 0,
+                                              ceDataInodes, codePaths, &sizes2));
+
+    // Verification: Sizes should be identical because PCC data is excluded when pccId = 0
+    for (int i = 0; i < sizes1.size(); i++) {
+        EXPECT_EQ(sizes1[i], sizes2[i]);
+    }
+
+    // Cleanup
+    system(StringPrintf("rm -f %s/file.txt", cePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", dePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/cache/file.txt", cePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", pccCePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", pccDePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/cache/file.txt", pccCePath.c_str()).c_str());
+}
+
+TEST_F(ServiceTest, GetAppSize_IncludesPccWhenPccIdNonZero) {
+    LOG(INFO) << "GetAppSize_IncludesPccWhenPccIdNonZero";
+    android::os::CreateAppDataResult result;
+    android::os::CreateAppDataArgs args;
+    args.packageName = "com.foo";
+    args.uuid = testUuid;
+    args.userId = kTestUserId;
+    args.appId = kTestAppId;
+    args.pccId = kTestPccAppId;
+    args.seInfo = "default";
+    args.flags = FLAG_STORAGE_CE | FLAG_STORAGE_DE;
+
+    ASSERT_BINDER_SUCCESS(service->createAppData(args, &result));
+
+    const std::string cePath = get_full_path("user/0/com.foo");
+    const std::string dePath = get_full_path("user_de/0/com.foo");
+    const std::string pccCePath = get_full_path("user/0/com.foo-pcc");
+    const std::string pccDePath = get_full_path("user_de/0/com.foo-pcc");
+
+    // 1. Write initial app data (1MB each to CE, DE, and cache)
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=1M count=1", cePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=1M count=1", dePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/cache/file.txt bs=1M count=1", cePath.c_str())
+                   .c_str());
+
+    std::vector<int64_t> sizes1, sizes2;
+    std::vector<std::string> packageNames = {"com.foo"};
+    std::vector<int64_t> ceDataInodes = {result.ceDataInode};
+    std::vector<std::string> codePaths = {};
+
+    // Get initial size with pccId = kTestPccAppId
+    ASSERT_BINDER_SUCCESS(service->getAppSize(testUuid, packageNames, kTestUserId, 0, kTestAppId,
+                                              kTestPccAppId, ceDataInodes, codePaths, &sizes1));
+
+    // 2. Write app data (2MB each to CE, DE, and cache) to PCC path
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=2M count=1", pccCePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=2M count=1", pccDePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/cache/file.txt bs=2M count=1", pccCePath.c_str())
+                   .c_str());
+
+    // Get new size with pccId = kTestPccAppId
+    ASSERT_BINDER_SUCCESS(service->getAppSize(testUuid, packageNames, kTestUserId, 0, kTestAppId,
+                                              kTestPccAppId, ceDataInodes, codePaths, &sizes2));
+
+    verifyPccStatsIncluded(sizes1, sizes2, 9 * 1024 * 1024, 3 * 1024 * 1024);
+
+    // Cleanup
+    system(StringPrintf("rm -f %s/file.txt", cePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", dePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/cache/file.txt", cePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", pccCePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", pccDePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/cache/file.txt", pccCePath.c_str()).c_str());
+}
+
+TEST_F(ServiceTest, GetAppSize_IncludesPccWhenPccIdNonZeroUsingQuota) {
+    LOG(INFO) << "GetAppSize_IncludesPccWhenPccIdNonZeroUsingQuota";
+    android::os::CreateAppDataResult result;
+    android::os::CreateAppDataArgs args;
+    args.packageName = "com.foo";
+    args.uuid = testUuid;
+    args.userId = kTestUserId;
+    args.appId = kTestAppId;
+    args.pccId = kTestPccAppId;
+    args.seInfo = "default";
+    args.flags = FLAG_STORAGE_CE | FLAG_STORAGE_DE;
+
+    ASSERT_BINDER_SUCCESS(service->createAppData(args, &result));
+
+    const std::string cePath = get_full_path("user/0/com.foo");
+    const std::string dePath = get_full_path("user_de/0/com.foo");
+    const std::string pccCePath = get_full_path("user/0/com.foo-pcc");
+    const std::string pccDePath = get_full_path("user_de/0/com.foo-pcc");
+
+    // 1. Write initial app data (1MB each to CE, DE, and cache)
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=1M count=1", cePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=1M count=1", dePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/cache/file.txt bs=1M count=1", cePath.c_str())
+                   .c_str());
+
+    std::vector<int64_t> sizes1, sizes2;
+    std::vector<std::string> packageNames = {"com.foo"};
+    std::vector<int64_t> ceDataInodes = {result.ceDataInode};
+    std::vector<std::string> codePaths = {};
+
+    // Get initial size with pccId = kTestPccAppId
+    ASSERT_BINDER_SUCCESS(service->getAppSize(testUuid, packageNames, kTestUserId,
+                                              InstalldNativeService::FLAG_USE_QUOTA, kTestAppId,
+                                              kTestPccAppId, ceDataInodes, codePaths, &sizes1));
+
+    // 2. Write app data (1MB each to CE, DE, and cache) to PCC path
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=2M count=1", pccCePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=2M count=1", pccDePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/cache/file.txt bs=2M count=1", pccCePath.c_str())
+                   .c_str());
+
+    // Get new size with pccId = kTestPccAppId
+    ASSERT_BINDER_SUCCESS(service->getAppSize(testUuid, packageNames, kTestUserId,
+                                              InstalldNativeService::FLAG_USE_QUOTA, kTestAppId,
+                                              kTestPccAppId, ceDataInodes, codePaths, &sizes2));
+
+    verifyPccStatsIncluded(sizes1, sizes2, 9 * 1024 * 1024, 3 * 1024 * 1024);
+
+    // Cleanup
+    system(StringPrintf("rm -f %s/file.txt", cePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", dePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/cache/file.txt", cePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", pccCePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", pccDePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/cache/file.txt", pccCePath.c_str()).c_str());
+}
+
+TEST_F(ServiceTest, GetUserSize_IncludesPccWhenPccIdNonZeroNotUsingQuota) {
+    LOG(INFO) << "GetUserSize_IncludesPccWhenPccIdNonZeroNotUsingQuota";
+    android::os::CreateAppDataResult result;
+    android::os::CreateAppDataArgs args;
+    args.packageName = "com.foo";
+    args.uuid = testUuid;
+    args.userId = kTestUserId;
+    args.appId = kTestAppId;
+    args.pccId = kTestPccAppId;
+    args.seInfo = "default";
+    args.flags = FLAG_STORAGE_CE | FLAG_STORAGE_DE;
+
+    ASSERT_BINDER_SUCCESS(service->createAppData(args, &result));
+
+    const std::string cePath = get_full_path("user/0/com.foo");
+    const std::string dePath = get_full_path("user_de/0/com.foo");
+    const std::string pccCePath = get_full_path("user/0/com.foo-pcc");
+    const std::string pccDePath = get_full_path("user_de/0/com.foo-pcc");
+
+    // 1. Write initial app data (1MB each to CE, DE, and cache)
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=1M count=1", cePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=1M count=1", dePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/cache/file.txt bs=1M count=1", cePath.c_str())
+                   .c_str());
+
+    std::vector<int64_t> sizes1, sizes2;
+    std::vector<int32_t> appIds = {kTestAppId};
+    std::vector<int32_t> pccIds = {kTestPccAppId};
+
+    ASSERT_BINDER_SUCCESS(service->getUserSize(testUuid, kTestUserId, 0, appIds, pccIds, &sizes1));
+
+    // 2. Write app data (1MB each to CE, DE, and cache) to PCC path
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=2M count=1", pccCePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=2M count=1", pccDePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/cache/file.txt bs=2M count=1", pccCePath.c_str())
+                   .c_str());
+
+    ASSERT_BINDER_SUCCESS(service->getUserSize(testUuid, kTestUserId, 0, appIds, pccIds, &sizes2));
+
+    verifyPccStatsIncluded(sizes1, sizes2, 9 * 1024 * 1024, 3 * 1024 * 1024);
+
+    // Cleanup
+    system(StringPrintf("rm -f %s/file.txt", cePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", dePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/cache/file.txt", cePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", pccCePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", pccDePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/cache/file.txt", pccCePath.c_str()).c_str());
+}
+
+TEST_F(ServiceTest, GetUserSize_IncludesPccWhenPccIdNonZeroUsingQuota) {
+    LOG(INFO) << "GetUserSize_IncludesPccWhenPccIdNonZeroUsingQuota";
+    android::os::CreateAppDataResult result;
+    android::os::CreateAppDataArgs args;
+    args.packageName = "com.foo";
+    args.uuid = testUuid;
+    args.userId = kTestUserId;
+    args.appId = kTestAppId;
+    args.pccId = kTestPccAppId;
+    args.seInfo = "default";
+    args.flags = FLAG_STORAGE_CE | FLAG_STORAGE_DE;
+
+    ASSERT_BINDER_SUCCESS(service->createAppData(args, &result));
+
+    const std::string cePath = get_full_path("user/0/com.foo");
+    const std::string dePath = get_full_path("user_de/0/com.foo");
+    const std::string pccCePath = get_full_path("user/0/com.foo-pcc");
+    const std::string pccDePath = get_full_path("user_de/0/com.foo-pcc");
+
+    // 1. Write initial app data (1MB each to CE, DE, and cache)
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=1M count=1", cePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=1M count=1", dePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/cache/file.txt bs=1M count=1", cePath.c_str())
+                   .c_str());
+
+    std::vector<int64_t> sizes1, sizes2;
+    std::vector<int32_t> appIds = {kTestAppId};
+    std::vector<int32_t> pccIds = {kTestPccAppId};
+
+    ASSERT_BINDER_SUCCESS(service->getUserSize(testUuid, kTestUserId,
+                                               InstalldNativeService::FLAG_USE_QUOTA, appIds,
+                                               pccIds, &sizes1));
+
+    // 2. Write app data (1MB each to CE, DE, and cache) to PCC path
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=2M count=1", pccCePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/file.txt bs=2M count=1", pccDePath.c_str()).c_str());
+    system(StringPrintf("dd if=/dev/zero of=%s/cache/file.txt bs=2M count=1", pccCePath.c_str())
+                   .c_str());
+
+    ASSERT_BINDER_SUCCESS(service->getUserSize(testUuid, kTestUserId,
+                                               InstalldNativeService::FLAG_USE_QUOTA, appIds,
+                                               pccIds, &sizes2));
+
+    // Verification: Sizes should be identical because PCC data is excluded when pccId is not passed
+    verifyPccStatsIncluded(sizes1, sizes2, 9 * 1024 * 1024, 3 * 1024 * 1024);
+
+    // Cleanup
+    system(StringPrintf("rm -f %s/file.txt", cePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", dePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/cache/file.txt", cePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", pccCePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/file.txt", pccDePath.c_str()).c_str());
+    system(StringPrintf("rm -f %s/cache/file.txt", pccCePath.c_str()).c_str());
+}
+
+TEST_F(ServiceTest, GetUserSize_BinderFailsWhenArgListSizeMismatch) {
+    LOG(INFO) << "GetUserSize_BinderFailsWhenArgListSizeMismatch";
+    std::vector<int64_t> sizes1;
+    std::vector<int32_t> appIds = {kTestAppId};
+    std::vector<int32_t> pccIds = {}; // Empty pccIds
+
+    ASSERT_BINDER_FAIL(service->getUserSize(testUuid, kTestUserId,
+                                            InstalldNativeService::FLAG_USE_QUOTA, appIds, pccIds,
+                                            &sizes1));
+
+    binder::Status expect_status =
+            service->getUserSize(testUuid, kTestUserId, InstalldNativeService::FLAG_USE_QUOTA,
+                                 appIds, pccIds, &sizes1);
+    ASSERT_TRUE(expect_status.exceptionCode() == binder::Status::EX_ILLEGAL_ARGUMENT);
+    ASSERT_TRUE(expect_status.exceptionMessage() == "appIds and pccIds are not of the same length");
 }
 
 class FsverityTest : public ServiceTest {
@@ -1656,6 +2040,9 @@ TEST_F(ServiceTest, CreateAppData_WithPcc) {
     // Verify cache subdirectories were also created
     EXPECT_TRUE(exists(cePath + "/cache"));
     EXPECT_TRUE(exists(pccCePath + "/cache"));
+
+    // Verify cache GID for PCC
+    EXPECT_EQ(kTestPccCacheGid, stat_gid((pccCePath + "/cache").c_str()));
 }
 
 TEST_F(ServiceTest, CreateAppData_WithPcc_InodeCheck) {
@@ -2143,7 +2530,8 @@ TEST_F(ServiceTest, CopyAppDataPath_Fail_Symlink) {
     auto callback = sp<MockAppDataOperationCallback>::make();
 
     ASSERT_TRUE(service->copyAppDataPath(testUuid, get_full_path(fromPath), get_full_path(toPath),
-                                         kTestUserId, kTestAppId, "default", 0, callback)
+                                         kTestUserId, kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2174,7 +2562,8 @@ TEST_F(ServiceTest, CopyAppDataPath_Fail_InvalidPath) {
 
     // The call itself returns ok() (oneway), but callback receives failure.
     ASSERT_TRUE(service->copyAppDataPath(testUuid, fromPath, get_full_path(toPath), kTestUserId,
-                                         kTestAppId, "default", 0, callback)
+                                         kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2188,7 +2577,8 @@ TEST_F(ServiceTest, CopyAppDataPath_AcceptNonLegacyPathForUser0_Internal) {
     std::string toPath = "/data/user/0/to_copy_internal";
 
     ASSERT_TRUE(service->copyAppDataPath(std::nullopt, fromPath, toPath, kTestUserId, kTestAppId,
-                                         "default", 0, callback)
+                                         "default", 0, multiuser_get_uid(kTestUserId, kTestAppId),
+                                         callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2214,7 +2604,8 @@ TEST_F(ServiceTest, CopyAppDataPath_Success) {
     auto callback = sp<MockAppDataOperationCallback>::make();
 
     ASSERT_TRUE(service->copyAppDataPath(testUuid, get_full_path(fromPath), get_full_path(toPath),
-                                         kTestUserId, kTestAppId, "default", 0, callback)
+                                         kTestUserId, kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2243,7 +2634,8 @@ TEST_F(ServiceTest, CopyAppDataPath_TargetExists) {
     auto callback = sp<MockAppDataOperationCallback>::make();
 
     ASSERT_TRUE(service->copyAppDataPath(testUuid, get_full_path(fromPath), get_full_path(toPath),
-                                         kTestUserId, kTestAppId, "default", 0, callback)
+                                         kTestUserId, kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2261,7 +2653,8 @@ TEST_F(ServiceTest, CopyAppDataPath_Fail_NonNormalizedPath) {
 
     // '..' is rejected immediately by Binder interface validation (shady path)
     ASSERT_FALSE(service->copyAppDataPath(std::nullopt, fromPath, toPath, kTestUserId, kTestAppId,
-                                          "default", 0, callback)
+                                          "default", 0, multiuser_get_uid(kTestUserId, kTestAppId),
+                                          callback)
                          .isOk());
 }
 
@@ -2272,7 +2665,8 @@ TEST_F(ServiceTest, CopyAppDataPath_Fail_RedundantPath) {
 
     // '//' passes Binder validation but should be rejected by internal normalization check
     ASSERT_TRUE(service->copyAppDataPath(std::nullopt, fromPath, toPath, kTestUserId, kTestAppId,
-                                         "default", 0, callback)
+                                         "default", 0, multiuser_get_uid(kTestUserId, kTestAppId),
+                                         callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2286,7 +2680,8 @@ TEST_F(ServiceTest, MoveAppDataPath_Fail_NonNormalizedPath) {
 
     // '/./' passes Binder validation but should be rejected by internal normalization check
     ASSERT_TRUE(service->moveAppDataPath(std::nullopt, fromPath, toPath, kTestUserId, kTestAppId,
-                                         "default", 0, callback)
+                                         "default", 0, multiuser_get_uid(kTestUserId, kTestAppId),
+                                         callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2329,7 +2724,8 @@ TEST_F(ServiceTest, MoveAppDataPath_Success) {
     auto callback = sp<MockAppDataOperationCallback>::make();
 
     ASSERT_TRUE(service->moveAppDataPath(testUuid, get_full_path(fromPath), get_full_path(toPath),
-                                         kTestUserId, kTestAppId, "default", 0, callback)
+                                         kTestUserId, kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2356,7 +2752,8 @@ TEST_F(ServiceTest, MoveAppDataPath_TargetExists_EmptyDir) {
     auto callback = sp<MockAppDataOperationCallback>::make();
 
     ASSERT_TRUE(service->moveAppDataPath(testUuid, get_full_path(fromPath), get_full_path(toPath),
-                                         kTestUserId, kTestAppId, "default", 0, callback)
+                                         kTestUserId, kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2384,13 +2781,43 @@ TEST_F(ServiceTest, MoveAppDataPath_TargetExists_NotEmptyDir) {
     auto callback = sp<MockAppDataOperationCallback>::make();
 
     ASSERT_TRUE(service->moveAppDataPath(testUuid, get_full_path(fromPath), get_full_path(toPath),
-                                         kTestUserId, kTestAppId, "default", 0, callback)
+                                         kTestUserId, kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
     // renameat() fails with ENOTEMPTY if target is a non-empty directory
     EXPECT_EQ(callback->mStatus, IAppDataOperationCallback::STATUS_FAILURE);
     EXPECT_TRUE(exists(fromPath)); // Source should still exist
+}
+
+TEST_F(ServiceTest, MoveAppDataPath_Fail_PermissionDenied) {
+    const std::string fromPath = "user/0/from_permission_denied";
+    const std::string toPath = "user/0/to_permission_denied";
+
+    delete_dir_contents_and_dir(get_full_path(fromPath), true);
+    delete_dir_contents_and_dir(get_full_path(toPath), true);
+
+    // Create source file owned by different app
+    mkdir(fromPath, kTestAppUid + 1, kTestAppUid + 1, 0700);
+    const std::string srcFile = fromPath + "/file.txt";
+    create_with_content(get_full_path(srcFile), kTestAppUid + 1, kTestAppUid + 1, 0600, "content");
+
+    // Create dest dir owned by target app
+    mkdir(toPath, kTestAppUid, kTestAppUid, 0700);
+
+    auto callback = sp<MockAppDataOperationCallback>::make();
+
+    // Move file, but callerUid is kTestAppUid, while source is kTestAppUid + 1
+    ASSERT_TRUE(service->moveAppDataPath(testUuid, get_full_path(srcFile), get_full_path(toPath),
+                                         kTestUserId, kTestAppId, "default", 0, kTestAppUid,
+                                         callback)
+                        .isOk());
+
+    callback->waitForCompletion();
+    EXPECT_EQ(callback->mStatus, IAppDataOperationCallback::STATUS_FAILURE);
+    EXPECT_THAT(callback->mMessage, testing::HasSubstr("PERMISSION_DENIED"));
+    EXPECT_TRUE(exists(srcFile));
 }
 
 TEST_F(ServiceTest, CopyAppDataPath_FileToDir) {
@@ -2413,7 +2840,8 @@ TEST_F(ServiceTest, CopyAppDataPath_FileToDir) {
 
     // Copy file to directory
     ASSERT_TRUE(service->copyAppDataPath(testUuid, get_full_path(srcFile), get_full_path(toPath),
-                                         kTestUserId, kTestAppId, "default", 0, callback)
+                                         kTestUserId, kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2432,18 +2860,19 @@ TEST_F(ServiceTest, MoveAppDataPath_FileToDir) {
     delete_dir_contents_and_dir(get_full_path(toPath), true);
 
     // Create source file
-    mkdir(fromPath, kSystemUid, kSystemUid, 0700);
+    mkdir(fromPath, kTestAppUid, kTestAppUid, 0700);
     const std::string srcFile = fromPath + "/file.txt";
-    create_with_content(get_full_path(srcFile), kSystemUid, kSystemUid, 0600, "content");
+    create_with_content(get_full_path(srcFile), kTestAppUid, kTestAppUid, 0600, "content");
 
     // Create dest dir
-    mkdir(toPath, kSystemUid, kSystemUid, 0700);
+    mkdir(toPath, kTestAppUid, kTestAppUid, 0700);
 
     auto callback = sp<MockAppDataOperationCallback>::make();
 
     // Move file to directory
     ASSERT_TRUE(service->moveAppDataPath(testUuid, get_full_path(srcFile), get_full_path(toPath),
-                                         kTestUserId, kTestAppId, "default", 0, callback)
+                                         kTestUserId, kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2473,7 +2902,8 @@ TEST_F(ServiceTest, CopyAppDataPath_SubdirCreated) {
 
     // Copy file to non-existent subdir within existing root
     ASSERT_TRUE(service->copyAppDataPath(testUuid, get_full_path(srcFile), get_full_path(toPath),
-                                         kTestUserId, kTestAppId, "default", 0, callback)
+                                         kTestUserId, kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2502,7 +2932,8 @@ TEST_F(ServiceTest, CopyAppDataPath_Fail_NoTargetRoot) {
 
     // Copy file to non-existent root
     ASSERT_TRUE(service->copyAppDataPath(testUuid, get_full_path(srcFile), get_full_path(toPath),
-                                         kTestUserId, kTestAppId, "default", 0, callback)
+                                         kTestUserId, kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2520,9 +2951,9 @@ TEST_F(ServiceTest, MoveAppDataPath_SubdirCreated) {
     delete_dir_contents_and_dir(get_full_path(toRoot), true);
 
     // Create source file
-    mkdir(fromPath, kSystemUid, kSystemUid, 0700);
+    mkdir(fromPath, kTestAppUid, kTestAppUid, 0700);
     const std::string srcFile = fromPath + "/file.txt";
-    create_with_content(get_full_path(srcFile), kSystemUid, kSystemUid, 0600, "content");
+    create_with_content(get_full_path(srcFile), kTestAppUid, kTestAppUid, 0600, "content");
 
     // Create target root but NOT the subdir
     mkdir(toRoot, kTestAppUid, kTestAppUid, 0700);
@@ -2531,7 +2962,8 @@ TEST_F(ServiceTest, MoveAppDataPath_SubdirCreated) {
 
     // Move file to non-existent subdir within existing root
     ASSERT_TRUE(service->moveAppDataPath(testUuid, get_full_path(srcFile), get_full_path(toPath),
-                                         kTestUserId, kTestAppId, "default", 0, callback)
+                                         kTestUserId, kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2551,9 +2983,9 @@ TEST_F(ServiceTest, MoveAppDataPath_Fail_NoTargetRoot) {
     delete_dir_contents_and_dir(get_full_path(toPath), true);
 
     // Create source file
-    mkdir(fromPath, kSystemUid, kSystemUid, 0700);
+    mkdir(fromPath, kTestAppUid, kTestAppUid, 0700);
     const std::string srcFile = fromPath + "/file.txt";
-    create_with_content(get_full_path(srcFile), kSystemUid, kSystemUid, 0600, "content");
+    create_with_content(get_full_path(srcFile), kTestAppUid, kTestAppUid, 0600, "content");
 
     // Note: we do NOT create toPath here.
 
@@ -2561,7 +2993,8 @@ TEST_F(ServiceTest, MoveAppDataPath_Fail_NoTargetRoot) {
 
     // Move file to non-existent root
     ASSERT_TRUE(service->moveAppDataPath(testUuid, get_full_path(srcFile), get_full_path(toPath),
-                                         kTestUserId, kTestAppId, "default", 0, callback)
+                                         kTestUserId, kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2590,7 +3023,8 @@ TEST_F(ServiceTest, MoveAppDataPath_DirToDir) {
 
     // Move directory into directory
     ASSERT_TRUE(service->moveAppDataPath(testUuid, get_full_path(fromPath), get_full_path(toPath),
-                                         kTestUserId, kTestAppId, "default", 0, callback)
+                                         kTestUserId, kTestAppId, "default", 0,
+                                         multiuser_get_uid(kTestUserId, kTestAppId), callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2619,7 +3053,8 @@ TEST_F(ServiceTest, CopyAppDataPath_Success_SecondaryUser) {
     auto callback = sp<MockAppDataOperationCallback>::make();
 
     ASSERT_TRUE(service->copyAppDataPath(testUuid, get_full_path(fromPath), get_full_path(toPath),
-                                         kSecondaryUserId, kTestAppId, "default", 0, callback)
+                                         kSecondaryUserId, kTestAppId, "default", 0,
+                                         kSecondaryAppUid, callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2648,7 +3083,8 @@ TEST_F(ServiceTest, MoveAppDataPath_Success_SecondaryUser) {
     auto callback = sp<MockAppDataOperationCallback>::make();
 
     ASSERT_TRUE(service->moveAppDataPath(testUuid, get_full_path(fromPath), get_full_path(toPath),
-                                         kSecondaryUserId, kTestAppId, "default", 0, callback)
+                                         kSecondaryUserId, kTestAppId, "default", 0,
+                                         kSecondaryAppUid, callback)
                         .isOk());
 
     callback->waitForCompletion();
@@ -2657,6 +3093,114 @@ TEST_F(ServiceTest, MoveAppDataPath_Success_SecondaryUser) {
     EXPECT_TRUE(exists(toPath + "/from_move/file.txt"));
     EXPECT_EQ(kSecondaryAppUid, stat_uid((toPath + "/from_move/file.txt").c_str()));
     EXPECT_FALSE(exists(fromPath));
+}
+
+TEST_F(ServiceTest, MoveAppDataPath_Fail_PermissionDenied_Recursive) {
+    const std::string fromPath = "user/0/from_permission_denied_rec";
+    const std::string toPath = "user/0/to_permission_denied_rec";
+
+    delete_dir_contents_and_dir(get_full_path(fromPath), true);
+    delete_dir_contents_and_dir(get_full_path(toPath), true);
+
+    // Create source dir owned by target app
+    mkdir(fromPath, kTestAppUid, kTestAppUid, 0700);
+    // Create source SUBDIR owned by target app
+    const std::string subDir = fromPath + "/subdir";
+    mkdir(subDir, kTestAppUid, kTestAppUid, 0700);
+    // Create source file INSIDE subdir owned by DIFFERENT app
+    const std::string srcFile = subDir + "/file.txt";
+    create_with_content(get_full_path(srcFile), kTestAppUid + 1, kTestAppUid + 1, 0600, "content");
+
+    // Create dest dir owned by target app
+    mkdir(toPath, kTestAppUid, kTestAppUid, 0700);
+
+    auto callback = sp<MockAppDataOperationCallback>::make();
+
+    // Move dir, but one nested file belongs to kTestAppUid + 1
+    ASSERT_TRUE(service->moveAppDataPath(testUuid, get_full_path(fromPath), get_full_path(toPath),
+                                         kTestUserId, kTestAppId, "default", 0, kTestAppUid,
+                                         callback)
+                        .isOk());
+
+    callback->waitForCompletion();
+    EXPECT_EQ(callback->mStatus, IAppDataOperationCallback::STATUS_FAILURE);
+    EXPECT_THAT(callback->mMessage, testing::HasSubstr("PERMISSION_DENIED"));
+    EXPECT_TRUE(exists(srcFile));
+}
+
+TEST_F(ServiceTest, CopyAppDataPath_Fail_PermissionDenied_Recursive) {
+    const std::string fromPath = "user/0/from_copy_permission_denied_rec";
+    const std::string toPath = "user/0/to_copy_permission_denied_rec";
+
+    delete_dir_contents_and_dir(get_full_path(fromPath), true);
+    delete_dir_contents_and_dir(get_full_path(toPath), true);
+
+    // Create source dir owned by target app
+    mkdir(fromPath, kTestAppUid, kTestAppUid, 0700);
+    // Create source SUBDIR owned by target app
+    const std::string subDir = fromPath + "/subdir";
+    mkdir(subDir, kTestAppUid, kTestAppUid, 0700);
+    // Create source file INSIDE subdir owned by DIFFERENT app
+    const std::string srcFile = subDir + "/file.txt";
+    create_with_content(get_full_path(srcFile), kTestAppUid + 1, kTestAppUid + 1, 0600, "content");
+
+    // Create dest dir owned by target app
+    mkdir(toPath, kTestAppUid, kTestAppUid, 0700);
+
+    auto callback = sp<MockAppDataOperationCallback>::make();
+
+    // Copy dir, but one nested file belongs to kTestAppUid + 1
+    ASSERT_TRUE(service->copyAppDataPath(testUuid, get_full_path(fromPath), get_full_path(toPath),
+                                         kTestUserId, kTestAppId, "default", 0, kTestAppUid,
+                                         callback)
+                        .isOk());
+
+    callback->waitForCompletion();
+    EXPECT_EQ(callback->mStatus, IAppDataOperationCallback::STATUS_FAILURE);
+    EXPECT_THAT(callback->mMessage, testing::HasSubstr("PERMISSION_DENIED"));
+    EXPECT_TRUE(exists(srcFile));
+}
+
+TEST_F(ServiceTest, MoveAppDataPath_Fail_PermissionDenied_SymlinkOwner) {
+    const std::string fromPath = "user/0/from_permission_denied_symlink";
+    const std::string toPath = "user/0/to_permission_denied_symlink";
+    const std::string targetPath = "/data/local/tmp/symlink_target.txt";
+
+    delete_dir_contents_and_dir(get_full_path(fromPath), true);
+    delete_dir_contents_and_dir(get_full_path(toPath), true);
+    unlink(targetPath.c_str());
+
+    // Create a target file
+    create_with_content(targetPath, kTestAppUid, kTestAppUid, 0600, "target");
+
+    // Create source dir owned by target app
+    mkdir(fromPath, kTestAppUid, kTestAppUid, 0700);
+
+    // Create a symlink owned by DIFFERENT app
+    std::string symlinkPath = get_full_path(fromPath) + "/mysymlink";
+    ASSERT_EQ(0, symlink(targetPath.c_str(), symlinkPath.c_str()));
+    ASSERT_EQ(0, lchown(symlinkPath.c_str(), kTestAppUid + 1, kTestAppUid + 1));
+
+    // Create dest dir owned by target app
+    mkdir(toPath, kTestAppUid, kTestAppUid, 0700);
+
+    auto callback = sp<MockAppDataOperationCallback>::make();
+
+    // Move dir, but nested symlink belongs to kTestAppUid + 1
+    ASSERT_TRUE(service->moveAppDataPath(testUuid, get_full_path(fromPath), get_full_path(toPath),
+                                         kTestUserId, kTestAppId, "default", 0, kTestAppUid,
+                                         callback)
+                        .isOk());
+
+    callback->waitForCompletion();
+    EXPECT_EQ(callback->mStatus, IAppDataOperationCallback::STATUS_FAILURE);
+    EXPECT_THAT(callback->mMessage, testing::HasSubstr("PERMISSION_DENIED"));
+
+    struct stat st;
+    EXPECT_EQ(0, lstat(symlinkPath.c_str(), &st));
+    EXPECT_TRUE(S_ISLNK(st.st_mode));
+
+    unlink(targetPath.c_str());
 }
 
 }  // namespace installd

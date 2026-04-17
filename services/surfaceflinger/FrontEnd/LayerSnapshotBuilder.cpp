@@ -28,6 +28,7 @@
 #include <common/FlagManager.h>
 #include <common/trace.h>
 #include <ftl/small_map.h>
+#include <include/private/SkHdrMetadata.h>
 #include <math/vec2.h>
 #include <ui/DisplayMap.h>
 #include <ui/FloatRect.h>
@@ -38,6 +39,7 @@
 #include "LayerLog.h"
 #include "LayerSnapshotBuilder.h"
 #include "RenderResourceCache.h"
+#include "ShaderRegistry.h"
 #include "TimeStats/TimeStats.h"
 #include "Tracing/TransactionTracing.h"
 
@@ -331,7 +333,7 @@ void updateMetadataAndGameMode(LayerSnapshot& snapshot, const RequestedLayerStat
 
 void clearChanges(LayerSnapshot& snapshot) {
     snapshot.changes.clear();
-    snapshot.clientChanges = 0;
+    snapshot.clientChanges.reset();
     snapshot.contentDirty = snapshot.autoRefresh;
     snapshot.hasReadyFrame = snapshot.autoRefresh;
     snapshot.sidebandStreamHasFrame = false;
@@ -344,7 +346,7 @@ LayerSnapshot LayerSnapshotBuilder::getRootSnapshot() {
     LayerSnapshot snapshot;
     snapshot.path = LayerHierarchy::TraversalPath::ROOT;
     snapshot.changes = ftl::Flags<RequestedLayerState::Changes>();
-    snapshot.clientChanges = 0;
+    snapshot.clientChanges.reset();
     snapshot.isHiddenByPolicyFromParent = false;
     snapshot.isHiddenByPolicyFromRelativeParent = false;
     snapshot.parentTransform.reset();
@@ -401,7 +403,7 @@ bool LayerSnapshotBuilder::tryFastUpdate(const Args& args) {
                     args.layerLifecycleManager.getLayerFromId(snapshot->path.id);
             if (!requested) continue;
             snapshot->merge(*requested, forceUpdate, args.displayChanges, args.forceFullDamage,
-                            primaryDisplayRotationFlags);
+                            primaryDisplayRotationFlags, args.shaderRegistry);
         }
         return false;
     }
@@ -411,7 +413,7 @@ bool LayerSnapshotBuilder::tryFastUpdate(const Args& args) {
         auto range = mIdToSnapshots.equal_range(requested->id);
         for (auto it = range.first; it != range.second; it++) {
             it->second->merge(*requested, forceUpdate, args.displayChanges, args.forceFullDamage,
-                              primaryDisplayRotationFlags);
+                              primaryDisplayRotationFlags, args.shaderRegistry);
         }
     }
 
@@ -452,10 +454,9 @@ void LayerSnapshotBuilder::updateSnapshots(const Args& args) {
     mMergedSnapshots.clear();
 
     if (args.mergeableHierarchyManager) {
-        const auto hierarchy =
-                args.mergeableHierarchyManager->getOwnedHierarchy(UNASSIGNED_LAYER_ID);
-        if (hierarchy) {
-            auto mergedSnapshot = hierarchy->getSnapshotCopy();
+        auto mergedSnapshot =
+                args.mergeableHierarchyManager->findLayerSnapshotCopy(UNASSIGNED_LAYER_ID);
+        if (mergedSnapshot) {
             mMergedSnapshots.emplace_back(std::move(mergedSnapshot));
         }
     }
@@ -551,7 +552,7 @@ const LayerSnapshot& LayerSnapshotBuilder::updateSnapshotsInHierarchy(
     if (newSnapshot) {
         snapshot = createSnapshot(traversalPath, *layer, parentSnapshot);
         snapshot->merge(*layer, /*forceUpdate=*/true, /*displayChanges=*/true, args.forceFullDamage,
-                        primaryDisplayRotationFlags);
+                        primaryDisplayRotationFlags, args.shaderRegistry);
         snapshot->changes |= RequestedLayerState::Changes::Created;
     }
 
@@ -566,9 +567,8 @@ const LayerSnapshot& LayerSnapshotBuilder::updateSnapshotsInHierarchy(
     }
 
     if (args.mergeableHierarchyManager) {
-        const auto hierarchy = args.mergeableHierarchyManager->getOwnedHierarchy(layer->id);
-        if (hierarchy) {
-            auto mergedSnapshot = hierarchy->getSnapshotCopy();
+        auto mergedSnapshot = args.mergeableHierarchyManager->findLayerSnapshotCopy(layer->id);
+        if (mergedSnapshot) {
             updateSnapshot(*mergedSnapshot, args, *layer, parentSnapshot, traversalPath);
             mMergedSnapshots.emplace_back(std::move(mergedSnapshot));
         }
@@ -766,7 +766,7 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
     snapshot.clientChanges |= (parentSnapshot.clientChanges & layer_state_t::AFFECTS_CHILDREN);
     // mark the content as dirty if the parent state changes can dirty the child's content (for
     // example alpha)
-    snapshot.contentDirty |= (snapshot.clientChanges & layer_state_t::CONTENT_DIRTY) != 0;
+    snapshot.contentDirty |= bool(snapshot.clientChanges & layer_state_t::CONTENT_DIRTY);
     snapshot.isHiddenByPolicyFromParent = parentSnapshot.isHiddenByPolicyFromParent ||
             parentSnapshot.invalidTransform || requested.isHiddenByPolicy() ||
             (args.excludeLayerIds.find(path.id) != args.excludeLayerIds.end()) ||
@@ -842,6 +842,16 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
         snapshot.stretchEffect = (requested.stretchEffect.hasEffect())
                 ? requested.stretchEffect
                 : parentSnapshot.stretchEffect;
+    }
+
+    if (forceUpdate || snapshot.clientChanges & layer_state_t::ePostProcessChanged) {
+        snapshot.postProcessShader = requested.postProcessShader;
+        snapshot.postProcessUniforms = requested.postProcessUniforms;
+        if (args.shaderRegistry && snapshot.postProcessShader) {
+            snapshot.postProcessEffect = args.shaderRegistry->getShader(snapshot.postProcessShader);
+        } else {
+            snapshot.postProcessEffect = nullptr;
+        }
     }
 
     if (forceUpdate ||
@@ -1049,8 +1059,17 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
     // For now we don't check LUT support so guard by a debug sysprop
     if (FlagManager::getInstance().force_agtm_without_luts() && snapshot.buffer) {
         std::optional<std::vector<uint8_t>> smpte2094_50;
-        status_t err = snapshot.buffer->getSmpte2094_50(&smpte2094_50);
+        status_t err;
+        {
+            SFTRACE_NAME("getSmpte2094_50");
+            err = snapshot.buffer->getSmpte2094_50(&smpte2094_50);
+        }
+
         hasSmpte2094_50 = err == OK && smpte2094_50;
+
+        if (hasSmpte2094_50) {
+            SFTRACE_NAME("Found smpte2094-50 on a layer!");
+        }
     }
 
     // computed snapshot properties
@@ -1071,7 +1090,7 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
           args.forceUpdate == ForceUpdateFlags::ALL ? "Force " : "",
           snapshot.getDebugString().c_str(), snapshot.changes.string().c_str(),
           parentSnapshot.changes.string().c_str(), requested.changes.string().c_str(),
-          std::to_string(requested.what).c_str(), parentSnapshot.getDebugString().c_str());
+          requested.what.to_string().c_str(), parentSnapshot.getDebugString().c_str());
 }
 
 void LayerSnapshotBuilder::updateRoundedCorner(LayerSnapshot& snapshot,

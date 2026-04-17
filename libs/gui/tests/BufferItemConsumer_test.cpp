@@ -45,7 +45,7 @@ class BufferItemConsumerTest : public ::testing::Test {
         : public BufferItemConsumer::BufferFreedListener {
         explicit BufferFreedListener(BufferItemConsumerTest* test)
             : mTest(test) {}
-        void onBufferFreed(const wp<GraphicBuffer>& /* gBuffer */) override {
+        void onBufferFreed(const sp<GraphicBuffer>& /* gBuffer */) override {
             mTest->HandleBufferFreed();
         }
         BufferItemConsumerTest* mTest;
@@ -57,7 +57,9 @@ class BufferItemConsumerTest : public ::testing::Test {
         virtual void onBufferReleased() override {}
         virtual bool needsReleaseNotify() override { return true; }
         virtual void onBuffersDiscarded(const std::vector<int32_t>&) override {}
-        virtual void onBufferDetached(int slot) override { mTest->HandleBufferDetached(slot); }
+        virtual void onBufferDetached(int slot, uint64_t bufferId) override {
+            mTest->HandleBufferDetached(slot, bufferId);
+        }
 
         BufferItemConsumerTest* mTest;
     };
@@ -93,11 +95,12 @@ class BufferItemConsumerTest : public ::testing::Test {
         ALOGD("HandleBufferFreed, mFreedBufferCount=%d", mFreedBufferCount);
     }
 
-    void HandleBufferDetached(int slot) {
+    void HandleBufferDetached(int slot, uint64_t bufferId) {
         std::lock_guard<std::mutex> lock(mMutex);
         mDetachedBufferSlots.push_back(slot);
-        ALOGD("HandleBufferDetached, slot=%d mDetachedBufferSlots-count=%zu", slot,
-              mDetachedBufferSlots.size());
+        mDetachedBufferIds.push_back(bufferId);
+        ALOGD("HandleBufferDetached, slot=%d bufferId=%" PRIu64 " mDetachedBufferSlots-count=%zu",
+              slot, bufferId, mDetachedBufferSlots.size());
     }
 
     void DequeueBuffer(int* outSlot) {
@@ -155,6 +158,7 @@ class BufferItemConsumerTest : public ::testing::Test {
     std::mutex mMutex;
     int mFreedBufferCount{0};
     std::vector<int> mDetachedBufferSlots = {};
+    std::vector<uint64_t> mDetachedBufferIds = {};
 
     sp<BufferItemConsumer> mBIC;
     sp<BufferFreedListener> mBFL;
@@ -281,6 +285,7 @@ TEST_F(BufferItemConsumerTest, DetachBufferWithBuffer) {
     sp<GraphicBuffer> buffer = mBuffers[slot];
     EXPECT_EQ(OK, mBIC->detachBuffer(buffer));
     EXPECT_THAT(mDetachedBufferSlots, testing::ElementsAre(slot));
+    EXPECT_THAT(mDetachedBufferIds, testing::ElementsAre(buffer->getId()));
 }
 
 TEST_F(BufferItemConsumerTest, UnlimitedSlots_AcquireReleaseAll) {
@@ -520,4 +525,39 @@ TEST_F(BufferItemConsumerTest, DiscardFreeBuffers_TriggersCallback) {
     EXPECT_EQ(10, freedCount);
 }
 
-}  // namespace android
+TEST_F(BufferItemConsumerTest, TriggerBufferFreed_UsageChange) {
+    auto [consumer, surface] = BufferItemConsumer::create(kUsage, 3);
+
+    struct MockFreedListener : public BufferItemConsumer::BufferFreedListener {
+        int mCount = 0;
+        void onBufferFreed(const sp<GraphicBuffer>& /* graphicBuffer */) override { mCount++; }
+    };
+    sp<MockFreedListener> listener = sp<MockFreedListener>::make();
+    consumer->setBufferFreedListener(listener);
+
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, nullptr));
+
+    // 1. Cycle one buffer to put it in the free list
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(OK, surface->queueBuffer(buffer, fence));
+
+    BufferItem item;
+    ASSERT_EQ(OK, consumer->acquireBuffer(&item, 0));
+    ASSERT_EQ(OK, consumer->releaseBuffer(item));
+
+    ASSERT_EQ(0, listener->mCount);
+
+    // 2. Trigger usage change on the producer side.
+    native_window_set_usage(surface.get(), kUsage | GRALLOC_USAGE_SW_WRITE_OFTEN);
+
+    // This dequeue should trigger reallocation because of usage change,
+    // which should notify the consumer via onBuffersReleased -> onBufferFreed.
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+
+    // 3. Verify consumer was notified
+    EXPECT_EQ(1, listener->mCount);
+}
+
+} // namespace android

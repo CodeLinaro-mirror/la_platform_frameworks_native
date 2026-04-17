@@ -1008,7 +1008,7 @@ public:
         std::optional<int> callerPriority;
         pid_t workerTid = mAllocWorkerTid.load(std::memory_order_relaxed);
         int callerScheduler = sched_getscheduler(0);
-        switch (callerScheduler) {
+        switch (callerScheduler & ~SCHED_RESET_ON_FORK) {
             // For fair policies, we can set worker thread's priority
             // to the caller thread's priority.
             case SCHED_OTHER: // i.e. SCHED_NORMAL
@@ -1180,9 +1180,11 @@ public:
                 [listener = mListener, slots = slots]() { listener->onBuffersDiscarded(slots); });
     }
 
-    void onBufferDetached(int slot) override {
+    void onBufferDetached(int slot, uint64_t bufferId) override {
         AsyncProducerListenerWorker::getInstance().post(
-                [listener = mListener, slot = slot]() { listener->onBufferDetached(slot); });
+                [listener = mListener, slot = slot, bufferId = bufferId]() {
+                    listener->onBufferDetached(slot, bufferId);
+                });
     }
 
     void onBufferAcquired(uint64_t bufferId, uint64_t frameNumber) override {
