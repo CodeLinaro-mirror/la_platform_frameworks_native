@@ -870,68 +870,92 @@ binder::Status InstalldNativeService::createAppDataLocked(
         ScopedTrace tracer("ce");
         auto path = create_data_user_ce_package_path(uuid_, userId, pkgname);
 
-        auto status = createAppDataDirs(path, uid, uid, previousUid, cacheGid, seInfo, targetMode,
-                                        projectIdApp, projectIdCache);
+        binder::Status status;
+        {
+            ScopedTrace tracer_dirs("create_ce_app_data_dirs");
+            status = createAppDataDirs(path, uid, uid, previousUid, cacheGid, seInfo, targetMode,
+                                       projectIdApp, projectIdCache);
+        }
         if (!status.isOk()) {
             return status;
         }
 
-        // Remember inode numbers of cache directories so that we can clear
-        // contents while CE storage is locked
-        if (write_path_inode(path, "cache", kXattrInodeCache) ||
-                write_path_inode(path, "code_cache", kXattrInodeCodeCache)) {
-            return error("Failed to write_path_inode for " + path);
-        }
-
-        // And return the CE inode of the top-level data directory so we can
-        // clear contents while CE storage is locked
-        if (ceDataInode != nullptr) {
-            ino_t result;
-            if (get_path_inode(path, &result) != 0) {
-                return error("Failed to get_path_inode for " + path);
+        {
+            ScopedTrace tracer_inodes("write_ce_path_inodes");
+            // Remember inode numbers of cache directories so that we can clear
+            // contents while CE storage is locked
+            if (write_path_inode(path, "cache", kXattrInodeCache) ||
+                    write_path_inode(path, "code_cache", kXattrInodeCodeCache)) {
+                return error("Failed to write_path_inode for " + path);
             }
-            *ceDataInode = static_cast<uint64_t>(result);
+
+            // And return the CE inode of the top-level data directory so we can
+            // clear contents while CE storage is locked
+            if (ceDataInode != nullptr) {
+                ino_t result;
+                if (get_path_inode(path, &result) != 0) {
+                    return error("Failed to get_path_inode for " + path);
+                }
+                *ceDataInode = static_cast<uint64_t>(result);
+            }
         }
 
-        // Prepare the PCC sibling directory.
-        status = createOrDeletePccDirectoryLocked(uuid_, userId, pkgname, pccId, previousPccId,
-                                                  seInfo, targetMode, /* isCeStorage */ true,
-                                                  pccCeDataInode);
+        {
+            ScopedTrace tracer_pcc("create_pcc_ce_dir");
+            // Prepare the PCC sibling directory.
+            status = createOrDeletePccDirectoryLocked(uuid_, userId, pkgname, pccId, previousPccId,
+                                                      seInfo, targetMode, /* isCeStorage */ true,
+                                                      pccCeDataInode);
 
-        if (!status.isOk()) {
-            return status;
+            if (!status.isOk()) {
+                return status;
+            }
         }
     }
     if (flags & FLAG_STORAGE_DE) {
         ScopedTrace tracer("de");
         auto path = create_data_user_de_package_path(uuid_, userId, pkgname);
 
-        auto status = createAppDataDirs(path, uid, uid, previousUid, cacheGid, seInfo, targetMode,
-                                        projectIdApp, projectIdCache);
+        binder::Status status;
+        {
+            ScopedTrace tracer_dirs("create_de_app_data_dirs");
+            status = createAppDataDirs(path, uid, uid, previousUid, cacheGid, seInfo, targetMode,
+                                       projectIdApp, projectIdCache);
+        }
         if (!status.isOk()) {
             return status;
         }
         if (previousUid > 0 && previousUid != uid) {
+            ScopedTrace tracer_chown("chown_app_profile_dir");
             chown_app_profile_dir(packageName, appId, userId);
         }
 
-        if (flags::enable_set_inode_quotas() &&
-            !PrepareAppInodeQuota(uuid ? uuid->c_str() : "", uid)) {
-            PLOG(ERROR) << "Failed to set hard quota " + path;
+        if (flags::enable_set_inode_quotas()) {
+            ScopedTrace tracer_quota("prepare_app_inode_quota");
+            if (!PrepareAppInodeQuota(uuid ? uuid->c_str() : "", uid)) {
+                PLOG(ERROR) << "Failed to set hard quota " + path;
+            }
         }
 
-        if (!prepare_app_profile_dir(packageName, appId, userId)) {
-            return error("Failed to prepare profiles for " + packageName);
+        {
+            ScopedTrace tracer_profile("prepare_app_profile_dir");
+            if (!prepare_app_profile_dir(packageName, appId, userId)) {
+                return error("Failed to prepare profiles for " + packageName);
+            }
         }
 
-        status = createOrDeletePccDirectoryLocked(uuid_, userId, pkgname, pccId, previousPccId,
-                                                  seInfo, targetMode, /* isCeStorage */ false,
-                                                  pccDeDataInode);
-        if (!status.isOk()) {
-            return status;
+        {
+            ScopedTrace tracer_pcc("create_pcc_de_dir");
+            status = createOrDeletePccDirectoryLocked(uuid_, userId, pkgname, pccId, previousPccId,
+                                                      seInfo, targetMode, /* isCeStorage */ false,
+                                                      pccDeDataInode);
+            if (!status.isOk()) {
+                return status;
+            }
         }
 
         if (deDataInode != nullptr) {
+            ScopedTrace tracer_inodes("get_de_path_inode");
             ino_t result;
             if (get_path_inode(path, &result) != 0) {
                 return error("Failed to get_path_inode for " + path);
@@ -1008,6 +1032,10 @@ binder::Status InstalldNativeService::createAppData(
     CHECK_ARGUMENT_UUID(uuid);
     CHECK_ARGUMENT_PACKAGE_NAME(packageName);
     LOCK_PACKAGE_USER();
+
+    auto trace_name = StringPrintf("createAppData pkg=%s userId=%d", packageName.c_str(), userId);
+    ScopedTrace tracer(trace_name.c_str());
+
     return createAppDataLocked(uuid, packageName, userId, flags, appId, previousAppId, seInfo,
                                targetSdkVersion, ceDataInode, deDataInode, pccCeDataInode,
                                pccDeDataInode, pccId, previousPccId);
@@ -1046,6 +1074,8 @@ binder::Status InstalldNativeService::createAppDataBatched(
     }
 
     // Locking is performed depeer in the callstack.
+    auto trace_name = StringPrintf("createAppDataBatched size=%zu", args.size());
+    ScopedTrace tracer(trace_name.c_str());
 
     std::vector<android::os::CreateAppDataResult> results;
     for (const auto &arg : args) {
@@ -1420,36 +1450,71 @@ binder::Status InstalldNativeService::destroyAppData(const std::optional<std::st
     CHECK_ARGUMENT_PACKAGE_NAME(packageName);
     LOCK_PACKAGE_USER();
 
+    auto trace_name = StringPrintf("destroyAppData pkg=%s userId=%d flags=%d",
+                                   packageName.c_str(), userId, flags);
+    ScopedTrace tracer(trace_name.c_str());
+
     const char* uuid_ = uuid ? uuid->c_str() : nullptr;
     const char* pkgname = packageName.c_str();
 
     binder::Status res = ok();
     if (flags & FLAG_STORAGE_CE) {
-        auto path = create_data_user_ce_package_path(uuid_, userId, pkgname, ceDataInode);
-        if (rename_delete_dir_contents_and_dir(path) != 0) {
-            res = error("Failed to delete " + path);
+        ScopedTrace tracer_ce("destroy_ce");
+        std::string path;
+        {
+            ScopedTrace tracer_path("create_data_user_ce_package_path");
+            path = create_data_user_ce_package_path(uuid_, userId, pkgname, ceDataInode);
+        }
+        {
+            ScopedTrace tracer_del("rename_delete_dir_contents_and_dir");
+            if (rename_delete_dir_contents_and_dir(path) != 0) {
+                res = error("Failed to delete " + path);
+            }
         }
 
         const std::string pccPackageName = packageName + kPccDataSuffix;
-        auto pccPath = create_data_user_ce_package_path(uuid_, userId, pccPackageName.c_str(),
-                                                        /* ce_data_inode= */ pccCeDataInode);
-        if (res.isOk() && rename_delete_dir_contents_and_dir(pccPath) != 0) {
-            res = error("Failed to delete " + pccPath);
+        std::string pccPath;
+        {
+            ScopedTrace tracer_pcc_path("create_data_user_ce_package_path_pcc");
+            pccPath = create_data_user_ce_package_path(uuid_, userId, pccPackageName.c_str(),
+                                                       /* ce_data_inode= */ pccCeDataInode);
+        }
+        if (res.isOk()) {
+            ScopedTrace tracer_pcc_del("rename_delete_dir_contents_and_dir_pcc");
+            if (rename_delete_dir_contents_and_dir(pccPath) != 0) {
+                res = error("Failed to delete " + pccPath);
+            }
         }
     }
     if (flags & FLAG_STORAGE_DE) {
-        auto path = create_data_user_de_package_path(uuid_, userId, pkgname);
-        if (rename_delete_dir_contents_and_dir(path) != 0) {
-            res = error("Failed to delete " + path);
+        ScopedTrace tracer_de("destroy_de");
+        std::string path;
+        {
+            ScopedTrace tracer_path("create_data_user_de_package_path");
+            path = create_data_user_de_package_path(uuid_, userId, pkgname);
+        }
+        {
+            ScopedTrace tracer_del("rename_delete_dir_contents_and_dir");
+            if (rename_delete_dir_contents_and_dir(path) != 0) {
+                res = error("Failed to delete " + path);
+            }
         }
 
         const std::string pccPackageName = packageName + kPccDataSuffix;
-        auto pccPath = create_data_user_de_package_path(uuid_, userId, pccPackageName.c_str());
-        if (res.isOk() && rename_delete_dir_contents_and_dir(pccPath) != 0) {
-            res = error("Failed to delete " + pccPath);
+        std::string pccPath;
+        {
+            ScopedTrace tracer_pcc_path("create_data_user_de_package_path_pcc");
+            pccPath = create_data_user_de_package_path(uuid_, userId, pccPackageName.c_str());
+        }
+        if (res.isOk()) {
+            ScopedTrace tracer_pcc_del("rename_delete_dir_contents_and_dir_pcc");
+            if (rename_delete_dir_contents_and_dir(pccPath) != 0) {
+                res = error("Failed to delete " + pccPath);
+            }
         }
 
         if ((flags & FLAG_CLEAR_APP_DATA_KEEP_ART_PROFILES) == 0) {
+            ScopedTrace tracer_profiles("destroy_app_profiles");
             destroy_app_current_profiles(packageName, userId);
             // TODO(calin): If the package is still installed by other users it's probably
             // beneficial to keep the reference profile around.
@@ -1458,6 +1523,7 @@ binder::Status InstalldNativeService::destroyAppData(const std::optional<std::st
         }
     }
     if (flags & FLAG_STORAGE_EXTERNAL) {
+        ScopedTrace tracer_ext("destroy_external");
         std::lock_guard<std::recursive_mutex> lock(mMountsLock);
         for (const auto& n : mStorageMounts) {
             auto extPath = n.second;
@@ -1490,7 +1556,12 @@ binder::Status InstalldNativeService::destroyAppData(const std::optional<std::st
             }
         }
     }
-    auto status = destroySdkSandboxDataPackageDirectory(uuid, packageName, userId, flags);
+
+    binder::Status status;
+    {
+        ScopedTrace tracer_sdk("destroy_sdk_sandbox");
+        status = destroySdkSandboxDataPackageDirectory(uuid, packageName, userId, flags);
+    }
     if (!status.isOk()) {
         res = status;
     }
@@ -2263,7 +2334,8 @@ binder::Status InstalldNativeService::createUserData(const std::optional<std::st
     CHECK_ARGUMENT_UUID(uuid);
     LOCK_USER();
 
-    ScopedTrace tracer("create-user-data");
+    auto trace_name = StringPrintf("createUserData userId=%d flags=%d", userId, flags);
+    ScopedTrace tracer(trace_name.c_str());
 
     const char* uuid_ = uuid ? uuid->c_str() : nullptr;
     if (flags & FLAG_STORAGE_DE) {
@@ -2284,9 +2356,13 @@ binder::Status InstalldNativeService::destroyUserData(const std::optional<std::s
     CHECK_ARGUMENT_UUID(uuid);
     LOCK_USER();
 
+    auto trace_name = StringPrintf("destroyUserData userId=%d flags=%d", userId, flags);
+    ScopedTrace tracer(trace_name.c_str());
+
     const char* uuid_ = uuid ? uuid->c_str() : nullptr;
     binder::Status res = ok();
     if (flags & FLAG_STORAGE_DE) {
+        ScopedTrace tracer_de("destroy_de");
         auto path = create_data_user_de_path(uuid_, userId);
         // Contents only, as vold is responsible for the user_de dir itself.
         if (delete_dir_contents(path, true) != 0) {
@@ -2309,6 +2385,7 @@ binder::Status InstalldNativeService::destroyUserData(const std::optional<std::s
         }
     }
     if (flags & FLAG_STORAGE_CE) {
+        ScopedTrace tracer_ce("destroy_ce");
         auto path = create_data_user_ce_path(uuid_, userId);
         // Contents only, as vold is responsible for the user_ce dir itself.
         if (delete_dir_contents(path, true) != 0) {
@@ -2632,8 +2709,12 @@ static void collectPccQuotaStats(const std::string& uuid, int32_t userId, int32_
     }
 }
 
-static void collectQuotaStats(const std::string& uuid, int32_t userId, int32_t appId, int32_t pccId,
-                              struct stats* stats, struct stats* extStats) {
+static void collectQuotaStatsForApp(const std::string& uuid, int32_t userId, int32_t appId,
+                                    struct stats* stats, struct stats* extStats) {
+    // early exit if appId <= 0 so that we don't return app storage stats to caller
+    if (appId <= 0) {
+        return;
+    }
     int64_t space, doubleSpaceToBeDeleted = 0;
     uid_t uid = multiuser_get_uid(userId, appId);
     static const bool supportsProjectId = internal_storage_has_project_id();
@@ -2691,7 +2772,11 @@ static void collectQuotaStats(const std::string& uuid, int32_t userId, int32_t a
             }
         }
     }
+}
 
+static void collectQuotaStats(const std::string& uuid, int32_t userId, int32_t appId, int32_t pccId,
+                              struct stats* stats, struct stats* extStats) {
+    collectQuotaStatsForApp(uuid, userId, appId, stats, extStats);
     collectPccQuotaStats(uuid, userId, pccId, stats);
 }
 
@@ -2881,7 +2966,7 @@ binder::Status InstalldNativeService::getAppSize(const std::optional<std::string
     // runtest -x frameworks/base/services/tests/servicestests/src/com/android/server/pm/InstallerTest.java -m testGetAppSize
 
 #if MEASURE_DEBUG
-    LOG(INFO) << "Measuring user " << userId << " app " << appId;
+    LOG(INFO) << "Measuring user " << userId << " app " << appId << " pcc " << pccId;
 #endif
 
     // Here's a summary of the common storage locations across the platform,
@@ -2919,33 +3004,41 @@ binder::Status InstalldNativeService::getAppSize(const std::optional<std::string
     // Calculating the app size of the external storage owning app in a manual way, since
     // calculating it through quota apis also includes external media storage in the app storage
     // numbers
-    if (flags & FLAG_USE_QUOTA && appId >= AID_APP_START && !ownsExternalStorage(appId)) {
-        atrace_pm_begin("code");
-        for (const auto& codePath : codePaths) {
-            calculate_tree_size(codePath, &stats.codeSize, -1,
-                    multiuser_get_shared_gid(0, appId));
+    if (flags & FLAG_USE_QUOTA && (appId <= 0 || appId >= AID_APP_START) &&
+        (appId <= 0 || !ownsExternalStorage(appId))) {
+        if (appId > 0) {
+            atrace_pm_begin("code");
+            for (const auto& codePath : codePaths) {
+                calculate_tree_size(codePath, &stats.codeSize, -1,
+                                    multiuser_get_shared_gid(0, appId));
+            }
+            atrace_pm_end();
         }
-        atrace_pm_end();
 
         atrace_pm_begin("quota");
         collectQuotaStats(uuidString, userId, appId, pccId, &stats, &extStats);
         atrace_pm_end();
     } else {
-        atrace_pm_begin("code");
-        for (const auto& codePath : codePaths) {
-            calculate_tree_size(codePath, &stats.codeSize);
+        if (appId > 0) {
+            atrace_pm_begin("code");
+            for (const auto& codePath : codePaths) {
+                calculate_tree_size(codePath, &stats.codeSize);
+            }
+            atrace_pm_end();
         }
-        atrace_pm_end();
 
         for (size_t i = 0; i < packageNames.size(); i++) {
             const char* pkgname = packageNames[i].c_str();
 
-            atrace_pm_begin("data");
-            auto cePath = create_data_user_ce_package_path(uuid_, userId, pkgname, ceDataInodes[i]);
-            collectManualStats(cePath, &stats);
-            auto dePath = create_data_user_de_package_path(uuid_, userId, pkgname);
-            collectManualStats(dePath, &stats);
-            atrace_pm_end();
+            if (appId > 0) {
+                atrace_pm_begin("data");
+                auto cePath =
+                        create_data_user_ce_package_path(uuid_, userId, pkgname, ceDataInodes[i]);
+                collectManualStats(cePath, &stats);
+                auto dePath = create_data_user_de_package_path(uuid_, userId, pkgname);
+                collectManualStats(dePath, &stats);
+                atrace_pm_end();
+            }
 
             if (pccId > 0) {
                 atrace_pm_begin("pcc");
@@ -2972,7 +3065,7 @@ binder::Status InstalldNativeService::getAppSize(const std::optional<std::string
                 atrace_pm_end();
             }
 
-            if (!uuid) {
+            if (appId > 0 && !uuid) {
                 atrace_pm_begin("profiles");
                 calculate_tree_size(
                         create_primary_current_profile_package_dir_path(userId, pkgname),
@@ -2983,15 +3076,17 @@ binder::Status InstalldNativeService::getAppSize(const std::optional<std::string
                 atrace_pm_end();
             }
 
-            atrace_pm_begin("external");
-            auto extPath = create_data_media_package_path(uuid_, userId, "data", pkgname);
-            collectManualStats(extPath, &extStats);
-            auto mediaPath = create_data_media_package_path(uuid_, userId, "media", pkgname);
-            calculate_tree_size(mediaPath, &extStats.dataSize);
-            atrace_pm_end();
+            if (appId > 0) {
+                atrace_pm_begin("external");
+                auto extPath = create_data_media_package_path(uuid_, userId, "data", pkgname);
+                collectManualStats(extPath, &extStats);
+                auto mediaPath = create_data_media_package_path(uuid_, userId, "media", pkgname);
+                calculate_tree_size(mediaPath, &extStats.dataSize);
+                atrace_pm_end();
+            }
         }
 
-        if (!uuid) {
+        if (appId > 0 && !uuid) {
             atrace_pm_begin("dalvik");
             int32_t sharedGid = multiuser_get_shared_gid(0, appId);
             if (sharedGid != -1) {
