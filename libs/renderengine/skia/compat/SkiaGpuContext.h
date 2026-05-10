@@ -25,7 +25,9 @@
 #include <include/gpu/graphite/PersistentPipelineStorage.h>
 #include <include/gpu/vk/VulkanBackendContext.h>
 
+#include "../debug/SkiaMemoryReporter.h"
 #include "SkiaBackendTexture.h"
+#include "renderengine/RenderEngine.h"
 
 #include <log/log.h>
 
@@ -106,15 +108,22 @@ public:
 
     virtual void purgeResourcesNotUsedIn(std::chrono::milliseconds) = 0;
 
-    virtual bool isAbandonedOrDeviceLost() = 0;
+    virtual constexpr RenderEngine::SkiaBackend getBackend_onlyUseForCriticalWorkarounds()
+            const = 0;
     virtual size_t getMaxRenderTargetSize() const = 0;
     virtual size_t getMaxTextureSize() const = 0;
-    virtual void setResourceCacheLimit(size_t maxResourceBytes) = 0;
+    virtual bool isAbandonedOrDeviceLost() = 0;
+    virtual bool supportsProtectedContent() const = 0;
 
+    virtual void setResourceCacheLimit(size_t maxResourceBytes) = 0;
     virtual void purgeUnlockedScratchResources() = 0;
     virtual void resetContextIfApplicable() = 0; // No-op outside of GL (&& Ganesh at this point.)
 
-    virtual void dumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump) const = 0;
+    virtual void reportStatsForEachCache(
+            const std::vector<ResourcePair>& resourceMap,
+            std::function<void(SkiaMemoryReporter& reporter, const char* label,
+                               const size_t cacheLimit)>
+                    reportStats) const = 0;
 };
 
 } // namespace android::renderengine::skia
