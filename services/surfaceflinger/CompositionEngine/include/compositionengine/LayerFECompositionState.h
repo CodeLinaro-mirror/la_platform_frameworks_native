@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
-/* Changes from Qualcomm Technologies, Inc. are provided under the following license:
+// QTI_BEGIN: 2023-01-24: Camera: sf: Add support for multiple displays
+/* Changes from Qualcomm Innovation Center are provided under the following license:
  *
  * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
-// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
+// QTI_END: 2023-01-24: Camera: sf: Add support for multiple displays
 #pragma once
 
 #include <cstdint>
@@ -260,11 +260,11 @@ struct LayerFECompositionState {
 
     // Debugging
     virtual void dump(std::string& out) const;
-// QTI_BEGIN: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_BEGIN: 2023-01-24: Camera: sf: Add support for multiple displays
 
     bool qtiIsSecureDisplay{false};
     bool qtiIsSecureCamera{false};
-// QTI_END: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_END: 2023-01-24: Camera: sf: Add support for multiple displays
 // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
     uint32_t qtiLayerClass; // Layer Classification
                             // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
