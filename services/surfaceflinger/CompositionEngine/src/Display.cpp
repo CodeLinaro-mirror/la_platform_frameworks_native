@@ -182,7 +182,6 @@ void Display::setColorProfile(const ColorProfile& colorProfile) {
     mQtiColorProfile.renderIntent = colorProfile.renderIntent;
 
 // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
-// QTI_BEGIN: 2025-06-29: Display: sf: Add FBT WCG blending space support for WFD
 
     if (isVirtual()) {
         auto qtiHalId = getDisplayIdVariant().and_then(asHalDisplayId<DisplayIdVariant>);
@@ -194,7 +193,6 @@ void Display::setColorProfile(const ColorProfile& colorProfile) {
         return;
     }
 
-// QTI_END: 2025-06-29: Display: sf: Add FBT WCG blending space support for WFD
     const auto physicalId = getDisplayIdVariant().and_then(asPhysicalDisplayId);
     LOG_FATAL_IF(!physicalId);
     getCompositionEngine().getHwComposer().setActiveColorMode(*physicalId, colorProfile.mode,
@@ -454,7 +452,6 @@ void Display::applyLayerLutsToLayers(const LayerLuts& layerLuts) {
 
         if (auto lutsIt = layerLuts.find(hwcLayer); lutsIt != layerLuts.end()) {
             if (auto mapperIt = mapper.find(hwcLayer); mapperIt != mapper.end()) {
-// QTI_BEGIN: 2025-06-19: Display: [Lut] clear out the lut if an invalud lut is provided.
                 if (mapperIt->second.ok()) {
                     layer->applyDeviceLayerLut(::android::base::unique_fd(
                                                        mapperIt->second.release()),
@@ -462,7 +459,6 @@ void Display::applyLayerLutsToLayers(const LayerLuts& layerLuts) {
                 } else {
                     layer->applyDeviceLayerLut(::android::base::unique_fd(), lutsIt->second);
                 }
-// QTI_END: 2025-06-19: Display: [Lut] clear out the lut if an invalud lut is provided.
             }
         }
     }
@@ -650,16 +646,12 @@ void Display::qtiBeginDraw() {
 
 // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
         if (SFTRACE_ENABLED()) {
-// QTI_BEGIN: 2023-03-22: Display: surfaceflinger: Fixes for spec fence
             std::string temp =
                     "Specfence_QtiBeginDraw_currentIndex_" + std::to_string(current.index);
-// QTI_END: 2023-03-22: Display: surfaceflinger: Fixes for spec fence
             SFTRACE_NAME(temp.c_str());
-// QTI_BEGIN: 2023-03-22: Display: surfaceflinger: Fixes for spec fence
         }
 
         if (current.index < 0) {
-// QTI_END: 2023-03-22: Display: surfaceflinger: Fixes for spec fence
 // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
             return;
         }
