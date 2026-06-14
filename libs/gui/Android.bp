@@ -600,6 +600,11 @@ qtidisplayextension_cc_defaults {
             cflags: [
                 "-DQTI_DISPLAY_EXTENSION",
             ],
+        },
+        qtilsrenabled: {
+            cflags: [
+                "-DQTI_LSR_ENABLED",
+            ],
         }
 // QTI_END: 2023-04-02: Performance: gui: Introduce QTI Extensions in AOSP
 // QTI_BEGIN: 2024-02-29: Display: gui: set buffer dequeue duration in buffer private meta data
