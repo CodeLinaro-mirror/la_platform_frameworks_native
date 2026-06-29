@@ -46,6 +46,8 @@ public:
         const void* extraData;
     };
 
+    ~RpcServerTrusty();
+
     /**
      * Creates an RPC server listening on the given port and adds it to the
      * Trusty handle set at |handleSet|.
@@ -148,6 +150,7 @@ private:
     std::vector<const uuid*> mUuidPtrs;
     tipc_port_acl mTipcPortAcl;
     tipc_port mTipcPort;
+    tipc_port_ctx* mTipcPortCtx;
 };
 
 } // namespace android
