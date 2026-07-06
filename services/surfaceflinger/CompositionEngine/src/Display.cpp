@@ -15,9 +15,9 @@
  */
 
 // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
-/* Changes from Qualcomm Innovation Center are provided under the following license:
+/* Changes from Qualcomm Technologies, Inc. are provided under the following license:
  *
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
@@ -613,6 +613,7 @@ void Display::qtiBeginDraw() {
             layerFlags.secure_video = layerCompositionState->hasProtectedContent;
             layerFlags.blur = (layerCompositionState->backgroundBlurRadius > 0) ||
                     (layerCompositionState->blurRegions.size() > 0);
+            layerFlags.edge_extension = layerCompositionState->edgeExtensionEffect.hasEffect();
             displayLayerFlags.push_back(layerFlags);
         }
         fbtLayerInfo.width = getState().orientedDisplaySpace.getBounds().width;
