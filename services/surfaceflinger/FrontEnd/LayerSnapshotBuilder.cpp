@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+/* Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
+
 // #define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 #include "FrontEnd/LayerSnapshot.h"
@@ -366,6 +373,19 @@ LayerSnapshot LayerSnapshotBuilder::getRootSnapshot() {
     snapshot.frameRate = {};
     snapshot.fixedTransformHint = ui::Transform::ROT_INVALID;
     snapshot.ignoreLocalTransform = false;
+    // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
+    snapshot.qtiCompositionLayerType = gui::CompositionLayerType::COMPOSITION_LAYER_NONE;
+    snapshot.qtiLayerVisibilityType = gui::LayerVisibilityType::LAYER_VISIBILITY_NONE;
+    snapshot.qtiReferenceSpaceType =
+            gui::RenderLayerReferenceSpaceType::RENDER_LAYER_REFERENCE_SPACE_NONE;
+    snapshot.qtiFrustum = gui::Frustum();
+    snapshot.qtiPose = gui::Pose();
+    snapshot.qtiPlaneEquation = gui::PlaneEquation();
+    snapshot.qtiQuadWidth = 0.0;
+    snapshot.qtiQuadHeight = 0.0;
+#endif
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
     return snapshot;
 }
 
@@ -962,6 +982,18 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
     snapshot.isOpaque = snapshot.contentOpaque && !snapshot.roundedCorner.hasRoundedCorners() &&
             snapshot.color.a == 1.f;
     snapshot.blendMode = getBlendMode(snapshot, requested);
+    // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
+    snapshot.qtiCompositionLayerType = requested.compositionLayerType;
+    snapshot.qtiLayerVisibilityType = requested.layerVisibilityType;
+    snapshot.qtiReferenceSpaceType = requested.referenceSpaceType;
+    snapshot.qtiFrustum = requested.frustum;
+    snapshot.qtiPose = requested.pose;
+    snapshot.qtiPlaneEquation = requested.planeEquation;
+    snapshot.qtiQuadWidth = requested.quadWidth;
+    snapshot.qtiQuadHeight = requested.quadHeight;
+#endif
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API
     LLOGV(snapshot.sequence,
           "%supdated %s changes:%s parent:%s requested:%s requested:%s from parent %s",
           args.forceUpdate == ForceUpdateFlags::ALL ? "Force " : "",

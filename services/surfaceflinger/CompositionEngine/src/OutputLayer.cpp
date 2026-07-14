@@ -14,14 +14,13 @@
  * limitations under the License.
  */
 
-// QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
-/* Changes from Qualcomm Innovation Center are provided under the following license:
- *
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+/* Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
-// QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 #include <DisplayHardware/Hal.h>
 #include <android-base/stringprintf.h>
 #include <compositionengine/DisplayColorProfile.h>
@@ -780,7 +779,29 @@ void OutputLayer::writeOutputIndependentPerFrameStateToHWC(
 
     QtiOutputExtension::qtiSetLayerType(hwcLayer, outputIndependentState.qtiLayerClass,
                               getLayerFE().getDebugName());
-// QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
+    // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
+    // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
+    QtiOutputExtension::qtiSetCompositionLayerType(hwcLayer,
+                                                   outputIndependentState.qtiCompositionLayerType,
+                                                   getLayerFE().getDebugName());
+    QtiOutputExtension::qtiSetLayerVisibilityType(hwcLayer,
+                                                  outputIndependentState.qtiLayerVisibilityType,
+                                                  getLayerFE().getDebugName());
+    QtiOutputExtension::qtiSetReferenceSpaceType(hwcLayer,
+                                                 outputIndependentState.qtiReferenceSpaceType,
+                                                 getLayerFE().getDebugName());
+    QtiOutputExtension::qtiSetFrustum(hwcLayer, outputIndependentState.qtiFrustum,
+                                      getLayerFE().getDebugName());
+    QtiOutputExtension::qtiSetPose(hwcLayer, outputIndependentState.qtiPose,
+                                   getLayerFE().getDebugName());
+    QtiOutputExtension::qtiSetPlaneEquation(hwcLayer, outputIndependentState.qtiPlaneEquation,
+                                            getLayerFE().getDebugName());
+    QtiOutputExtension::qtiSetQuadSize(hwcLayer, outputIndependentState.qtiQuadWidth,
+                                       outputIndependentState.qtiQuadHeight,
+                                       getLayerFE().getDebugName());
+#endif
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 }
 
 void OutputLayer::writeSolidColorStateToHWC(HWC2::Layer* hwcLayer,

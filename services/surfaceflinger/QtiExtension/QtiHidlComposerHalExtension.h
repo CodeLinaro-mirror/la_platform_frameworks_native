@@ -1,4 +1,5 @@
-/* Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+/*
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 #pragma once
@@ -33,6 +34,40 @@ public:
 
     V2_1::Error qtiSetDisplayElapseTime(Display display, uint64_t timeStamp) override;
     V2_1::Error qtiSetLayerType(Display display, V2_1_Layer layer, uint32_t type) override;
+#ifdef QTI_LSR_ENABLED
+    V2_1::Error qtiSetCompositionLayerType(
+            Display display, V2_1_Layer layer,
+            gui::CompositionLayerType compositionLayerType) override {
+        return Error::NONE;
+    }
+    V2_1::Error qtiSetLayerVisibilityType(Display display, V2_1_Layer layer,
+                                          gui::LayerVisibilityType layerVisibilityType) override {
+        return Error::NONE;
+    }
+    V2_1::Error qtiSetReferenceSpaceType(
+            Display display, V2_1_Layer layer,
+            gui::RenderLayerReferenceSpaceType referenceSpaceType) override {
+        return Error::NONE;
+    }
+    V2_1::Error qtiSetFrustum(Display display, V2_1_Layer layer, gui::Frustum frustum) override {
+        return Error::NONE;
+    }
+    V2_1::Error qtiSetPose(Display display, V2_1_Layer layer, gui::Pose pose) override {
+        return Error::NONE;
+    }
+    V2_1::Error qtiSetPlaneEquation(Display display, V2_1_Layer layer,
+                                    gui::PlaneEquation planeEquation) override {
+        return Error::NONE;
+    }
+    V2_1::Error qtiSetQuadSize(Display display, V2_1_Layer layer, float quadWidth,
+                               float quadHeight) override {
+        return Error::NONE;
+    }
+    V2_1::Error qtiSetDisplayConfig(Display display,
+                                    const gui::DisplayDeviceConfig& displayDeviceConfig) {
+        return Error::NONE;
+    }
+#endif
     V2_1::Error qtiSetLayerFlag(Display display, V2_1_Layer layer,
                           uint32_t layerFlag) override;
     V2_1::Error qtiSetClientTarget_3_1(Display display, int32_t slot, int acquireFence,

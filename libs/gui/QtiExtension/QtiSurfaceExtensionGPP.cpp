@@ -28,6 +28,8 @@ enum class TAG : uint32_t {
     GPP_SERV_QUERY_SUPPORTED_GAME,
     GPP_SERV_LAST = GPP_SERV_QUERY_SUPPORTED_GAME,
 };
+#define GPP_INIT_RETRY_INTERVAL_MS 500
+#define GPP_INIT_RETRY_MAX_ATTEMPTS 5
 
 namespace android::libguiextension {
 QtiSurfaceExtensionGPP::QtiSurfaceExtensionGPP(
@@ -38,6 +40,8 @@ QtiSurfaceExtensionGPP::QtiSurfaceExtensionGPP(
       mIsEnable(false),
       mIsSupported(true),
       mConnectedToGpu(false),
+      mSessionConflictRetryCount(0),
+      mLastSessionConflictRetryTimestamp(0),
       mOriginalGbp(*gbp),
       mGbp(nullptr),
       mHandle(handle),
@@ -46,7 +50,8 @@ QtiSurfaceExtensionGPP::QtiSurfaceExtensionGPP(
       mFuncDeinit(nullptr),
       mConnectedProducerListener(),
       mClientSetBufferCount(0),
-      mLastQueuedBufferSlot(-1) {
+      mLastQueuedBufferSlot(-1),
+      mAutoPrerotation(false) {
     // FIRST_APPLICATION_UID / AID_APP_START is first uid for 3rd party application.
     // The system application will not enter this logic.
     mUID = getuid();
@@ -54,7 +59,6 @@ QtiSurfaceExtensionGPP::QtiSurfaceExtensionGPP(
         mIsSupported = false;
         return;
     }
-
     sp<IServiceManager> sm = defaultServiceManager();
     if (sm == nullptr) {
         mIsSupported = false;
@@ -128,10 +132,6 @@ void QtiSurfaceExtensionGPP::DisableGPPinternal(sp<IGraphicBufferProducer>* gbp)
     if (mIsEnable && mFuncDeinit) {
         reinterpret_cast<DeinitFunc_t>(mFuncDeinit)(mHandle);
     }
-    if (mLibHandler != nullptr) {
-        dlclose(mLibHandler);
-    }
-    mLibHandler = nullptr;
     mGbp = nullptr;
     if (mOriginalGbp != nullptr) {
         if (static_cast<uint32_t>(mFrameRate) != 0) {
@@ -146,8 +146,15 @@ void QtiSurfaceExtensionGPP::DisableGPPinternal(sp<IGraphicBufferProducer>* gbp)
     }
 }
 
+bool QtiSurfaceExtensionGPP::IsSessionConflictRetryAllowed() const {
+    const nsecs_t now = systemTime(SYSTEM_TIME_MONOTONIC);
+    const nsecs_t intervalNs = milliseconds_to_nanoseconds(GPP_INIT_RETRY_INTERVAL_MS);
+    return mSessionConflictRetryCount < GPP_INIT_RETRY_MAX_ATTEMPTS &&
+           (now - mLastSessionConflictRetryTimestamp >= intervalNs);
+}
+
 bool QtiSurfaceExtensionGPP::DynamicEnableInternal(sp<IGraphicBufferProducer>* gbp, bool needReconnect) {
-    if (mIsSupported && mConnectedToGpu) {
+    if (mIsSupported && mConnectedToGpu && IsSessionConflictRetryAllowed()) {
         char valueStr[PROPERTY_VALUE_MAX] = {0};
         property_get("vendor.gpp.frc.enable", valueStr, "0x11");//default value should not be 0x0(FRC OFF) or 0x1(FRC ON),need to other value,choose 0x11.
         int enable = -1;
@@ -178,9 +185,16 @@ bool QtiSurfaceExtensionGPP::DynamicEnableInternal(sp<IGraphicBufferProducer>* g
                     if (err == NAME_NOT_FOUND || err == INVALID_OPERATION) {
                        mIsSupported = false;
                        ALOGV("Failed to init GPP: Surface or App is not supported by GPP");
+                    } else if (err == ALREADY_EXISTS) {
+                        mLastSessionConflictRetryTimestamp = systemTime(SYSTEM_TIME_MONOTONIC);
+                        mSessionConflictRetryCount++;
+                        if (mSessionConflictRetryCount >= GPP_INIT_RETRY_MAX_ATTEMPTS) {
+                            mIsSupported = false;
+                        }
+                        ALOGE("Failed to init GPP: Exist another session. Retry attempt %d", mSessionConflictRetryCount);
                     } else {
                         mIsSupported = false;
-                        ALOGV("Failed to init GPP: Unknown error.");
+                        ALOGE("Failed to init GPP: Unknown error.");
                     }
                 }
             } else {
@@ -190,6 +204,7 @@ bool QtiSurfaceExtensionGPP::DynamicEnableInternal(sp<IGraphicBufferProducer>* g
             if (needReconnect && mIsEnable == enable && nullptr != *gbp && nullptr != mConnectedProducerListener) {
                IGraphicBufferProducer::QueueBufferOutput output;
                (*gbp)->connect(mConnectedProducerListener, mAPI, mReportBufferRemoval, &output);
+               (*gbp)->setAutoPrerotation(mAutoPrerotation);
                TransferBuffersToNewQueue(gbp);
             }
             if (mIsEnable == enable) {

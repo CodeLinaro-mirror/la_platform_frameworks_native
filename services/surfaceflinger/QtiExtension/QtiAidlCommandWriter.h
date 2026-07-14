@@ -1,4 +1,5 @@
-/* Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+/*
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 #pragma once
@@ -11,12 +12,30 @@ using ::aidl::android::hardware::graphics::composer3::ComposerClientWriter;
 #else
 #include <aidl/vendor/qti/hardware/display/composer3/IQtiComposer3Client.h>
 
+#ifdef QTI_LSR_ENABLED
+#include <android/gui/CompositionLayerType.h>
+#include <android/gui/Frustum.h>
+#include <android/gui/LayerVisibilityType.h>
+#include <android/gui/Orientation.h>
+#include <android/gui/PlaneEquation.h>
+#include <android/gui/Pose.h>
+#include <android/gui/Position.h>
+#include <android/gui/RenderLayerReferenceSpaceType.h>
+#endif
+
+#include <aidl/vendor/qti/hardware/display/composer3/QtiLayerCommand.h>
+
 using aidl::vendor::qti::hardware::display::composer3::IQtiComposer3Client;
 using aidl::vendor::qti::hardware::display::composer3::QtiDisplayCommand;
 using aidl::vendor::qti::hardware::display::composer3::QtiDrawMethod;
 using aidl::vendor::qti::hardware::display::composer3::QtiLayerCommand;
 using aidl::vendor::qti::hardware::display::composer3::QtiLayerFlags;
 using aidl::vendor::qti::hardware::display::composer3::QtiLayerType;
+#ifdef QTI_LSR_ENABLED
+using aidl::vendor::qti::hardware::display::composer3::QtiCompositionLayerType;
+using aidl::vendor::qti::hardware::display::composer3::QtiLayerVisibilityType;
+using aidl::vendor::qti::hardware::display::composer3::QtiRenderLayerReferenceSpaceType;
+#endif
 
 namespace android::Hwc2 {
 
@@ -38,6 +57,85 @@ public:
             qtiLayerCommand->qtiLayerType = static_cast<QtiLayerType>(type);
         }
     }
+
+#ifdef QTI_LSR_ENABLED
+    void qtiSetCompositionLayerType(int64_t display, int64_t layer,
+                                    gui::CompositionLayerType compositionLayerType) {
+        auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
+        if (qtiLayerCommand) {
+            qtiLayerCommand->qtiCompositionLayerType.emplace();
+            qtiLayerCommand->qtiCompositionLayerType->compositionLayerType =
+                    static_cast<QtiCompositionLayerType>(compositionLayerType);
+        }
+    }
+
+    void qtiSetLayerVisibilityType(int64_t display, int64_t layer,
+                                   gui::LayerVisibilityType layerVisibilityType) {
+        auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
+        if (qtiLayerCommand) {
+            qtiLayerCommand->qtiLayerVisibilityType.emplace();
+            qtiLayerCommand->qtiLayerVisibilityType->layerVisibilityType =
+                    static_cast<QtiLayerVisibilityType>(layerVisibilityType);
+        }
+    }
+
+    void qtiSetReferenceSpaceType(int64_t display, int64_t layer,
+                                  gui::RenderLayerReferenceSpaceType referenceSpaceType) {
+        auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
+        if (qtiLayerCommand) {
+            qtiLayerCommand->qtiRenderLayerReferenceSpaceType.emplace();
+            qtiLayerCommand->qtiRenderLayerReferenceSpaceType->renderLayerReferenceSpaceType =
+                    static_cast<QtiRenderLayerReferenceSpaceType>(referenceSpaceType);
+        }
+    }
+
+    void qtiSetFrustum(int64_t display, int64_t layer, gui::Frustum frustum) {
+        auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
+        if (qtiLayerCommand) {
+            qtiLayerCommand->qtiLayerFrustum.emplace();
+            qtiLayerCommand->qtiLayerFrustum->angleLeft = frustum.angleLeft;
+            qtiLayerCommand->qtiLayerFrustum->angleRight = frustum.angleRight;
+            qtiLayerCommand->qtiLayerFrustum->angleUp = frustum.angleUp;
+            qtiLayerCommand->qtiLayerFrustum->angleDown = frustum.angleDown;
+        }
+    }
+
+    void qtiSetPose(int64_t display, int64_t layer, gui::Pose pose) {
+        auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
+        if (qtiLayerCommand) {
+            qtiLayerCommand->qtiLayerPose.emplace();
+            auto& pos = qtiLayerCommand->qtiLayerPose->pos;
+            pos.x = pose.pos.x;
+            pos.y = pose.pos.y;
+            pos.z = pose.pos.z;
+            auto& orientation = qtiLayerCommand->qtiLayerPose->orientation;
+            orientation.x = pose.orientation.x;
+            orientation.y = pose.orientation.y;
+            orientation.z = pose.orientation.z;
+            orientation.w = pose.orientation.w;
+        }
+    }
+
+    void qtiSetPlaneEquation(int64_t display, int64_t layer, gui::PlaneEquation planeEquation) {
+        auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
+        if (qtiLayerCommand) {
+            qtiLayerCommand->qtiLayerPlaneEquation.emplace();
+            qtiLayerCommand->qtiLayerPlaneEquation->a = planeEquation.a;
+            qtiLayerCommand->qtiLayerPlaneEquation->b = planeEquation.b;
+            qtiLayerCommand->qtiLayerPlaneEquation->c = planeEquation.c;
+            qtiLayerCommand->qtiLayerPlaneEquation->d = planeEquation.d;
+        }
+    }
+
+    void qtiSetQuadSize(int64_t display, int64_t layer, float quadWidth, float quadHeight) {
+        auto qtiLayerCommand = qtiGetLayerCommand(display, layer);
+        if (qtiLayerCommand) {
+            qtiLayerCommand->qtiLayerQuadSize.emplace();
+            qtiLayerCommand->qtiLayerQuadSize->width = quadWidth;
+            qtiLayerCommand->qtiLayerQuadSize->height = quadHeight;
+        }
+    }
+#endif
 
     void qtiSetDisplayElapseTime(int64_t display, uint64_t time) {
         auto qtiDisplayCommand = qtiGetDisplayCommand(display);

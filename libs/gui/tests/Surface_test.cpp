@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 #include <gtest/gtest.h>
 
 #include <SurfaceFlingerProperties.h>
@@ -1016,6 +1022,12 @@ public:
 
     binder::Status getMaxLayerPictureProfiles(const sp<IBinder>& /*display*/,
                                               int32_t* /*outMaxProfiles*/) {
+        return binder::Status::ok();
+    }
+
+    binder::Status setDisplayConfig(
+            const sp<IBinder>& /*displayToken*/,
+            const gui::DisplayDeviceConfig& /*displayDeviceConfig*/) override {
         return binder::Status::ok();
     }
 

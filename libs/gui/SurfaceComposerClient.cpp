@@ -12,13 +12,18 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-// QTI_BEGIN: 2024-06-19: Performance: native: smart touch FR LOST markings modification.
  *
  * Changes from Qualcomm Innovation Center are provided under the following license:
  * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
-// QTI_END: 2024-06-19: Performance: native: smart touch FR LOST markings modification.
  */
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 #define LOG_TAG "SurfaceComposerClient"
 
@@ -71,10 +76,8 @@
 #include <private/gui/ComposerService.h>
 #include <private/gui/ComposerServiceAIDL.h>
 
-// QTI_BEGIN: 2024-05-15: Performance: native: smart touch consuming
 #include "QtiExtension/QtiDolphinWrapper.h"
 
-// QTI_END: 2024-05-15: Performance: native: smart touch consuming
 // This server size should always be smaller than the server cache size
 #define BUFFER_CACHE_MAX_SIZE 4096
 
@@ -1164,35 +1167,25 @@ status_t SurfaceComposerClient::Transaction::apply(bool synchronous, bool oneWay
     if ((mState.mFlags & wakeupFlags) == wakeupFlags) {
         mState.mFlags &= ~(wakeupFlags);
     }
-// QTI_BEGIN: 2025-06-18: Performance: gui: Filter valid transaction for queueBuffer
     QtiDolphinWrapper* qtiDolphinWrapper = nullptr;
     if (mState.mHasListenerCallbacks) {
         qtiDolphinWrapper = QtiDolphinWrapper::qtiGetDolphinWrapper();
     }
-// QTI_END: 2025-06-18: Performance: gui: Filter valid transaction for queueBuffer
-// QTI_BEGIN: 2024-05-15: Performance: native: smart touch consuming
     if (qtiDolphinWrapper && qtiDolphinWrapper->qtiDolphinFilterBuffer) {
-// QTI_END: 2024-05-15: Performance: native: smart touch consuming
         qtiDolphinWrapper->qtiDolphinFilterBuffer(mState.mIsAutoTimestamp, mState.mDesiredPresentTime, mState.mFlags);
-// QTI_BEGIN: 2024-05-15: Performance: native: smart touch consuming
     }
-// QTI_END: 2024-05-15: Performance: native: smart touch consuming
 
     if (!mState.mApplyToken) mState.mApplyToken = getDefaultApplyToken();
 
     sp<ISurfaceComposer> sf(ComposerService::getComposerService());
-// QTI_BEGIN: 2024-05-15: Performance: native: smart touch consuming
     if (qtiDolphinWrapper && qtiDolphinWrapper->qtiDolphinQueueBuffer) {
         qtiDolphinWrapper->qtiDolphinQueueBuffer(true);
     }
-// QTI_END: 2024-05-15: Performance: native: smart touch consuming
     status_t binderStatus = sf->setTransactionState(std::move(mState));
     mState.mId = generateId();
-// QTI_BEGIN: 2024-05-15: Performance: native: smart touch consuming
     if (qtiDolphinWrapper && qtiDolphinWrapper->qtiDolphinQueueBuffer) {
         qtiDolphinWrapper->qtiDolphinQueueBuffer(false);
     }
-// QTI_END: 2024-05-15: Performance: native: smart touch consuming
 
     // Clear the current states and flags
     clear();
@@ -1724,6 +1717,122 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::unsetBuf
     s->bufferData = nullptr;
     return *this;
 }
+
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setReferenceSpaceType(
+        const sp<SurfaceControl>& sc,
+        const gui::RenderLayerReferenceSpaceType& referenceSpaceType) {
+#ifdef QTI_LSR_ENABLED
+    layer_state_t* s = getLayerState(sc);
+    if (!s) {
+        mStatus = BAD_INDEX;
+        return *this;
+    }
+    s->what |= layer_state_t::eReferenceSpaceTypeChanged;
+    s->referenceSpaceType = referenceSpaceType;
+
+    registerSurfaceControlForCallback(sc);
+#endif
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setCompositionLayerType(
+        const sp<SurfaceControl>& sc, const gui::CompositionLayerType& compositionLayerType) {
+#ifdef QTI_LSR_ENABLED
+    layer_state_t* s = getLayerState(sc);
+    if (!s) {
+        mStatus = BAD_INDEX;
+        return *this;
+    }
+    s->what |= layer_state_t::eCompositionLayerTypeChanged;
+    s->compositionLayerType = compositionLayerType;
+
+    registerSurfaceControlForCallback(sc);
+#endif
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setPose(
+        const sp<SurfaceControl>& sc, const gui::Pose& pose) {
+#ifdef QTI_LSR_ENABLED
+    layer_state_t* s = getLayerState(sc);
+    if (!s) {
+        mStatus = BAD_INDEX;
+        return *this;
+    }
+    s->what |= layer_state_t::ePoseChanged;
+    s->pose = pose;
+
+    registerSurfaceControlForCallback(sc);
+#endif
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setQuadSize(
+        const sp<SurfaceControl>& sc, float width, float height) {
+#ifdef QTI_LSR_ENABLED
+    layer_state_t* s = getLayerState(sc);
+    if (!s) {
+        mStatus = BAD_INDEX;
+        return *this;
+    }
+    s->what |= layer_state_t::eQuadSizeChanged;
+    s->quadWidth = width;
+    s->quadHeight = height;
+
+    registerSurfaceControlForCallback(sc);
+#endif
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setFrustum(
+        const sp<SurfaceControl>& sc, const gui::Frustum& frustum) {
+#ifdef QTI_LSR_ENABLED
+    layer_state_t* s = getLayerState(sc);
+    if (!s) {
+        mStatus = BAD_INDEX;
+        return *this;
+    }
+    s->what |= layer_state_t::eFrustumChanged;
+    s->frustum = frustum;
+
+    registerSurfaceControlForCallback(sc);
+#endif
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setPlaneEquation(
+        const sp<SurfaceControl>& sc, const gui::PlaneEquation& planeEquation) {
+#ifdef QTI_LSR_ENABLED
+    layer_state_t* s = getLayerState(sc);
+    if (!s) {
+        mStatus = BAD_INDEX;
+        return *this;
+    }
+    s->what |= layer_state_t::ePlaneEquationChanged;
+    s->planeEquation = planeEquation;
+
+    registerSurfaceControlForCallback(sc);
+#endif
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setLayerVisibilityType(
+        const sp<SurfaceControl>& sc, const gui::LayerVisibilityType& layerVisibilityType) {
+#ifdef QTI_LSR_ENABLED
+    layer_state_t* s = getLayerState(sc);
+    if (!s) {
+        mStatus = BAD_INDEX;
+        return *this;
+    }
+    s->what |= layer_state_t::eLayerVisibilityChanged;
+    s->layerVisibilityType = layerVisibilityType;
+
+    registerSurfaceControlForCallback(sc);
+#endif
+    return *this;
+}
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 void SurfaceComposerClient::Transaction::setReleaseBufferCallback(BufferData* bufferData,
                                                                   ReleaseBufferCallback callback) {
@@ -3164,6 +3273,23 @@ std::optional<DisplayDecorationSupport> SurfaceComposerClient::getDisplayDecorat
     }
     return support;
 }
+
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+status_t SurfaceComposerClient::setDisplayConfig(const sp<IBinder>& display,
+                                                 gui::DisplayDeviceConfig& displayDeviceConfig) {
+#ifdef QTI_LSR_ENABLED
+    binder::Status status =
+            ComposerServiceAIDL::getComposerService()->setDisplayConfig(display,
+                                                                        displayDeviceConfig);
+    if (!status.isOk()) {
+        status_t err = statusTFromBinderStatus(status);
+        ALOGE("setDisplayConfig failed:  %s (%d)", strerror(-err), err);
+        return UNKNOWN_ERROR;
+    }
+#endif
+    return NO_ERROR;
+}
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 int SurfaceComposerClient::getGpuContextPriority() {
     int priority;

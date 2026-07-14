@@ -14,18 +14,16 @@
  * limitations under the License.
  */
 
-// QTI_BEGIN: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_BEGIN: 2023-01-24: Camera: sf: Add support for multiple displays
 /* Changes from Qualcomm Innovation Center are provided under the following license:
  *
-// QTI_END: 2023-01-24: Display: sf: Add support for multiple displays
-// QTI_BEGIN: 2024-02-28: Display: sf: Add check for unknown dataspace
+// QTI_END: 2023-01-24: Camera: sf: Add support for multiple displays
  * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
-// QTI_END: 2024-02-28: Display: sf: Add check for unknown dataspace
-// QTI_BEGIN: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_BEGIN: 2023-01-24: Camera: sf: Add support for multiple displays
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
-// QTI_END: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_END: 2023-01-24: Camera: sf: Add support for multiple displays
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
 
 #pragma clang diagnostic push
@@ -82,9 +80,9 @@
 #include "FrontEnd/LayerHandle.h"
 #include "Layer.h"
 #include "LayerProtoHelper.h"
-// QTI_BEGIN: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_BEGIN: 2023-01-24: Camera: sf: Add support for multiple displays
 #include "QtiExtension/QtiSurfaceFlingerExtensionIntf.h"
-// QTI_END: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_END: 2023-01-24: Camera: sf: Add support for multiple displays
 #include "SurfaceFlinger.h"
 #include "TimeStats/TimeStats.h"
 #include "TransactionCallbackInvoker.h"
@@ -133,12 +131,12 @@ TimeStats::SetFrameRateVote frameRateToSetFrameRateVotePayload(Layer::FrameRate 
 
 } // namespace
 
-// QTI_BEGIN: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_BEGIN: 2023-01-24: Camera: sf: Add support for multiple displays
 namespace surfaceflingerextension {
 class QtiSurfaceFlingerExtensionIntf;
 } // namespace surfaceflingerextension
 
-// QTI_END: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_END: 2023-01-24: Camera: sf: Add support for multiple displays
 using namespace ftl::flag_operators;
 
 using base::StringAppendF;
@@ -183,7 +181,21 @@ Layer::Layer(const surfaceflinger::LayerCreationArgs& args)
     mOwnerAppId = mOwnerUid % PER_USER_RANGE;
 
     mPotentialCursor = args.flags & ISurfaceComposerClient::eCursorWindow;
-// QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
+
+    // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
+    mDrawingState.compositionLayerType = gui::CompositionLayerType::COMPOSITION_LAYER_NONE;
+    mDrawingState.layerVisibilityType = gui::LayerVisibilityType::LAYER_VISIBILITY_NONE;
+    mDrawingState.referenceSpaceType =
+            gui::RenderLayerReferenceSpaceType::RENDER_LAYER_REFERENCE_SPACE_NONE;
+    mDrawingState.frustum = gui::Frustum();
+    mDrawingState.pose = gui::Pose();
+    mDrawingState.planeEquation = gui::PlaneEquation();
+    mDrawingState.quadWidth = 0.0;
+    mDrawingState.quadHeight = 0.0;
+#endif
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
+    // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
     mQtiLayerClass = mFlinger->mQtiSFExtnIntf->qtiGetLayerClass(mName);
 // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
 }
@@ -411,6 +423,69 @@ bool Layer::setCrop(const FloatRect& crop) {
     return true;
 }
 
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
+bool Layer::setPlaneEquation(gui::PlaneEquation planeEquation) {
+    if (mDrawingState.planeEquation == planeEquation) return false;
+    mDrawingState.sequence++;
+    mDrawingState.planeEquation = planeEquation;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setReferenceSpaceType(gui::RenderLayerReferenceSpaceType referenceSpaceType) {
+    if (mDrawingState.referenceSpaceType == referenceSpaceType) return false;
+    mDrawingState.sequence++;
+    mDrawingState.referenceSpaceType = referenceSpaceType;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setCompositionLayerType(gui::CompositionLayerType compositionLayerType) {
+    if (mDrawingState.compositionLayerType == compositionLayerType) return false;
+    mDrawingState.sequence++;
+    mDrawingState.compositionLayerType = compositionLayerType;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setLayerVisibilityType(gui::LayerVisibilityType layerVisibilityType) {
+    if (mDrawingState.layerVisibilityType == layerVisibilityType) return false;
+    mDrawingState.sequence++;
+    mDrawingState.layerVisibilityType = layerVisibilityType;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setPose(gui::Pose pose) {
+    if (mDrawingState.pose == pose) return false;
+    mDrawingState.sequence++;
+    mDrawingState.pose = pose;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setQuadSize(float quadWidth, float quadHeight) {
+    if ((mDrawingState.quadWidth == quadWidth) && (mDrawingState.quadHeight == quadHeight)) {
+        return false;
+    }
+    mDrawingState.sequence++;
+    mDrawingState.quadWidth = quadWidth;
+    mDrawingState.quadHeight = quadHeight;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setFrustum(gui::Frustum frustum) {
+    if (mDrawingState.frustum == frustum) return false;
+    mDrawingState.sequence++;
+    mDrawingState.frustum = frustum;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+#endif
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
+
 bool Layer::isLayerFocusedBasedOnPriority(int32_t priority) {
     return priority == PRIORITY_FOCUSED_WITH_MODE || priority == PRIORITY_FOCUSED_WITHOUT_MODE;
 };
@@ -607,9 +682,7 @@ void Layer::miniDump(std::string& result, const frontend::LayerSnapshot& snapsho
     StringAppendF(&result, "  %10zu | ", snapshot.globalZ);
     StringAppendF(&result, "  %10d | ",
                   snapshot.layerMetadata.getInt32(gui::METADATA_WINDOW_TYPE, 0));
-// QTI_BEGIN: 2024-01-29: Display: sf: enable layerext in Android V
     StringAppendF(&result, "  %10d | ", mQtiLayerClass);
-// QTI_END: 2024-01-29: Display: sf: enable layerext in Android V
     StringAppendF(&result, "%10s | ", toString(getCompositionType(outputLayer)).c_str());
     const auto& outputLayerState = outputLayer->getState();
     StringAppendF(&result, "%10s | ", toString(outputLayerState.bufferTransform).c_str());
@@ -1335,30 +1408,20 @@ void Layer::gatherBufferInfo() {
         {
             SFTRACE_NAME("getDataspace");
             err = mapper.getDataspace(mBufferInfo.mBuffer->getBuffer()->handle, &dataspace);
-// QTI_BEGIN: 2024-02-28: Display: sf: Add check for unknown dataspace
             if (dataspace == ui::Dataspace::UNKNOWN) {
-// QTI_END: 2024-02-28: Display: sf: Add check for unknown dataspace
-// QTI_BEGIN: 2024-12-24: Display: SF: Reduce unknown dataspace log priority
               ALOGV("%s: Received unknown dataspace from gralloc", __func__);
-// QTI_END: 2024-12-24: Display: SF: Reduce unknown dataspace log priority
-// QTI_BEGIN: 2024-02-28: Display: sf: Add check for unknown dataspace
             }
-// QTI_END: 2024-02-28: Display: sf: Add check for unknown dataspace
         }
-// QTI_BEGIN: 2024-02-28: Display: sf: Add check for unknown dataspace
         if ((err != OK || dataspace != mBufferInfo.mDataspace)
             && dataspace != ui::Dataspace::UNKNOWN) {
-// QTI_END: 2024-02-28: Display: sf: Add check for unknown dataspace
             {
                 SFTRACE_NAME("setDataspace");
                 err = mapper.setDataspace(mBufferInfo.mBuffer->getBuffer()->handle,
                                           static_cast<ui::Dataspace>(mBufferInfo.mDataspace));
             }
-// QTI_BEGIN: 2024-02-28: Display: sf: upsert RenderEngine's caches
             // GPU drivers cache gralloc metadata which means before we composite we need
             // to upsert RenderEngine's cache.
             mBufferInfo.mBuffer->remapBuffer();
-// QTI_END: 2024-02-28: Display: sf: upsert RenderEngine's caches
         }
     }
     if (lastDataspace != mBufferInfo.mDataspace ||
@@ -1411,7 +1474,6 @@ sp<LayerFE> Layer::getCompositionEngineLayerFE(
     }
     auto layerFE = mFlinger->getFactory().createLayerFE(mName, this);
     mLayerFEs.emplace_back(path, layerFE);
-// QTI_BEGIN: 2025-01-07: Display: sf: Update LayerFE's composition state before composition
 
     if (getBuffer()) {
         mQtiIsSecureDisplay = mFlinger->mQtiSFExtnIntf->qtiIsSecureDisplay(
@@ -1419,7 +1481,6 @@ sp<LayerFE> Layer::getCompositionEngineLayerFE(
         mQtiIsSecureCamera = mFlinger->mQtiSFExtnIntf->qtiIsSecureCamera(
                 static_cast<sp<const GraphicBuffer>>(getBuffer()));
     }
-// QTI_END: 2025-01-07: Display: sf: Update LayerFE's composition state before composition
     return layerFE;
 }
 
@@ -1570,9 +1631,7 @@ bool Layer::latchBufferImpl(bool& recomputeVisibleRegions, nsecs_t latchTime, bo
             recomputeVisibleRegions = true;
         }
     }
-// QTI_BEGIN: 2024-07-19: Display: sf: use correct layer stack id in smomo
     mFlinger->mQtiSFExtnIntf->qtiSetPresentTime(qtiGetSmomoLayerStackId(), getSequence(),
-// QTI_END: 2024-07-19: Display: sf: use correct layer stack id in smomo
 // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
                                                 mBufferInfo.mDesiredPresentTime);
 
@@ -1679,10 +1738,8 @@ void Layer::setIsSmallDirty(frontend::LayerSnapshot* snapshot) {
                                                    bounds.getWidth() * bounds.getHeight());
 }
 
-// QTI_BEGIN: 2024-07-19: Display: sf: use correct layer stack id in smomo
 void Layer::qtiSetSmomoLayerStackId(uint32_t id) {
     qtiSmomoLayerStackId = id;
-// QTI_END: 2024-07-19: Display: sf: use correct layer stack id in smomo
 // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
 }
 

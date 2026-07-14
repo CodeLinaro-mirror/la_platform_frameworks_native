@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-// QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
-/* Changes from Qualcomm Innovation Center are provided under the following license:
- *
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
-// QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 #pragma once
 
 #include <android/gui/DropInputMode.h>
@@ -51,6 +51,19 @@
 #include <compositionengine/LayerFECompositionState.h>
 #include <scheduler/Fps.h>
 #include <scheduler/Seamlessness.h>
+
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
+#include <android/gui/CompositionLayerType.h>
+#include <android/gui/Frustum.h>
+#include <android/gui/LayerVisibilityType.h>
+#include <android/gui/Orientation.h>
+#include <android/gui/PlaneEquation.h>
+#include <android/gui/Pose.h>
+#include <android/gui/Position.h>
+#include <android/gui/RenderLayerReferenceSpaceType.h>
+#endif
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
 #include <cstdint>
 #include <functional>
@@ -168,6 +181,18 @@ public:
         float desiredHdrSdrRatio = -1.f;
         int64_t latchedVsyncId = 0;
         bool useVsyncIdForRefreshRateSelection = false;
+        // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
+        gui::CompositionLayerType compositionLayerType;
+        gui::LayerVisibilityType layerVisibilityType;
+        gui::RenderLayerReferenceSpaceType referenceSpaceType;
+        gui::Frustum frustum;
+        gui::Pose pose;
+        gui::PlaneEquation planeEquation;
+        float quadWidth;
+        float quadHeight;
+#endif
+        // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
     };
 
     explicit Layer(const surfaceflinger::LayerCreationArgs& args);
@@ -184,6 +209,18 @@ public:
 
     // Buffer space
     bool setCrop(const FloatRect& crop);
+
+    // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
+    virtual bool setPlaneEquation(gui::PlaneEquation planeEquation);
+    virtual bool setReferenceSpaceType(gui::RenderLayerReferenceSpaceType referenceSpaceType);
+    virtual bool setCompositionLayerType(gui::CompositionLayerType compositionLayerType);
+    virtual bool setLayerVisibilityType(gui::LayerVisibilityType layerVisibilityType);
+    virtual bool setPose(gui::Pose pose);
+    virtual bool setQuadSize(float quadWidth, float quadHeight);
+    virtual bool setFrustum(gui::Frustum frustum);
+#endif
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 
     bool setTransform(uint32_t /*transform*/);
     bool setTransformToDisplayInverse(bool /*transformToDisplayInverse*/);
@@ -415,19 +452,13 @@ public:
     // Check if the damage region is a small dirty.
     void setIsSmallDirty(frontend::LayerSnapshot* snapshot);
 
-// QTI_BEGIN: 2024-07-19: Display: sf: use correct layer stack id in smomo
     void qtiSetSmomoLayerStackId(uint32_t id);
-// QTI_END: 2024-07-19: Display: sf: use correct layer stack id in smomo
 // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
     uint32_t qtiGetSmomoLayerStackId();
 // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
-// QTI_BEGIN: 2024-01-29: Display: sf: enable layerext in Android V
     uint32_t qtiGetLayerClass() { return mQtiLayerClass; };
-// QTI_END: 2024-01-29: Display: sf: enable layerext in Android V
-// QTI_BEGIN: 2025-01-07: Display: sf: Update LayerFE's composition state before composition
     bool qtiIsSecureDisplay() { return mQtiIsSecureDisplay; };
     bool qtiIsSecureCamera() { return mQtiIsSecureCamera; };
-// QTI_END: 2025-01-07: Display: sf: Update LayerFE's composition state before composition
 
 protected:
     // For unit tests
@@ -468,10 +499,8 @@ protected:
 // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
     uint32_t mQtiLayerClass{0};
 // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
-// QTI_BEGIN: 2025-01-07: Display: sf: Update LayerFE's composition state before composition
     bool mQtiIsSecureDisplay = false;
     bool mQtiIsSecureCamera = false;
-// QTI_END: 2025-01-07: Display: sf: Update LayerFE's composition state before composition
     // main thread
     sp<NativeHandle> mSidebandStream;
 

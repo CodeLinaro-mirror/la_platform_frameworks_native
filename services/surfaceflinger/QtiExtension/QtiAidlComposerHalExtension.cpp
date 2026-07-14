@@ -1,8 +1,16 @@
-/* Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+/*
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 #define LOG_NDEBUG 0
 #include "QtiAidlComposerHalExtension.h"
+#include <aidl/vendor/qti/hardware/display/composer3/QtiLayerCommand.h>
+
+#ifdef QTI_LSR_ENABLED
+using aidl::vendor::qti::hardware::display::composer3::QtiDisplayDeviceConfig;
+using aidl::vendor::qti::hardware::display::composer3::QtiDisplayProjectionMatrix;
+using aidl::vendor::qti::hardware::display::composer3::QtiLayerOrientation;
+#endif
 
 namespace android::surfaceflingerextension {
 
@@ -52,6 +60,95 @@ Error QtiAidlComposerHalExtension::qtiSetLayerType(Display display, V2_1_Layer l
 #endif
     return error;
 }
+
+#ifdef QTI_LSR_ENABLED
+Error QtiAidlComposerHalExtension::qtiSetCompositionLayerType(
+        Display display, V2_1_Layer layer, gui::CompositionLayerType compositionLayerType) {
+#ifdef QTI_COMPOSER3_EXTENSIONS
+    mQtiAidlComposer->mMutex.lock_shared();
+    mQtiAidlComposer->getWriter(display)->get().qtiSetCompositionLayerType(static_cast<int64_t>(
+                                                                                   display),
+                                                                           static_cast<int64_t>(
+                                                                                   layer),
+                                                                           compositionLayerType);
+    mQtiAidlComposer->mMutex.unlock_shared();
+#endif
+    return Error::NONE;
+}
+
+Error QtiAidlComposerHalExtension::qtiSetLayerVisibilityType(
+        Display display, V2_1_Layer layer, gui::LayerVisibilityType layerVisibilityType) {
+#ifdef QTI_COMPOSER3_EXTENSIONS
+    mQtiAidlComposer->mMutex.lock_shared();
+    mQtiAidlComposer->getWriter(display)->get().qtiSetLayerVisibilityType(static_cast<int64_t>(
+                                                                                  display),
+                                                                          static_cast<int64_t>(
+                                                                                  layer),
+                                                                          layerVisibilityType);
+    mQtiAidlComposer->mMutex.unlock_shared();
+#endif
+    return Error::NONE;
+}
+
+Error QtiAidlComposerHalExtension::qtiSetReferenceSpaceType(
+        Display display, V2_1_Layer layer, gui::RenderLayerReferenceSpaceType referenceSpaceType) {
+#ifdef QTI_COMPOSER3_EXTENSIONS
+    mQtiAidlComposer->mMutex.lock_shared();
+    mQtiAidlComposer->getWriter(display)->get().qtiSetReferenceSpaceType(static_cast<int64_t>(
+                                                                                 display),
+                                                                         static_cast<int64_t>(
+                                                                                 layer),
+                                                                         referenceSpaceType);
+    mQtiAidlComposer->mMutex.unlock_shared();
+#endif
+    return Error::NONE;
+}
+
+Error QtiAidlComposerHalExtension::qtiSetFrustum(Display display, V2_1_Layer layer,
+                                                 gui::Frustum frustum) {
+#ifdef QTI_COMPOSER3_EXTENSIONS
+    mQtiAidlComposer->mMutex.lock_shared();
+    mQtiAidlComposer->getWriter(display)->get().qtiSetFrustum(static_cast<int64_t>(display),
+                                                              static_cast<int64_t>(layer), frustum);
+    mQtiAidlComposer->mMutex.unlock_shared();
+#endif
+    return Error::NONE;
+}
+
+Error QtiAidlComposerHalExtension::qtiSetPose(Display display, V2_1_Layer layer, gui::Pose pose) {
+#ifdef QTI_COMPOSER3_EXTENSIONS
+    mQtiAidlComposer->mMutex.lock_shared();
+    mQtiAidlComposer->getWriter(display)->get().qtiSetPose(static_cast<int64_t>(display),
+                                                           static_cast<int64_t>(layer), pose);
+    mQtiAidlComposer->mMutex.unlock_shared();
+#endif
+    return Error::NONE;
+}
+
+Error QtiAidlComposerHalExtension::qtiSetPlaneEquation(Display display, V2_1_Layer layer,
+                                                       gui::PlaneEquation planeEquation) {
+#ifdef QTI_COMPOSER3_EXTENSIONS
+    mQtiAidlComposer->mMutex.lock_shared();
+    mQtiAidlComposer->getWriter(display)->get().qtiSetPlaneEquation(static_cast<int64_t>(display),
+                                                                    static_cast<int64_t>(layer),
+                                                                    planeEquation);
+    mQtiAidlComposer->mMutex.unlock_shared();
+#endif
+    return Error::NONE;
+}
+
+Error QtiAidlComposerHalExtension::qtiSetQuadSize(Display display, V2_1_Layer layer,
+                                                  float quadWidth, float quadHeight) {
+#ifdef QTI_COMPOSER3_EXTENSIONS
+    mQtiAidlComposer->mMutex.lock_shared();
+    mQtiAidlComposer->getWriter(display)->get().qtiSetQuadSize(static_cast<int64_t>(display),
+                                                               static_cast<int64_t>(layer),
+                                                               quadWidth, quadHeight);
+    mQtiAidlComposer->mMutex.unlock_shared();
+#endif
+    return Error::NONE;
+}
+#endif
 
 Error QtiAidlComposerHalExtension::qtiSetLayerFlag(Display display, V2_1_Layer layer,
                                                    uint32_t flags) {
@@ -114,5 +211,40 @@ Error QtiAidlComposerHalExtension::qtiTryDrawMethod(Display display,
 #endif
     return ret;
 }
+
+#ifdef QTI_LSR_ENABLED
+Error QtiAidlComposerHalExtension::qtiSetDisplayConfig(
+        Display display, const gui::DisplayDeviceConfig& displayDeviceConfig) {
+    Error ret = Error::NONE;
+#ifdef QTI_COMPOSER3_EXTENSIONS
+    mQtiAidlComposer->mMutex.lock_shared();
+    if (mQtiAidlComposer->qtiComposer3Client) {
+        QtiDisplayDeviceConfig qtiDisplayDeviceConfig;
+        for (size_t i = 0; i < qtiDisplayDeviceConfig.rotation.size(); i++) {
+            auto& qtiRotation = qtiDisplayDeviceConfig.rotation[i];
+            auto& rotation = displayDeviceConfig.rotation[i];
+            qtiRotation.x = rotation.x;
+            qtiRotation.y = rotation.y;
+            qtiRotation.z = rotation.z;
+            qtiRotation.w = rotation.w;
+            qtiDisplayDeviceConfig.projectionMatrix[i].prjMatrix =
+                    displayDeviceConfig.projectionMatrix[i].prjMatrix;
+        }
+        qtiDisplayDeviceConfig.gamma = displayDeviceConfig.gamma;
+        qtiDisplayDeviceConfig.calibrationFileStr = displayDeviceConfig.calibrationFileStr;
+
+        auto status = mQtiAidlComposer->qtiComposer3Client
+                              ->qtiSetDisplayDeviceConfig(static_cast<int64_t>(display),
+                                                          qtiDisplayDeviceConfig);
+        if (!status.isOk()) {
+            ALOGE("qtiDisplayDeviceConfig failed %s", status.getDescription().c_str());
+            ret = static_cast<Error>(status.getServiceSpecificError());
+        }
+    }
+    mQtiAidlComposer->mMutex.unlock_shared();
+#endif
+    return ret;
+}
+#endif
 
 } // namespace android::surfaceflingerextension

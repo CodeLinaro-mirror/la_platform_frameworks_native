@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-// QTI_BEGIN: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_BEGIN: 2023-01-24: Camera: sf: Add support for multiple displays
 /* Changes from Qualcomm Innovation Center are provided under the following license:
  *
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
-// QTI_END: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_END: 2023-01-24: Camera: sf: Add support for multiple displays
 #pragma once
 
 #include <cstdint>
@@ -45,6 +45,18 @@
 #pragma clang diagnostic ignored "-Wconversion"
 #pragma clang diagnostic ignored "-Wextra"
 
+// QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API.
+#ifdef QTI_LSR_ENABLED
+#include <android/gui/CompositionLayerType.h>
+#include <android/gui/Frustum.h>
+#include <android/gui/LayerVisibilityType.h>
+#include <android/gui/Orientation.h>
+#include <android/gui/PlaneEquation.h>
+#include <android/gui/Pose.h>
+#include <android/gui/Position.h>
+#include <android/gui/RenderLayerReferenceSpaceType.h>
+#endif
+// QTI_END: 2026-01-26: Display: sf: Add reprojection API.
 #include <gui/BufferQueue.h>
 #include <ui/EdgeExtensionEffect.h>
 #include <ui/GraphicBuffer.h>
@@ -248,15 +260,29 @@ struct LayerFECompositionState {
 
     // Debugging
     virtual void dump(std::string& out) const;
-// QTI_BEGIN: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_BEGIN: 2023-01-24: Camera: sf: Add support for multiple displays
 
     bool qtiIsSecureDisplay{false};
     bool qtiIsSecureCamera{false};
-// QTI_END: 2023-01-24: Display: sf: Add support for multiple displays
+// QTI_END: 2023-01-24: Camera: sf: Add support for multiple displays
 // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
     uint32_t qtiLayerClass; // Layer Classification
-// QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
-
+                            // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
+                            // QTI_BEGIN: 2026-01-26: Display: sf: Add reprojection API
+#ifdef QTI_LSR_ENABLED
+    gui::CompositionLayerType qtiCompositionLayerType =
+            gui::CompositionLayerType::COMPOSITION_LAYER_NONE;
+    gui::RenderLayerReferenceSpaceType qtiReferenceSpaceType =
+            gui::RenderLayerReferenceSpaceType::RENDER_LAYER_REFERENCE_SPACE_NONE;
+    gui::LayerVisibilityType qtiLayerVisibilityType =
+            gui::LayerVisibilityType::LAYER_VISIBILITY_NONE;
+    gui::Frustum qtiFrustum = gui::Frustum();
+    gui::Pose qtiPose = gui::Pose();
+    gui::PlaneEquation qtiPlaneEquation = gui::PlaneEquation();
+    float qtiQuadWidth = 0.f;
+    float qtiQuadHeight = 0.f;
+#endif
+    // QTI_END: 2026-01-26: Display: sf: Add reprojection API
 };
 
 } // namespace android::compositionengine
