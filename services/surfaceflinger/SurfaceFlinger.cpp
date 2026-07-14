@@ -1298,6 +1298,19 @@ status_t SurfaceFlinger::setActiveModeFromBackdoor(const sp<display::DisplayToke
         }
 
         const Fps fps = *fpsOpt;
+        /* QTI_BEGIN */
+        if (mQtiSFExtnIntf) {
+            const auto modeOpt = snapshot.displayModes().get(modeId);
+            if (modeOpt) {
+                const auto& modePtr = modeOpt->get();
+                const auto hwcId = modePtr->getHwcId();
+                if (mQtiSFExtnIntf->qtiIsSupportedConfigSwitch(displayToken, hwcId)!= NO_ERROR) {
+                    ALOGE("%s: QTI Extn: Config switch not supported for HWC ID %d", whence, hwcId);
+                    return BAD_VALUE;
+                }
+            }
+        }
+        /* QTI_END */
 
         // Keep the old switching type.
         const bool allowGroupSwitching =
@@ -7051,12 +7064,6 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                     ALOGE("Invalid physical display ID");
                     return nullptr;
                 }();
-
-                /* QTI_BEGIN */
-                if (mQtiSFExtnIntf->qtiIsSupportedConfigSwitch(display, modeId) != NO_ERROR) {
-                    return BAD_VALUE;
-                }
-                /* QTI_END */
 
                 mDebugDisplayModeSetByBackdoor = false;
                 const status_t result = setActiveModeFromBackdoor(display, DisplayModeId{modeId});
