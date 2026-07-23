@@ -47,6 +47,7 @@ using aidl::vendor::qti::hardware::display::config::CameraSmoothOp;
 using aidl::vendor::qti::hardware::display::config::Concurrency;
 using aidl::vendor::qti::hardware::display::config::DisplayType;
 using aidl::vendor::qti::hardware::display::config::TUIEventType;
+using aidl::vendor::qti::hardware::display::config::VirtualDispType;
 
 using composer::LayerExtnIntf;
 using smomo::SmomoIntf;
@@ -253,6 +254,9 @@ public:
     std::optional<PhysicalDisplayId> qtiGetInternalDisplayId();
     void qtiSetDesiredModeByThermalLevel(float newLevelFps);
     bool qtiIsFpsDeferNeeded(float newFpsRequest) override;
+    void qtiDisallowThermalFpsChange() override {
+        mQtiAllowThermalFpsChange = false;
+    }
     DisplayModePtr qtiGetModeFromFps(float fps);
     void qtiHandleNewLevelFps(float currFps, float newLevelFps, float* fpsToSet);
     void qtiNotifyResolutionSwitch(int displayId, int32_t width, int32_t height,
