@@ -165,14 +165,14 @@ static const SkString kShader = SkString(R"(
                 float tz = (z1 == z0) ? 0 : (z - z0);
 
                 // indices
-                float i000 = x0 + (y0 * float(size)) + (z0 * float(size) * float(size));
-                float i001 = x0 + (y0 * float(size)) + (z1 * float(size) * float(size));
-                float i010 = x0 + (y1 * float(size)) + (z0 * float(size) * float(size));
-                float i011 = x0 + (y1 * float(size)) + (z1 * float(size) * float(size));
-                float i100 = x1 + (y0 * float(size)) + (z0 * float(size) * float(size));
-                float i101 = x1 + (y0 * float(size)) + (z1 * float(size) * float(size));
-                float i110 = x1 + (y1 * float(size)) + (z0 * float(size) * float(size));
-                float i111 = x1 + (y1 * float(size)) + (z1 * float(size) * float(size));
+                float i000 = z0 + (y0 * float(size)) + (x0 * float(size) * float(size));
+                float i001 = z1 + (y0 * float(size)) + (x0 * float(size) * float(size));
+                float i010 = z0 + (y1 * float(size)) + (x0 * float(size) * float(size));
+                float i011 = z1 + (y1 * float(size)) + (x0 * float(size) * float(size));
+                float i100 = z0 + (y0 * float(size)) + (x1 * float(size) * float(size));
+                float i101 = z1 + (y0 * float(size)) + (x1 * float(size) * float(size));
+                float i110 = z0 + (y1 * float(size)) + (x1 * float(size) * float(size));
+                float i111 = z1 + (y1 * float(size)) + (x1 * float(size) * float(size));
 
                 // TODO(b/377984618): support Tetrahedral interpolation
                 // perform trilinear interpolation
@@ -190,7 +190,7 @@ static const SkString kShader = SkString(R"(
                   // TODO(user): add correct weights by calculating tetrahedron volume ratios
                   if(tx >= ty && ty >= tz) {
                     linear = (1.0 - tx) * c000 + (tx - ty) * c100 + (ty - tz) * c110 + tz * c111;
-                  } else if(tx >= linear.b && linear.b >= ty) {
+                  } else if(tx >= tz && tz >= ty) {
                     linear = (1.0 - tx) * c000 + (tx - tz) * c100 + (tz - ty) * c101 + ty * c111;
                   } else if(tz >= tx && tx >= ty) {
                     linear = (1.0 - tz) * c000 + (tz - tx) * c001 + (tx - ty) * c101 + ty * c111;
