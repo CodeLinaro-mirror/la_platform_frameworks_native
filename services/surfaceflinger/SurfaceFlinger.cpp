@@ -1533,8 +1533,11 @@ void SurfaceFlinger::setDesiredMode(display::DisplayModeRequest desiredMode) {
             break;
     }
 
+    // QTI_BEGIN
     mQtiSFExtnIntf->qtiSetContentFps(mode.fps.getValue());
     mQtiSFExtnIntf->qtiDolphinSetVsyncPeriod(mode.fps.getPeriodNsecs());
+    mQtiSFExtnIntf->qtiUpdateVsyncConfiguration();
+    // QTI_END
 }
 
 status_t SurfaceFlinger::setActiveModeFromBackdoor(const sp<display::DisplayToken>& displayToken,
@@ -5099,12 +5102,6 @@ void SurfaceFlinger::processDisplayChanged(const wp<IBinder>& displayToken,
     }
 }
 
-void SurfaceFlinger::resetPhaseConfiguration(Fps refreshRate) {
-// QTI_BEGIN: 2023-01-17: Display: sf: Introduce QTI Extensions in AOSP
-    mQtiSFExtnIntf->qtiUpdateVsyncConfiguration();
-// QTI_END: 2023-01-17: Display: sf: Introduce QTI Extensions in AOSP
-}
-
 void SurfaceFlinger::processDisplayChangesLocked() {
     const auto& currentDisplays = mCurrentState.displays;
     const auto& drawingDisplays = mDrawingState.displays;
@@ -5130,6 +5127,9 @@ void SurfaceFlinger::processDisplayChangesLocked() {
     }
 
     mDrawingState.displays = mCurrentState.displays;
+    // QTI_BEGIN
+    mQtiSFExtnIntf->qtiUpdateVsyncConfiguration();
+    // QTI_END
 }
 
 void SurfaceFlinger::commitTransactionsLocked(uint32_t transactionFlags) {
