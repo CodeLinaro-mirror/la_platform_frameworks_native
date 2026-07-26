@@ -1417,6 +1417,13 @@ void SurfaceFlinger::setDesiredMode(display::DisplayModeRequest desiredMode) {
 
     SFTRACE_NAME(ftl::Concat(__func__, ' ', displayId.value).c_str());
 
+    if (getHwComposer().getDisplayConnectionType(displayId) ==
+        ui::DisplayConnectionType::External) {
+        ALOGW("%s: Attempted to set desired mode for external display %" PRIu64, __func__,
+              displayId.value);
+        return;
+    }
+
     const bool emitEvent = desiredMode.emitEvent;
 
     using DesiredModeAction = display::DisplayModeController::DesiredModeAction;
