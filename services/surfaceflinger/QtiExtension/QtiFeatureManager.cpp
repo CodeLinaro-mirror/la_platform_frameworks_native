@@ -1,4 +1,4 @@
-/* Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 // #define LOG_NDEBUG 0
@@ -100,6 +100,14 @@ void QtiFeatureManager::qtiInit() {
     propName = qtiGetPropName(QtiFeature::kVirtualDispTypePQ);
     mQtiVirtualDispTypePQ = base::GetBoolProperty(propName, false);
     ALOGI_IF(mQtiVirtualDispTypePQ, "Enable Virtual DIsplayType: %d", mQtiVirtualDispTypePQ);
+
+    propName = qtiGetPropName(QtiFeature::kRenderSysuiAsSrgb);
+    mQtiRenderSysuiAsSrgb = base::GetBoolProperty(propName, false);
+    ALOGI_IF(mQtiRenderSysuiAsSrgb, "Render selected SysUI layers as sRGB");
+
+    propName = qtiGetPropName(QtiFeature::kAllowSecCamConcurrency);
+    mQtiAllowSecCamConcurrency = base::GetBoolProperty(propName, false);
+    ALOGI_IF(mQtiAllowSecCamConcurrency, "Allow secure camera concurrency on multiple displays");
 }
 
 void QtiFeatureManager::qtiSetIDisplayConfig(std::shared_ptr<IDisplayConfig> aidl) {
@@ -164,6 +172,10 @@ bool QtiFeatureManager::qtiIsExtensionFeatureEnabled(QtiFeature feature) {
             return mQtiReduceSlotsForWideVideo;
         case QtiFeature::kVirtualDispTypePQ:
             return mQtiVirtualDispTypePQ;
+        case QtiFeature::kRenderSysuiAsSrgb:
+            return mQtiRenderSysuiAsSrgb;
+        case QtiFeature::kAllowSecCamConcurrency:
+            return mQtiAllowSecCamConcurrency;
         default:
             ALOGW("Queried unknown SF extension feature %d", feature);
             return false;
@@ -210,6 +222,10 @@ string QtiFeatureManager::qtiGetPropName(QtiFeature feature) {
             return "vendor.display.reduce_slots_for_wide_video";
         case QtiFeature::kVirtualDispTypePQ:
             return "vendor.display.virtual_display_type_pq";
+        case QtiFeature::kRenderSysuiAsSrgb:
+            return "vendor.display.render_sysui_as_srgb";
+        case QtiFeature::kAllowSecCamConcurrency:
+            return "vendor.display.allow_seccam_concurrency";
         default:
             ALOGW("Queried unknown SF extension feature %d", feature);
             return "";
