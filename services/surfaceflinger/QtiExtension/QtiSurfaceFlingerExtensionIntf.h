@@ -44,6 +44,7 @@ enum QtiFeature {
     kEnablePowerSaveModeForVideo,
     kRenderSysuiAsSrgb,
     kAllowSecCamConcurrency,
+    kEnablePowerSaveModeForVideo,
 };
 
 class QtiSurfaceFlingerExtensionIntf {
