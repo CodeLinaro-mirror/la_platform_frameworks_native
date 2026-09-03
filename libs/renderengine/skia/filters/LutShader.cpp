@@ -19,8 +19,10 @@
 #include <SkTileMode.h>
 #include <common/trace.h>
 #include <cutils/ashmem.h>
+#include <log/log.h>
 #include <math/half.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <ui/ColorSpace.h>
 
 #include "include/core/SkColorSpace.h"
@@ -243,53 +245,48 @@ sk_sp<SkShader> LutShader::lutShader(sk_sp<SkShader>& input,
         mBuilder = std::make_unique<SkRuntimeShaderBuilder>(instance.effect);
     }
 
-    auto& fd = displayLuts->getLutFileDescriptor();
-    if (fd.ok()) {
-        // de-gamma the image without changing the primaries
-        SkImage* baseImage = input->isAImage((SkMatrix*)nullptr, (SkTileMode*)nullptr);
-        sk_sp<SkColorSpace> baseColorSpace = baseImage && baseImage->colorSpace()
-                ? baseImage->refColorSpace()
-                : SkColorSpace::MakeSRGB();
-        sk_sp<SkColorSpace> lutMathColorSpace = baseColorSpace->makeLinearGamma();
-        input = input->makeWithWorkingColorSpace(lutMathColorSpace);
-
-        auto& offsets = displayLuts->offsets;
-        auto& lutProperties = displayLuts->lutProperties;
-        std::vector<float> buffers;
-        int fullLength = offsets[lutProperties.size() - 1];
-        if (lutProperties[lutProperties.size() - 1].dimension == 1) {
-            fullLength += lutProperties[lutProperties.size() - 1].size;
-        } else {
-            fullLength += (lutProperties[lutProperties.size() - 1].size *
-                           lutProperties[lutProperties.size() - 1].size *
-                           lutProperties[lutProperties.size() - 1].size * 3);
-        }
-        size_t bufferSize = fullLength * sizeof(float);
-
-        // decode the shared memory of luts
-        float* ptr =
-                (float*)mmap(NULL, bufferSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd.get(), 0);
-        if (ptr == MAP_FAILED) {
-            LOG_ALWAYS_FATAL("mmap failed");
-        }
-        buffers = std::vector<float>(ptr, ptr + fullLength);
-        munmap(ptr, bufferSize);
-
-        for (size_t i = 0; i < offsets.size(); i++) {
-            int bufferSizePerLut = (i == offsets.size() - 1) ? buffers.size() - offsets[i]
-                                                             : offsets[i + 1] - offsets[i];
-            // divide by 3 for 3d Lut because of 3 (RGB) channels
-            if (static_cast<LutProperties::Dimension>(lutProperties[i].dimension) ==
-                LutProperties::Dimension::THREE_D) {
-                bufferSizePerLut /= 3;
-            }
-            input = generateLutShader(input, buffers, offsets[i], bufferSizePerLut,
-                                      lutProperties[i].dimension, lutProperties[i].size,
-                                      lutProperties[i].samplingKey, srcDataspace);
-        }
-
-        input = input->makeWithWorkingColorSpace(outColorSpace);
+    if (!displayLuts || !displayLuts->isValid()) {
+        ALOGW("displayLuts is nullptr or invalid, skip LutShader!");
+        return input;
     }
+
+    // de-gamma the image without changing the primaries
+    SkImage* baseImage = input->isAImage((SkMatrix*)nullptr, (SkTileMode*)nullptr);
+    sk_sp<SkColorSpace> baseColorSpace = baseImage && baseImage->colorSpace()
+            ? baseImage->refColorSpace()
+            : SkColorSpace::MakeSRGB();
+    sk_sp<SkColorSpace> lutMathColorSpace = baseColorSpace->makeLinearGamma();
+    input = input->makeWithWorkingColorSpace(lutMathColorSpace);
+
+    size_t maxEndOffset = displayLuts->getMaxEndOffset();
+    auto& fd = displayLuts->getLutFileDescriptor();
+    auto& offsets = displayLuts->offsets;
+    auto& lutProperties = displayLuts->lutProperties;
+
+    size_t bufferSize = static_cast<size_t>(ashmem_get_size_region(fd.get()));
+
+    std::vector<float> buffers;
+    // decode the shared memory of luts
+    float* ptr = (float*)mmap(NULL, bufferSize, PROT_READ, MAP_SHARED, fd.get(), 0);
+    if (ptr == MAP_FAILED) {
+        ALOGW("mmap failed when decoding displayLuts");
+        return input;
+    }
+    buffers = std::vector<float>(ptr, ptr + maxEndOffset);
+    munmap(ptr, bufferSize);
+
+    for (size_t i = 0; i < offsets.size(); i++) {
+        size_t elementsNeededPerChannel = lutProperties[i].getElementsNeededPerChannel();
+        if (elementsNeededPerChannel == 0) {
+            ALOGW("Invalid elementsNeededPerChannel at index %zu", i);
+            return input;
+        }
+
+        input = generateLutShader(input, buffers, offsets[i], elementsNeededPerChannel,
+                                          lutProperties[i].dimension, lutProperties[i].size,
+                                          lutProperties[i].samplingKey, srcDataspace);
+    }
+    input = input->makeWithWorkingColorSpace(outColorSpace);
     return input;
 }
 
