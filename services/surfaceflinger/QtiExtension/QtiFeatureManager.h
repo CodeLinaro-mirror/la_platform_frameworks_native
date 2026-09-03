@@ -63,7 +63,6 @@ private:
     bool mQtiAllowIdleFallback = false;
     bool mQtiReduceSlotsForWideVideo = true;
     bool mQtiVirtualDispTypePQ = false;
-    bool mQtiEnablePowerSaveModeForVideo = false;
     bool mQtiRenderSysuiAsSrgb = false;
     bool mQtiAllowSecCamConcurrency = false;
     bool mQtiEnablePowerSaveModeForVideo = false;

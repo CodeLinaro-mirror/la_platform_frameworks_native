@@ -101,9 +101,6 @@ void QtiFeatureManager::qtiInit() {
     mQtiVirtualDispTypePQ = base::GetBoolProperty(propName, false);
     ALOGI_IF(mQtiVirtualDispTypePQ, "Enable Virtual DIsplayType: %d", mQtiVirtualDispTypePQ);
 
-    propName = qtiGetPropName(QtiFeature::kEnablePowerSaveModeForVideo);
-    mQtiEnablePowerSaveModeForVideo = base::GetBoolProperty(propName, false);
-    ALOGI_IF(mQtiEnablePowerSaveModeForVideo, "Enable Power Save Mode for low fps Video");
     propName = qtiGetPropName(QtiFeature::kRenderSysuiAsSrgb);
     mQtiRenderSysuiAsSrgb = base::GetBoolProperty(propName, false);
     ALOGI_IF(mQtiRenderSysuiAsSrgb, "Render selected SysUI layers as sRGB");
@@ -179,8 +176,6 @@ bool QtiFeatureManager::qtiIsExtensionFeatureEnabled(QtiFeature feature) {
             return mQtiReduceSlotsForWideVideo;
         case QtiFeature::kVirtualDispTypePQ:
             return mQtiVirtualDispTypePQ;
-        case QtiFeature::kEnablePowerSaveModeForVideo:
-            return mQtiEnablePowerSaveModeForVideo;
         case QtiFeature::kRenderSysuiAsSrgb:
             return mQtiRenderSysuiAsSrgb;
         case QtiFeature::kAllowSecCamConcurrency:
@@ -233,8 +228,6 @@ string QtiFeatureManager::qtiGetPropName(QtiFeature feature) {
             return "vendor.display.reduce_slots_for_wide_video";
         case QtiFeature::kVirtualDispTypePQ:
             return "vendor.display.virtual_display_type_pq";
-        case QtiFeature::kEnablePowerSaveModeForVideo:
-            return "vendor.display.enable_power_save_mode_for_video";
         case QtiFeature::kRenderSysuiAsSrgb:
             return "vendor.display.render_sysui_as_srgb";
         case QtiFeature::kAllowSecCamConcurrency:
