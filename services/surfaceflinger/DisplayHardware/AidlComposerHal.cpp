@@ -946,6 +946,7 @@ Error AidlComposer::presentOrValidateDisplay(Display display, nsecs_t expectedPr
 
     *state = translate<uint32_t>(*result);
 
+// QTI_BEGIN: 2024-02-28: Display: AidlComposerHal: Add handling for presentOrValidatedisplay state
     if (*state == 2) {
         auto fence = reader->get().takePresentFence(displayId);
         // take ownership
@@ -954,6 +955,7 @@ Error AidlComposer::presentOrValidateDisplay(Display display, nsecs_t expectedPr
         reader->get().hasChanges(displayId, outNumTypes, outNumRequests);
     }
 
+// QTI_END: 2024-02-28: Display: AidlComposerHal: Add handling for presentOrValidatedisplay state
     if (*result == PresentOrValidate::Result::Presented) {
         auto fence = reader->get().takePresentFence(displayId);
         // take ownership
