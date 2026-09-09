@@ -108,6 +108,10 @@ void QtiFeatureManager::qtiInit() {
     propName = qtiGetPropName(QtiFeature::kAllowSecCamConcurrency);
     mQtiAllowSecCamConcurrency = base::GetBoolProperty(propName, false);
     ALOGI_IF(mQtiAllowSecCamConcurrency, "Allow secure camera concurrency on multiple displays");
+
+    propName = qtiGetPropName(QtiFeature::kEnablePowerSaveModeForVideo);
+    mQtiEnablePowerSaveModeForVideo = base::GetBoolProperty(propName, false);
+    ALOGI_IF(mQtiEnablePowerSaveModeForVideo, "Enable Power Save Mode for low fps Video");
 }
 
 void QtiFeatureManager::qtiSetIDisplayConfig(std::shared_ptr<IDisplayConfig> aidl) {
@@ -176,6 +180,8 @@ bool QtiFeatureManager::qtiIsExtensionFeatureEnabled(QtiFeature feature) {
             return mQtiRenderSysuiAsSrgb;
         case QtiFeature::kAllowSecCamConcurrency:
             return mQtiAllowSecCamConcurrency;
+        case QtiFeature::kEnablePowerSaveModeForVideo:
+            return mQtiEnablePowerSaveModeForVideo;
         default:
             ALOGW("Queried unknown SF extension feature %d", feature);
             return false;
@@ -226,6 +232,8 @@ string QtiFeatureManager::qtiGetPropName(QtiFeature feature) {
             return "vendor.display.render_sysui_as_srgb";
         case QtiFeature::kAllowSecCamConcurrency:
             return "vendor.display.allow_seccam_concurrency";
+        case QtiFeature::kEnablePowerSaveModeForVideo:
+            return "vendor.display.enable_power_save_mode_for_video";
         default:
             ALOGW("Queried unknown SF extension feature %d", feature);
             return "";
