@@ -69,6 +69,7 @@ enum class LayerStateField : uint32_t {
     SolidColor            = 1u << 16,
     BackgroundBlurRadius  = 1u << 17,
     BlurRegions           = 1u << 18,
+    BlursDisabled         = 1u << 19,
 };
 // clang-format on
 
@@ -229,7 +230,8 @@ public:
     Rect getDisplayFrame() const { return mDisplayFrame.get(); }
     const Region& getVisibleRegion() const { return mVisibleRegion.get(); }
     bool hasBlurBehind() const {
-        return mBackgroundBlurRadius.get() > 0 || !mBlurRegions.get().empty();
+        return (mBackgroundBlurRadius.get() > 0 || !mBlurRegions.get().empty()) &&
+                !mIsBlursDisabled.get();
     }
     int32_t getBackgroundBlurRadius() const { return mBackgroundBlurRadius.get(); }
     hardware::graphics::composer::hal::Composition getCompositionType() const {
@@ -401,6 +403,12 @@ private:
                                                                   : nullptr)};
                     }};
 
+    // Even if the same buffer is passed to BLAST's setBuffer(), we still increment the frame
+    // number and need to treat it as if the buffer changed. Otherwise we break existing
+    // front-buffer rendering paths (such as egl's EGL_SINGLE_BUFFER).
+    OutputLayerState<uint64_t, LayerStateField::Buffer> mFrameNumber{
+            [](auto layer) { return layer->getLayerFE().getCompositionState()->frameNumber; }};
+
     int64_t mFramesSinceBufferUpdate = 0;
 
     OutputLayerState<half4, LayerStateField::SolidColor>
@@ -449,7 +457,10 @@ private:
                                       return hash;
                                   }};
 
-    static const constexpr size_t kNumNonUniqueFields = 16;
+    OutputLayerState<bool, LayerStateField::BlursDisabled> mIsBlursDisabled{
+            [](auto layer) { return layer->getState().ignoreBlur; }};
+
+    static const constexpr size_t kNumNonUniqueFields = 18;
 
     std::array<StateInterface*, kNumNonUniqueFields> getNonUniqueFields() {
         std::array<const StateInterface*, kNumNonUniqueFields> constFields =
@@ -468,6 +479,7 @@ private:
                 &mAlpha,        &mLayerMetadata,  &mVisibleRegion,        &mOutputDataspace,
                 &mPixelFormat,  &mColorTransform, &mCompositionType,      &mSidebandStream,
                 &mBuffer,       &mSolidColor,     &mBackgroundBlurRadius, &mBlurRegions,
+                &mFrameNumber,  &mIsBlursDisabled
         };
     }
 };

@@ -332,6 +332,7 @@ void BufferLayer::preparePerFrameCompositionState() {
             ? 0
             : mBufferInfo.mBufferSlot;
     compositionState->acquireFence = mBufferInfo.mFence;
+    compositionState->frameNumber = mBufferInfo.mFrameNumber;
 }
 
 bool BufferLayer::onPreComposition(nsecs_t refreshStartTime) {
