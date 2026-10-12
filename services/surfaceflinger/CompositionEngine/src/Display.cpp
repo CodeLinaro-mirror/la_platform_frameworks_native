@@ -243,7 +243,12 @@ std::unique_ptr<compositionengine::OutputLayer> Display::createOutputLayer(
         outputLayer->setHwcLayer(std::move(hwcLayer));
 // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
 
-        if (layerFE->getCompositionState()->outputFilter.toInternalDisplay) {
+        const auto outputFilter = layerFE->getCompositionState()->outputFilter;
+        const bool needsMasking = outputFilter.toInternalDisplay || outputFilter.skipScreenshot;
+        const bool internalPhysicalDisplay = physicalDisplayId.has_value() &&
+                hwc.getDisplayConnectionType(*physicalDisplayId) == ui::DisplayConnectionType::Internal;
+	ALOGE("InternalphysicalDisplay : %d needsMasking : %d \n",internalPhysicalDisplay,needsMasking);
+        if (needsMasking && internalPhysicalDisplay) {
 // QTI_END: 2023-03-06: Display: SF: Squash commit of SF Extensions.
             QtiOutputExtension::qtiSetLayerAsMask(mIdVariant, outputLayer->getHwcLayer()->getId());
 // QTI_BEGIN: 2023-03-06: Display: SF: Squash commit of SF Extensions.
