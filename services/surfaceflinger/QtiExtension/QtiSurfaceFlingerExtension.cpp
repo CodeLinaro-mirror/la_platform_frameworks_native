@@ -601,20 +601,21 @@ void QtiSurfaceFlingerExtension::qtiSetContentFps(uint32_t contentFps) {
     if (mQtiFlinger->mBootFinished && mQtiDisplayExtnIntf && !mQtiRequestedContentFps &&
         contentFps != mQtiCurrentFps) {
         mQtiRequestedContentFps = true;
-        if (mQtiFailedAttempts % (int) ceil(contentFps/10) != 0) {
-            mQtiFailedAttempts += 1;
-            return;
-        }
 
-        auto perf_hal_status = base::GetProperty("init.svc.perf2-hal-1-0", "");
-        auto perf_hal_init_status = base::GetIntProperty("vendor.mpctl.init.complete", 0);
-        if (perf_hal_status == "stopped" || !perf_hal_init_status) {
+        // Query the perf HAL properties only until they report ready once. After that the
+        // cached state is used and the properties are not read again.
+        if (!mQtiPerfHalReady) {
+            if (mQtiFailedAttempts % (int) ceil(contentFps/10) != 0) {
+                mQtiFailedAttempts += 1;
+                return;
+            }
+
+            auto perf_hal_status = base::GetProperty("init.svc.perf2-hal-1-0", "");
+            auto perf_hal_init_status = base::GetIntProperty("vendor.mpctl.init.complete", 0);
+            mQtiPerfHalReady = perf_hal_status != "stopped" && perf_hal_init_status;
+
             ALOGV("Perf-Hal service is stopped number of attempts %d", mQtiFailedAttempts);
             mQtiFailedAttempts += 1;
-            if (mQtiFailedAttempts > (int) contentFps / 2) {
-                mQtiFailedAttempts = 0;
-                mQtiCurrentFps = contentFps;
-            }
             return;
         }
 

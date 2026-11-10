@@ -310,6 +310,7 @@ private:
     bool mQtiAllowThermalFpsChange = false;
     bool mQtiRequestedContentFps = false;
     int mQtiFailedAttempts = 0;
+    bool mQtiPerfHalReady = false;
     int mQtiDisplayCount = 0;
     std::set<uint32_t> mQtiHasScreenshotSet;
 
